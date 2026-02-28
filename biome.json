@@ -1,0 +1,30 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.4.4/schema.json",
+	"files": {
+		"includes": [
+			"**",
+			"!**/dist/**",
+			"!**/.next/**",
+			"!**/.open-next/**",
+			"!**/.wrangler/**"
+		]
+	},
+	"assist": {
+		"actions": {
+			"source": {
+				"organizeImports": "on"
+			}
+		}
+	},
+	"linter": {
+		"rules": {
+			"recommended": true,
+			"style": {
+				"noDefaultExport": "off"
+			}
+		}
+	},
+	"formatter": {
+		"indentStyle": "tab"
+	}
+}

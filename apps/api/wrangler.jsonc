@@ -1,0 +1,12 @@
+{
+	"name": "world-issue-tracker-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-04-01",
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "world-issue-tracker",
+			"database_id": "placeholder-replace-after-d1-create"
+		}
+	]
+}

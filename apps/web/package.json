@@ -1,0 +1,28 @@
+{
+	"name": "@world-issue-tracker/web",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "next dev --turbopack",
+		"build": "next build",
+		"start": "next start",
+		"check": "tsc --noEmit",
+		"lint": "biome check .",
+		"deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+	},
+	"dependencies": {
+		"@world-issue-tracker/shared": "workspace:*",
+		"next": "^15.3.0",
+		"react": "^19.1.0",
+		"react-dom": "^19.1.0"
+	},
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"@cloudflare/workers-types": "^4.20250214.0",
+		"@opennextjs/cloudflare": "^1.0.0",
+		"@types/react": "^19.1.0",
+		"@types/react-dom": "^19.1.0",
+		"wrangler": "^4.0.0"
+	}
+}
