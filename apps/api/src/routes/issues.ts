@@ -1,13 +1,12 @@
+import { getAuth } from "@hono/clerk-auth";
 import {
 	CreateIssueSchema,
 	ListIssuesQuerySchema,
 	UpdateIssueSchema,
 } from "@world-issue-tracker/shared";
 import { Hono } from "hono";
-
-type Bindings = {
-	DB: D1Database;
-};
+import type { Bindings } from "../index";
+import { requireAuth } from "../middleware/auth";
 
 export const issues = new Hono<{ Bindings: Bindings }>();
 
@@ -18,8 +17,8 @@ issues.onError((err, c) => {
 	throw err;
 });
 
-// POST /issues — Create
-issues.post("/", async (c) => {
+// POST /issues — Create (auth required)
+issues.post("/", requireAuth, async (c) => {
 	const body = await c.req.json();
 	const parsed = CreateIssueSchema.safeParse(body);
 	if (!parsed.success) {
@@ -28,19 +27,29 @@ issues.post("/", async (c) => {
 
 	const { title, description, scope, latitude, longitude, category } =
 		parsed.data;
+	const auth = getAuth(c);
+	const userId = auth?.userId;
 
 	const result = await c.env.DB.prepare(
-		`INSERT INTO issues (title, description, scope, latitude, longitude, category)
-     VALUES (?, ?, ?, ?, ?, ?)
+		`INSERT INTO issues (title, description, scope, latitude, longitude, category, user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      RETURNING *`,
 	)
-		.bind(title, description, scope, latitude, longitude, category ?? null)
+		.bind(
+			title,
+			description,
+			scope,
+			latitude,
+			longitude,
+			category ?? null,
+			userId,
+		)
 		.first();
 
 	return c.json(result, 201);
 });
 
-// GET /issues — List
+// GET /issues — List (public)
 issues.get("/", async (c) => {
 	const query = Object.fromEntries(new URL(c.req.url).searchParams);
 	const parsed = ListIssuesQuerySchema.safeParse(query);
@@ -84,7 +93,7 @@ issues.get("/", async (c) => {
 	});
 });
 
-// GET /issues/:id — Get by ID
+// GET /issues/:id — Get by ID (public)
 issues.get("/:id", async (c) => {
 	const id = c.req.param("id");
 	const row = await c.env.DB.prepare("SELECT * FROM issues WHERE id = ?")
@@ -97,8 +106,8 @@ issues.get("/:id", async (c) => {
 	return c.json(row);
 });
 
-// PATCH /issues/:id — Partial update
-issues.patch("/:id", async (c) => {
+// PATCH /issues/:id — Partial update (auth required)
+issues.patch("/:id", requireAuth, async (c) => {
 	const id = c.req.param("id");
 	const body = await c.req.json();
 	const parsed = UpdateIssueSchema.safeParse(body);

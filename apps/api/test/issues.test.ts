@@ -1,9 +1,21 @@
 import { env } from "cloudflare:test";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import app from "../src/index";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+let mockUserId: string | null = "test-user-123";
+
+vi.mock("@hono/clerk-auth", () => ({
+	clerkMiddleware: () => async (_c: unknown, next: () => Promise<void>) => {
+		await next();
+	},
+	getAuth: () => ({ userId: mockUserId }),
+}));
+
+import { createApp } from "../src/index";
+
+const app = createApp();
 
 const MIGRATION =
-	"CREATE TABLE IF NOT EXISTS issues (id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), title TEXT NOT NULL, description TEXT NOT NULL, scope TEXT NOT NULL CHECK (scope IN ('personal', 'community', 'municipality', 'national', 'global')), status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'triaged', 'in_progress', 'review', 'resolved', 'closed')), latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));";
+	"CREATE TABLE IF NOT EXISTS issues (id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), title TEXT NOT NULL, description TEXT NOT NULL, scope TEXT NOT NULL CHECK (scope IN ('personal', 'community', 'municipality', 'national', 'global')), status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'triaged', 'in_progress', 'review', 'resolved', 'closed')), latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT, user_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));";
 
 const validIssue = {
 	title: "Broken streetlight",
@@ -32,17 +44,62 @@ describe("Issues CRUD", () => {
 
 	beforeEach(async () => {
 		await env.DB.exec("DELETE FROM issues");
+		mockUserId = "test-user-123";
+	});
+
+	// --- Authentication ---
+	describe("Authentication", () => {
+		it("returns 401 for unauthenticated POST", async () => {
+			mockUserId = null;
+			const res = await createIssue();
+			expect(res.status).toBe(401);
+			const body = await res.json();
+			expect(body.error).toBe("Unauthorized");
+		});
+
+		it("returns 401 for unauthenticated PATCH", async () => {
+			const createRes = await createIssue();
+			const created = await createRes.json();
+
+			mockUserId = null;
+			const res = await app.request(
+				`/issues/${created.id}`,
+				{
+					method: "PATCH",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ title: "Updated" }),
+				},
+				env,
+			);
+			expect(res.status).toBe(401);
+		});
+
+		it("allows unauthenticated GET list", async () => {
+			mockUserId = null;
+			const res = await app.request("/issues", {}, env);
+			expect(res.status).toBe(200);
+		});
+
+		it("allows unauthenticated GET by id", async () => {
+			const createRes = await createIssue();
+			const created = await createRes.json();
+
+			mockUserId = null;
+			const res = await app.request(`/issues/${created.id}`, {}, env);
+			expect(res.status).toBe(200);
+		});
 	});
 
 	// --- POST /issues ---
 	describe("POST /issues", () => {
-		it("creates an issue and returns 201", async () => {
+		it("creates an issue with user_id and returns 201", async () => {
 			const res = await createIssue();
 			expect(res.status).toBe(201);
 			const body = await res.json();
 			expect(body.title).toBe(validIssue.title);
 			expect(body.scope).toBe(validIssue.scope);
 			expect(body.status).toBe("open");
+			expect(body.user_id).toBe("test-user-123");
 			expect(body.id).toBeDefined();
 			expect(body.created_at).toBeDefined();
 		});

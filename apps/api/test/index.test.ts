@@ -1,6 +1,16 @@
 import { env } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
-import app from "../src/index";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@hono/clerk-auth", () => ({
+	clerkMiddleware: () => async (_c: unknown, next: () => Promise<void>) => {
+		await next();
+	},
+	getAuth: () => ({ userId: null }),
+}));
+
+import { createApp } from "../src/index";
+
+const app = createApp();
 
 describe("API root", () => {
 	it("returns status ok", async () => {

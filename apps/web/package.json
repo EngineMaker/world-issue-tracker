@@ -12,6 +12,7 @@
 		"deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
 	},
 	"dependencies": {
+		"@clerk/nextjs": "^6.39.0",
 		"@world-issue-tracker/shared": "workspace:*",
 		"next": "^15.3.0",
 		"react": "^19.1.0",
