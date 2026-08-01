@@ -9,6 +9,7 @@
 		"start": "next start",
 		"check": "tsc --noEmit",
 		"lint": "biome check .",
+		"test": "bun test",
 		"deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
 	},
 	"dependencies": {
