@@ -17,7 +17,28 @@ const app = createApp();
 const MIGRATION =
 	"CREATE TABLE IF NOT EXISTS issues (id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), title TEXT NOT NULL, description TEXT NOT NULL, scope TEXT NOT NULL CHECK (scope IN ('personal', 'community', 'municipality', 'national', 'global')), status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'triaged', 'in_progress', 'review', 'resolved', 'closed')), latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT, user_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));";
 
-const validIssue = {
+type IssueInput = {
+	title: string;
+	description: string;
+	scope: string;
+	latitude: number;
+	longitude: number;
+	category?: string;
+};
+
+/**
+ * API のレスポンス JSON。単体の Issue と一覧レスポンスの両方を受ける。
+ * テストからの読み取り専用なので、キーは緩く引けるようにしてある。
+ */
+// biome-ignore lint/suspicious/noExplicitAny: テストからレスポンスを緩く読むための意図的な型
+type IssueBody = Record<string, any>;
+
+/** `res.json()` は `unknown` を返すため、テスト用に型を与える薄いラッパー。 */
+async function readBody(res: Response): Promise<IssueBody> {
+	return (await res.json()) as IssueBody;
+}
+
+const validIssue: IssueInput = {
 	title: "Broken streetlight",
 	description: "The streetlight on Main St is not working",
 	scope: "community",
@@ -25,7 +46,7 @@ const validIssue = {
 	longitude: 139.76,
 };
 
-async function createIssue(data = validIssue) {
+async function createIssue(data: IssueInput = validIssue) {
 	return app.request(
 		"/issues",
 		{
@@ -53,13 +74,13 @@ describe("Issues CRUD", () => {
 			mockUserId = null;
 			const res = await createIssue();
 			expect(res.status).toBe(401);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.error).toBe("Unauthorized");
 		});
 
 		it("returns 401 for unauthenticated PATCH", async () => {
 			const createRes = await createIssue();
-			const created = await createRes.json();
+			const created = await readBody(createRes);
 
 			mockUserId = null;
 			const res = await app.request(
@@ -82,7 +103,7 @@ describe("Issues CRUD", () => {
 
 		it("allows unauthenticated GET by id", async () => {
 			const createRes = await createIssue();
-			const created = await createRes.json();
+			const created = await readBody(createRes);
 
 			mockUserId = null;
 			const res = await app.request(`/issues/${created.id}`, {}, env);
@@ -95,7 +116,7 @@ describe("Issues CRUD", () => {
 		it("creates an issue with user_id and returns 201", async () => {
 			const res = await createIssue();
 			expect(res.status).toBe(201);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.title).toBe(validIssue.title);
 			expect(body.scope).toBe(validIssue.scope);
 			expect(body.status).toBe("open");
@@ -110,14 +131,14 @@ describe("Issues CRUD", () => {
 				category: "infrastructure",
 			});
 			expect(res.status).toBe(201);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.category).toBe("infrastructure");
 		});
 
 		it("rejects missing required fields", async () => {
 			const res = await createIssue({ title: "Only title" } as never);
 			expect(res.status).toBe(400);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.error).toBeDefined();
 		});
 
@@ -147,7 +168,7 @@ describe("Issues CRUD", () => {
 				env,
 			);
 			expect(res.status).toBe(400);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.error).toBe("Invalid JSON");
 		});
 	});
@@ -157,7 +178,7 @@ describe("Issues CRUD", () => {
 		it("returns empty list initially", async () => {
 			const res = await app.request("/issues", {}, env);
 			expect(res.status).toBe(200);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.data).toEqual([]);
 			expect(body.total).toBe(0);
 		});
@@ -168,7 +189,7 @@ describe("Issues CRUD", () => {
 
 			const res = await app.request("/issues", {}, env);
 			expect(res.status).toBe(200);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.data).toHaveLength(2);
 			expect(body.total).toBe(2);
 			expect(body.limit).toBe(20);
@@ -180,7 +201,7 @@ describe("Issues CRUD", () => {
 			await createIssue({ ...validIssue, scope: "national" });
 
 			const res = await app.request("/issues?scope=community", {}, env);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
 			expect(body.total).toBe(1);
 			expect(body.data[0].scope).toBe("community");
@@ -190,11 +211,11 @@ describe("Issues CRUD", () => {
 			await createIssue();
 
 			const res = await app.request("/issues?status=open", {}, env);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
 
 			const res2 = await app.request("/issues?status=closed", {}, env);
-			const body2 = await res2.json();
+			const body2 = await readBody(res2);
 			expect(body2.data).toHaveLength(0);
 		});
 
@@ -204,12 +225,12 @@ describe("Issues CRUD", () => {
 			await createIssue({ ...validIssue, title: "Issue 3" });
 
 			const res = await app.request("/issues?limit=2&offset=0", {}, env);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.data).toHaveLength(2);
 			expect(body.total).toBe(3);
 
 			const res2 = await app.request("/issues?limit=2&offset=2", {}, env);
-			const body2 = await res2.json();
+			const body2 = await readBody(res2);
 			expect(body2.data).toHaveLength(1);
 		});
 	});
@@ -218,11 +239,11 @@ describe("Issues CRUD", () => {
 	describe("GET /issues/:id", () => {
 		it("returns an issue by id", async () => {
 			const createRes = await createIssue();
-			const created = await createRes.json();
+			const created = await readBody(createRes);
 
 			const res = await app.request(`/issues/${created.id}`, {}, env);
 			expect(res.status).toBe(200);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.id).toBe(created.id);
 			expect(body.title).toBe(validIssue.title);
 		});
@@ -230,7 +251,7 @@ describe("Issues CRUD", () => {
 		it("returns 404 for non-existent id", async () => {
 			const res = await app.request("/issues/nonexistent", {}, env);
 			expect(res.status).toBe(404);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.error).toBe("Issue not found");
 		});
 	});
@@ -239,7 +260,7 @@ describe("Issues CRUD", () => {
 	describe("PATCH /issues/:id", () => {
 		it("updates title", async () => {
 			const createRes = await createIssue();
-			const created = await createRes.json();
+			const created = await readBody(createRes);
 
 			const res = await app.request(
 				`/issues/${created.id}`,
@@ -251,14 +272,14 @@ describe("Issues CRUD", () => {
 				env,
 			);
 			expect(res.status).toBe(200);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.title).toBe("Updated title");
 			expect(body.description).toBe(validIssue.description);
 		});
 
 		it("updates status", async () => {
 			const createRes = await createIssue();
-			const created = await createRes.json();
+			const created = await readBody(createRes);
 
 			const res = await app.request(
 				`/issues/${created.id}`,
@@ -270,13 +291,13 @@ describe("Issues CRUD", () => {
 				env,
 			);
 			expect(res.status).toBe(200);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.status).toBe("triaged");
 		});
 
 		it("updates updated_at timestamp", async () => {
 			const createRes = await createIssue();
-			const created = await createRes.json();
+			const created = await readBody(createRes);
 
 			const res = await app.request(
 				`/issues/${created.id}`,
@@ -287,7 +308,7 @@ describe("Issues CRUD", () => {
 				},
 				env,
 			);
-			const body = await res.json();
+			const body = await readBody(res);
 			expect(body.updated_at).toBeDefined();
 		});
 
@@ -306,7 +327,7 @@ describe("Issues CRUD", () => {
 
 		it("rejects empty body", async () => {
 			const createRes = await createIssue();
-			const created = await createRes.json();
+			const created = await readBody(createRes);
 
 			const res = await app.request(
 				`/issues/${created.id}`,
