@@ -411,4 +411,126 @@ describe("Issues CRUD", () => {
 			expect(res.status).toBe(200);
 		});
 	});
+
+	// --- Ownership ---
+	describe("Ownership", () => {
+		/** owner-A が作成した Issue を返す。以降 attacker-Z として操作するテスト用。 */
+		async function createIssueAsOwner() {
+			mockUserId = "owner-A";
+			const res = await createIssue();
+			const created = await readBody(res);
+			mockUserId = "attacker-Z";
+			return created;
+		}
+
+		it("returns 403 for PATCH by a non-owner", async () => {
+			const created = await createIssueAsOwner();
+
+			const res = await app.request(
+				`/issues/${created.id}`,
+				{
+					method: "PATCH",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ title: "Hijacked" }),
+				},
+				env,
+			);
+			expect(res.status).toBe(403);
+			const body = await readBody(res);
+			expect(body.error).toBe("Forbidden");
+		});
+
+		it("does not modify the issue on PATCH by a non-owner", async () => {
+			const created = await createIssueAsOwner();
+
+			await app.request(
+				`/issues/${created.id}`,
+				{
+					method: "PATCH",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ title: "Hijacked" }),
+				},
+				env,
+			);
+
+			const res = await app.request(`/issues/${created.id}`, {}, env);
+			const body = await readBody(res);
+			expect(body.title).toBe(validIssue.title);
+		});
+
+		it("returns 403 for DELETE by a non-owner", async () => {
+			const created = await createIssueAsOwner();
+
+			const res = await app.request(
+				`/issues/${created.id}`,
+				{ method: "DELETE" },
+				env,
+			);
+			expect(res.status).toBe(403);
+			const body = await readBody(res);
+			expect(body.error).toBe("Forbidden");
+		});
+
+		it("does not delete the issue on DELETE by a non-owner", async () => {
+			const created = await createIssueAsOwner();
+
+			await app.request(`/issues/${created.id}`, { method: "DELETE" }, env);
+
+			const res = await app.request(`/issues/${created.id}`, {}, env);
+			expect(res.status).toBe(200);
+		});
+
+		it("allows the owner to PATCH and DELETE", async () => {
+			mockUserId = "owner-A";
+			const createRes = await createIssue();
+			const created = await readBody(createRes);
+
+			const patchRes = await app.request(
+				`/issues/${created.id}`,
+				{
+					method: "PATCH",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ title: "Updated by owner" }),
+				},
+				env,
+			);
+			expect(patchRes.status).toBe(200);
+
+			const delRes = await app.request(
+				`/issues/${created.id}`,
+				{ method: "DELETE" },
+				env,
+			);
+			expect(delRes.status).toBe(200);
+		});
+
+		it("returns 403 before validation errors for a non-owner", async () => {
+			const created = await createIssueAsOwner();
+
+			const res = await app.request(
+				`/issues/${created.id}`,
+				{
+					method: "PATCH",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ scope: "not-a-scope" }),
+				},
+				env,
+			);
+			expect(res.status).toBe(403);
+		});
+
+		it("returns 403 for an issue with no owner (legacy rows)", async () => {
+			await env.DB.prepare(
+				`INSERT INTO issues (id, title, description, scope, latitude, longitude, user_id)
+         VALUES ('legacy-1', 'Legacy', 'No owner', 'community', 0, 0, NULL)`,
+			).run();
+
+			const res = await app.request(
+				"/issues/legacy-1",
+				{ method: "DELETE" },
+				env,
+			);
+			expect(res.status).toBe(403);
+		});
+	});
 });
