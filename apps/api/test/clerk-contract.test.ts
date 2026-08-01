@@ -2,9 +2,7 @@ import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../src/index";
-
-const MIGRATION =
-	"CREATE TABLE IF NOT EXISTS issues (id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), title TEXT NOT NULL, description TEXT NOT NULL, scope TEXT NOT NULL CHECK (scope IN ('personal', 'community', 'municipality', 'national', 'global')), status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'triaged', 'in_progress', 'review', 'resolved', 'closed')), latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT, user_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));";
+import { applyMigrations } from "./helpers/migrate";
 
 /**
  * 実物の `clerkMiddleware` に対する契約テスト。
@@ -27,7 +25,7 @@ describe("Clerk middleware contract (no mocks)", () => {
 	const app = createApp();
 
 	beforeAll(async () => {
-		await env.DB.exec(MIGRATION);
+		await applyMigrations();
 	});
 
 	// キーは `vitest.config.ts` のダミー（`.dev.vars` があればそちら）から渡る。
