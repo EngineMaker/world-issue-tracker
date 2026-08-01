@@ -10,6 +10,45 @@ import { requireAuth } from "../middleware/auth";
 
 export const issues = new Hono<{ Bindings: Bindings }>();
 
+/**
+ * 認証不要の GET が返してよいカラム。
+ *
+ * `user_id`（Clerk User ID）のような内部フィールドは意図的に含めていない。
+ * カラムを追加したときは、ここに足すかどうかで「公開してよいか」を明示的に判断する。
+ */
+export const PUBLIC_ISSUE_COLUMNS = [
+	"id",
+	"title",
+	"description",
+	"scope",
+	"status",
+	"latitude",
+	"longitude",
+	"category",
+	"created_at",
+	"updated_at",
+] as const;
+
+type PublicIssue = Record<(typeof PUBLIC_ISSUE_COLUMNS)[number], unknown>;
+
+/**
+ * 公開 GET が返すカラムだけを並べた SELECT 句。
+ * `SELECT *` にすると、カラムを追加した瞬間にそれが公開されてしまう。
+ */
+export const PUBLIC_SELECT = PUBLIC_ISSUE_COLUMNS.join(", ");
+
+/**
+ * DB の行から公開してよいカラムだけを取り出す。
+ *
+ * SELECT でカラムを絞ったうえで、返す直前にもここを通す二段構えにしている。
+ * SELECT 句の書き漏れがあっても、内部フィールドはここで落ちる。
+ */
+export function toPublicIssue(row: Record<string, unknown>): PublicIssue {
+	return Object.fromEntries(
+		PUBLIC_ISSUE_COLUMNS.map((column) => [column, row[column]]),
+	) as PublicIssue;
+}
+
 issues.onError((err, c) => {
 	if (err instanceof SyntaxError) {
 		return c.json({ error: "Invalid JSON" }, 400);
@@ -80,13 +119,13 @@ issues.get("/", async (c) => {
 		.first<{ total: number }>();
 
 	const rows = await c.env.DB.prepare(
-		`SELECT * FROM issues ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+		`SELECT ${PUBLIC_SELECT} FROM issues ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
 	)
 		.bind(...binds, limit, offset)
 		.all();
 
 	return c.json({
-		data: rows.results,
+		data: rows.results.map(toPublicIssue),
 		total: countRow?.total ?? 0,
 		limit,
 		offset,
@@ -96,14 +135,16 @@ issues.get("/", async (c) => {
 // GET /issues/:id — Get by ID (public)
 issues.get("/:id", async (c) => {
 	const id = c.req.param("id");
-	const row = await c.env.DB.prepare("SELECT * FROM issues WHERE id = ?")
+	const row = await c.env.DB.prepare(
+		`SELECT ${PUBLIC_SELECT} FROM issues WHERE id = ?`,
+	)
 		.bind(id)
 		.first();
 
 	if (!row) {
 		return c.json({ error: "Issue not found" }, 404);
 	}
-	return c.json(row);
+	return c.json(toPublicIssue(row));
 });
 
 /**

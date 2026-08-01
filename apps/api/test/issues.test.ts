@@ -11,6 +11,10 @@ vi.mock("@hono/clerk-auth", () => ({
 }));
 
 import { createApp } from "../src/index";
+import {
+	PUBLIC_SELECT as PUBLIC_SELECT_FOR_TEST,
+	toPublicIssue as toPublicIssueForTest,
+} from "../src/routes/issues";
 
 const app = createApp();
 
@@ -253,6 +257,203 @@ describe("Issues CRUD", () => {
 			expect(res.status).toBe(404);
 			const body = await readBody(res);
 			expect(body.error).toBe("Issue not found");
+		});
+	});
+
+	// --- 公開レスポンスに内部フィールドを載せない ---
+	describe("Public response fields", () => {
+		/** 公開 GET が返してよいキー。ここに無いものはレスポンスに出てはならない。 */
+		const PUBLIC_KEYS = [
+			"id",
+			"title",
+			"description",
+			"scope",
+			"status",
+			"latitude",
+			"longitude",
+			"category",
+			"created_at",
+			"updated_at",
+		];
+
+		beforeEach(async () => {
+			mockUserId = "user_2abcSECRETclerkid";
+		});
+
+		it("does not expose user_id in GET list", async () => {
+			await createIssue();
+
+			mockUserId = null;
+			const res = await app.request("/issues", {}, env);
+			const body = await readBody(res);
+			expect(body.data).toHaveLength(1);
+			expect(body.data[0]).not.toHaveProperty("user_id");
+			expect(JSON.stringify(body)).not.toContain("user_2abcSECRETclerkid");
+		});
+
+		it("does not expose user_id in GET by id", async () => {
+			const createRes = await createIssue();
+			const created = await readBody(createRes);
+
+			mockUserId = null;
+			const res = await app.request(`/issues/${created.id}`, {}, env);
+			const body = await readBody(res);
+			expect(body).not.toHaveProperty("user_id");
+			expect(JSON.stringify(body)).not.toContain("user_2abcSECRETclerkid");
+		});
+
+		it("returns exactly the public keys in GET list", async () => {
+			await createIssue({ ...validIssue, category: "infrastructure" });
+
+			mockUserId = null;
+			const res = await app.request("/issues", {}, env);
+			const body = await readBody(res);
+			expect(Object.keys(body.data[0]).sort()).toEqual([...PUBLIC_KEYS].sort());
+		});
+
+		// 一覧はフィルタ・ページングでクエリの組み立てが変わるため、
+		// 絞り込み無しの経路だけでなく、条件付きの経路でも公開キーだけが
+		// 返ることを確認する（特定条件でのみ漏れる退行を検出するため）。
+		it("returns exactly the public keys when filtered by scope", async () => {
+			await createIssue();
+			await createIssue({ ...validIssue, scope: "national" });
+
+			mockUserId = null;
+			const res = await app.request("/issues?scope=community", {}, env);
+			const body = await readBody(res);
+			expect(body.data).toHaveLength(1);
+			expect(Object.keys(body.data[0]).sort()).toEqual([...PUBLIC_KEYS].sort());
+			expect(JSON.stringify(body)).not.toContain("user_2abcSECRETclerkid");
+		});
+
+		it("returns exactly the public keys when filtered by status", async () => {
+			await createIssue();
+
+			mockUserId = null;
+			const res = await app.request("/issues?status=open", {}, env);
+			const body = await readBody(res);
+			expect(body.data).toHaveLength(1);
+			expect(Object.keys(body.data[0]).sort()).toEqual([...PUBLIC_KEYS].sort());
+			expect(JSON.stringify(body)).not.toContain("user_2abcSECRETclerkid");
+		});
+
+		it("returns exactly the public keys on a paginated page", async () => {
+			await createIssue({ ...validIssue, title: "Issue 1" });
+			await createIssue({ ...validIssue, title: "Issue 2" });
+			await createIssue({ ...validIssue, title: "Issue 3" });
+
+			mockUserId = null;
+			const res = await app.request("/issues?limit=1&offset=1", {}, env);
+			const body = await readBody(res);
+			expect(body.data).toHaveLength(1);
+			expect(Object.keys(body.data[0]).sort()).toEqual([...PUBLIC_KEYS].sort());
+			expect(JSON.stringify(body)).not.toContain("user_2abcSECRETclerkid");
+		});
+
+		it("returns exactly the public keys in GET by id", async () => {
+			const createRes = await createIssue({
+				...validIssue,
+				category: "infrastructure",
+			});
+			const created = await readBody(createRes);
+
+			mockUserId = null;
+			const res = await app.request(`/issues/${created.id}`, {}, env);
+			const body = await readBody(res);
+			expect(Object.keys(body).sort()).toEqual([...PUBLIC_KEYS].sort());
+		});
+
+		it("keeps the public field values intact", async () => {
+			const createRes = await createIssue({
+				...validIssue,
+				category: "infrastructure",
+			});
+			const created = await readBody(createRes);
+
+			mockUserId = null;
+			const res = await app.request(`/issues/${created.id}`, {}, env);
+			const body = await readBody(res);
+			expect(body.id).toBe(created.id);
+			expect(body.title).toBe(validIssue.title);
+			expect(body.description).toBe(validIssue.description);
+			expect(body.scope).toBe(validIssue.scope);
+			expect(body.status).toBe("open");
+			expect(body.latitude).toBe(validIssue.latitude);
+			expect(body.longitude).toBe(validIssue.longitude);
+			expect(body.category).toBe("infrastructure");
+			expect(body.created_at).toBeDefined();
+			expect(body.updated_at).toBeDefined();
+		});
+
+		it("returns category as null when it was not set", async () => {
+			const createRes = await createIssue();
+			const created = await readBody(createRes);
+
+			mockUserId = null;
+			const res = await app.request(`/issues/${created.id}`, {}, env);
+			const body = await readBody(res);
+			expect(body.category).toBeNull();
+		});
+
+		it("does not expose future internal columns added to the table", async () => {
+			// カラム追加で自動的に公開されてしまう構造を防ぐための回帰テスト。
+			// 一時テーブルではなく実テーブルに足すと後続テストへ影響するため、
+			// このテスト内で追加して最後に元へ戻す。
+			await env.DB.exec(
+				"ALTER TABLE issues ADD COLUMN internal_note TEXT DEFAULT 'secret-internal-note'",
+			);
+			try {
+				await createIssue();
+
+				mockUserId = null;
+				const listRes = await app.request("/issues", {}, env);
+				const listBody = await readBody(listRes);
+				expect(JSON.stringify(listBody)).not.toContain("secret-internal-note");
+				expect(listBody.data[0]).not.toHaveProperty("internal_note");
+
+				const id = listBody.data[0].id;
+				const byIdRes = await app.request(`/issues/${id}`, {}, env);
+				const byIdBody = await readBody(byIdRes);
+				expect(JSON.stringify(byIdBody)).not.toContain("secret-internal-note");
+				expect(byIdBody).not.toHaveProperty("internal_note");
+			} finally {
+				await env.DB.exec("ALTER TABLE issues DROP COLUMN internal_note");
+			}
+		});
+
+		// SELECT でカラムを絞る層と、返す直前に絞る層の二段構えにしているため、
+		// HTTP 経由のテストだけでは片方を外しても結果が変わらず、退行に気づけない。
+		// ここでは各層の部品を直接呼んで、それぞれが単独で効いていることを確認する。
+		describe("Defence layers", () => {
+			it("keeps the SELECT clause free of internal columns", async () => {
+				// SELECT 層: クエリ自体が user_id を取ってこないこと。
+				// DTO 層を外しても user_id が漏れない、という形で確認する。
+				await createIssue();
+
+				const row = await env.DB.prepare(
+					`SELECT ${PUBLIC_SELECT_FOR_TEST} FROM issues LIMIT 1`,
+				).first<Record<string, unknown>>();
+
+				expect(row).not.toBeNull();
+				expect(row).not.toHaveProperty("user_id");
+				expect(Object.keys(row ?? {}).sort()).toEqual([...PUBLIC_KEYS].sort());
+			});
+
+			it("strips internal fields even when the row carries them", async () => {
+				// DTO 層: SELECT * に退行した場合でも、返す直前に落ちること。
+				// 実際に SELECT * で取った行を GET と同じ整形にかけて確かめる。
+				await createIssue();
+
+				const rawQuery = env.DB.prepare("SELECT * FROM issues LIMIT 1");
+				const raw = await rawQuery.first<Record<string, unknown>>();
+
+				// 前提: 生の行には user_id が含まれている
+				expect(raw).toHaveProperty("user_id", "user_2abcSECRETclerkid");
+
+				const shaped = toPublicIssueForTest(raw ?? {});
+				expect(shaped).not.toHaveProperty("user_id");
+				expect(Object.keys(shaped).sort()).toEqual([...PUBLIC_KEYS].sort());
+			});
 		});
 	});
 
