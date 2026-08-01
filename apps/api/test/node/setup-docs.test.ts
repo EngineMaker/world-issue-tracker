@@ -78,7 +78,21 @@ describe("環境変数のサンプルファイル", () => {
 			for (const line of readRepoFile(path).split("\n")) {
 				const trimmed = line.trim();
 				if (trimmed === "" || trimmed.startsWith("#")) continue;
-				const value = trimmed.slice(trimmed.indexOf("=") + 1);
+				const separator = trimmed.indexOf("=");
+				const key = trimmed.slice(0, separator);
+				const value = trimmed.slice(separator + 1);
+
+				// URL のような公開してよい設定値は実値のままサンプルに書く。
+				// 秘匿すべきなのは資格情報なので、検査対象をそちらに限定する。
+				// ここを緩めすぎると実キーの混入を見逃すため、
+				// 「除外してよいキー」を列挙する側（許可リスト）にしている。
+				if (key === "NEXT_PUBLIC_API_URL") {
+					expect(value, `${path} の ${key} が URL でない`).toMatch(
+						/^https?:\/\//,
+					);
+					continue;
+				}
+
 				// Clerk の実キーはランダム文字列が続く。
 				// プレースホルダは `xxxx` で終わることを必須とする
 				expect(value, `${path} に実値らしき文字列がある: ${line}`).toMatch(

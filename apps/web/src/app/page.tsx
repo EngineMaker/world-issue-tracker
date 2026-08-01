@@ -1,4 +1,5 @@
 import { IssueScope, IssueStatus } from "@world-issue-tracker/shared";
+import Link from "next/link";
 
 export default function Home() {
 	const scopes = IssueScope.options;
@@ -8,6 +9,10 @@ export default function Home() {
 		<main>
 			<h1>World Issue Tracker</h1>
 			<p>地球のバグを、みんなで可視化して、みんなで直す</p>
+
+			<p>
+				<Link href="/issues/new">Issue を起票する</Link>
+			</p>
 
 			<section>
 				<h2>Issue Scopes</h2>
