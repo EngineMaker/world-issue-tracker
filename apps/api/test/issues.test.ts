@@ -51,6 +51,43 @@ async function readBody(res: Response): Promise<IssueBody> {
 	return (await res.json()) as IssueBody;
 }
 
+/**
+ * SQLite が返すタイムスタンプ文字列をミリ秒に直す。
+ *
+ * 書式は `YYYY-MM-DD HH:MM:SS[.SSS]`（UTC、末尾のオフセット表記なし）。
+ * そのまま `new Date()` に渡すとローカルタイム扱いになるため、
+ * 区切りを ISO 形式に直して UTC であることを明示する。
+ * パースできない値は NaN になり、比較の assertion がそのまま落ちる。
+ */
+function toMillis(timestamp: string): number {
+	return new Date(`${timestamp.replace(" ", "T")}Z`).getTime();
+}
+
+/**
+ * 実装が書き込むタイムスタンプの書式（`YYYY-MM-DD HH:MM:SS.SSS`）。
+ *
+ * テーブルの DEFAULT は秒精度なので、この書式であること自体が
+ * 「アプリが明示的に書いた」証拠になる。DEFAULT 任せに退行すると
+ * ミリ秒部が消えてマッチしなくなる。
+ */
+const TIMESTAMP_FORMAT = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/;
+
+/**
+ * DB に保存されている行を直接読む。
+ *
+ * PATCH のレスポンス JSON だけを見ていると、DB に書かずにレスポンスを
+ * 組み立てるだけの実装でも通ってしまう。永続化されたかを見るために使う。
+ */
+async function readStoredIssue(id: string): Promise<IssueBody> {
+	const row = await env.DB.prepare("SELECT * FROM issues WHERE id = ?")
+		.bind(id)
+		.first<IssueBody>();
+	if (!row) {
+		throw new Error(`Issue ${id} not found in DB`);
+	}
+	return row;
+}
+
 const validIssue: IssueInput = {
 	title: "Broken streetlight",
 	description: "The streetlight on Main St is not working",
@@ -142,6 +179,23 @@ describe("Issues CRUD", () => {
 			expect(body.user_id).toBe("test-user-123");
 			expect(body.id).toBeDefined();
 			expect(body.created_at).toBeDefined();
+		});
+
+		it("stamps created_at and updated_at with millisecond precision", async () => {
+			// テーブルの DEFAULT（秒精度）任せに戻ると、作成直後の PATCH で
+			// created_at が最大 999ms 先行し、updated_at < created_at の逆転が起きる。
+			// アプリが明示的にミリ秒精度で書いていることを、書式で確認する。
+			const res = await createIssue();
+			const body = await readBody(res);
+
+			expect(body.created_at).toMatch(TIMESTAMP_FORMAT);
+			expect(body.updated_at).toMatch(TIMESTAMP_FORMAT);
+			// 作成時点では両者が同じ瞬間を指す
+			expect(body.updated_at).toBe(body.created_at);
+
+			const stored = await readStoredIssue(body.id);
+			expect(stored.created_at).toMatch(TIMESTAMP_FORMAT);
+			expect(stored.updated_at).toMatch(TIMESTAMP_FORMAT);
 		});
 
 		it("creates an issue with optional category", async () => {
@@ -670,7 +724,131 @@ describe("Issues CRUD", () => {
 				env,
 			);
 			const body = await readBody(res);
-			expect(body.updated_at).toBeDefined();
+
+			// 値が「存在する」だけでは PATCH の挙動を検証したことにならない。
+			// `updated_at` は NOT NULL DEFAULT なので INSERT 時点で必ず入っており、
+			// 更新処理を消しても toBeDefined() は通ってしまう。
+			// 作成時の値から実際に進んだことを見る。
+			expect(body.updated_at).not.toBe(created.updated_at);
+			expect(toMillis(body.updated_at)).toBeGreaterThan(
+				toMillis(created.updated_at),
+			);
+
+			// レスポンスだけを見ていると「DB には書かず、返す JSON の
+			// updated_at だけ差し替える」実装でも通ってしまう。
+			// 読み直して、進んだ値が永続化されていることまで確認する。
+			const stored = await readStoredIssue(created.id);
+			expect(stored.updated_at).toBe(body.updated_at);
+		});
+
+		it("leaves created_at untouched while advancing updated_at", async () => {
+			// `updated_at` を進める実装が、ついでに `created_at` まで
+			// 書き換えていないこと（例: 両方に NOW を入れる退行）を見る。
+			const createRes = await createIssue();
+			const created = await readBody(createRes);
+
+			const res = await app.request(
+				`/issues/${created.id}`,
+				{
+					method: "PATCH",
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
+					body: JSON.stringify({ title: "New title" }),
+				},
+				env,
+			);
+			const body = await readBody(res);
+
+			expect(body.created_at).toBe(created.created_at);
+			expect(toMillis(body.updated_at)).toBeGreaterThan(
+				toMillis(body.created_at),
+			);
+
+			const stored = await readStoredIssue(created.id);
+			expect(stored.created_at).toBe(created.created_at);
+			expect(toMillis(stored.updated_at)).toBeGreaterThan(
+				toMillis(stored.created_at),
+			);
+		});
+
+		it("advances updated_at on every consecutive update", async () => {
+			// 秒精度だと同一秒内の連続更新で値が動かず、
+			// 「最終更新順に並べる」「キャッシュ無効化」が壊れる。
+			// 待ち時間を入れずに連続 PATCH して、毎回進むことを確認する。
+			//
+			// 1 リクエストが認証・所有者確認・UPDATE を経るため 1ms 以上かかり、
+			// ミリ秒精度なら値は必ず進む。ここが稀に落ちるようなら、
+			// 経路が速くなって同一ミリ秒に収まった可能性を疑うこと。
+			const createRes = await createIssue();
+			const created = await readBody(createRes);
+
+			const timestamps: string[] = [created.updated_at];
+			for (const title of ["First", "Second", "Third"]) {
+				const res = await app.request(
+					`/issues/${created.id}`,
+					{
+						method: "PATCH",
+						headers: {
+							"Content-Type": "application/json",
+							Origin: ALLOWED_ORIGIN,
+						},
+						body: JSON.stringify({ title }),
+					},
+					env,
+				);
+				const body = await readBody(res);
+
+				// レスポンスと DB の値が一致していること（＝実際に書かれたこと）を
+				// 各回で確かめたうえで、DB 側の値を並びの検証に使う
+				const stored = await readStoredIssue(created.id);
+				expect(body.updated_at).toBe(stored.updated_at);
+				timestamps.push(stored.updated_at);
+			}
+
+			// 同じ値が一度でも並べば、その更新は時刻を進められていない
+			expect(new Set(timestamps).size).toBe(timestamps.length);
+			// 隣り合う 2 つを取り出して、常に後ろの方が新しいことを見る
+			const pairs = timestamps
+				.slice(1)
+				.map((current, index) => [timestamps[index], current] as const);
+			for (const [previous, current] of pairs) {
+				expect(toMillis(current)).toBeGreaterThan(toMillis(previous ?? ""));
+			}
+		});
+
+		it("stores timestamps in a format that sorts chronologically as text", async () => {
+			// `ORDER BY updated_at` は文字列比較で効くため、書式が崩れると
+			// 並び順が壊れる。秒精度の既存行と混在しても順序が保たれることを見る。
+			const createRes = await createIssue();
+			const created = await readBody(createRes);
+
+			// DEFAULT（秒精度）で入った古い行を模した値を直接仕込む
+			await env.DB.prepare(
+				"UPDATE issues SET created_at = ?, updated_at = ? WHERE id = ?",
+			)
+				.bind("2000-01-01 00:00:00", "2000-01-01 00:00:00", created.id)
+				.run();
+
+			const res = await app.request(
+				`/issues/${created.id}`,
+				{
+					method: "PATCH",
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
+					body: JSON.stringify({ title: "New title" }),
+				},
+				env,
+			);
+			const body = await readBody(res);
+
+			// 実装が書く書式は `YYYY-MM-DD HH:MM:SS.SSS`
+			expect(body.updated_at).toMatch(TIMESTAMP_FORMAT);
+			// 秒精度の古い値との比較が、文字列としても時系列順になる
+			expect(body.updated_at > "2000-01-01 00:00:00").toBe(true);
 		});
 
 		it("returns 404 for non-existent id", async () => {

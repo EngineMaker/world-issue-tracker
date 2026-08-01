@@ -49,6 +49,19 @@ export function toPublicIssue(row: Record<string, unknown>): PublicIssue {
 	) as PublicIssue;
 }
 
+/**
+ * `created_at` / `updated_at` に入れるタイムスタンプの SQL 式。
+ *
+ * テーブルの DEFAULT は `datetime('now')`（秒精度）だが、それだと
+ * 「作成と更新が同一秒内に起きると `updated_at` が動かない」ため、
+ * 更新されたかどうかを値から判別できない。連続した更新でも順序が付くよう、
+ * アプリ経由の書き込みではミリ秒精度で明示的に入れる。
+ *
+ * 書式は `YYYY-MM-DD HH:MM:SS.SSS` で、秒精度の `YYYY-MM-DD HH:MM:SS` と
+ * 先頭が共通するため、DEFAULT で入った既存行との辞書順比較も時系列順と一致する。
+ */
+const NOW_SQL = "strftime('%Y-%m-%d %H:%M:%f', 'now')";
+
 issues.onError((err, c) => {
 	if (err instanceof SyntaxError) {
 		return c.json({ error: "Invalid JSON" }, 400);
@@ -70,8 +83,8 @@ issues.post("/", requireAuth, async (c) => {
 	const userId = auth?.userId;
 
 	const result = await c.env.DB.prepare(
-		`INSERT INTO issues (title, description, scope, latitude, longitude, category, user_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO issues (title, description, scope, latitude, longitude, category, user_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ${NOW_SQL}, ${NOW_SQL})
      RETURNING *`,
 	)
 		.bind(
@@ -200,7 +213,7 @@ issues.patch("/:id", requireAuth, async (c) => {
 		setClauses.push(`${key} = ?`);
 		binds.push(value ?? null);
 	}
-	setClauses.push("updated_at = datetime('now')");
+	setClauses.push(`updated_at = ${NOW_SQL}`);
 
 	const auth = getAuth(c);
 
