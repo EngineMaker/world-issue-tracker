@@ -1,16 +1,14 @@
 import { env } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-let mockUserId: string | null = "test-user-123";
-
-vi.mock("@hono/clerk-auth", () => ({
-	clerkMiddleware: () => async (_c: unknown, next: () => Promise<void>) => {
-		await next();
-	},
-	getAuth: () => ({ userId: mockUserId }),
-}));
+// モックの層については helpers/clerk-mock.ts を参照。
+vi.mock("@clerk/backend", async () => {
+	const { clerkBackendMockFactory } = await import("./helpers/clerk-mock");
+	return clerkBackendMockFactory();
+});
 
 import { ALLOWED_ORIGINS, createApp } from "../src/index";
+import { getLastAuthSource, setMockUserId } from "./helpers/clerk-mock";
 
 const app = createApp();
 
@@ -63,7 +61,7 @@ describe("CSRF protection", () => {
 
 	beforeEach(async () => {
 		await env.DB.exec("DELETE FROM issues");
-		mockUserId = "test-user-123";
+		setMockUserId("test-user-123");
 	});
 
 	// --- Simple request（プリフライトが発生しない Content-Type） ---
@@ -392,7 +390,7 @@ describe("CSRF protection", () => {
 		it("still requires authentication when the token is not accepted", async () => {
 			// Origin 検証を免除しても認証は免除されない。Clerk がトークンを
 			// 受け付けなければ requireAuth が 401 を返し、書き込みは起きない。
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request(
 				"/issues",
 				{
@@ -407,6 +405,43 @@ describe("CSRF protection", () => {
 			);
 			expect(res.status).toBe(401);
 			expect(await countIssues()).toBe(0);
+		});
+
+		// Origin 検証の分岐だけでなく、Clerk 側がどの経路の資格情報を読んだかも見る。
+		// Bearer と Cookie の違いは CSRF の成否そのもの（Cookie はブラウザが自動送信し、
+		// Bearer はしない）なので、両者が区別されずに扱われる退行を捕まえたい。
+		it("reads the token from the Authorization header, not the cookie", async () => {
+			await app.request(
+				"/issues",
+				{
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						Authorization: "Bearer some-session-token",
+						Cookie: "__session=cookie-session-token",
+					},
+					body: JSON.stringify(validIssue),
+				},
+				env,
+			);
+			expect(getLastAuthSource()).toBe("bearer");
+		});
+
+		it("falls back to the cookie when there is no Bearer token", async () => {
+			await app.request(
+				"/issues",
+				{
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						Origin: "http://localhost:3000",
+						Cookie: "__session=cookie-session-token",
+					},
+					body: JSON.stringify(validIssue),
+				},
+				env,
+			);
+			expect(getLastAuthSource()).toBe("cookie");
 		});
 
 		it("does not treat a non-Bearer scheme as a token", async () => {
