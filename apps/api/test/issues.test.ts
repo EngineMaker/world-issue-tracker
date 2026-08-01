@@ -385,7 +385,7 @@ describe("Issues CRUD", () => {
 			expect(body.error).toBe("Issue not found");
 		});
 
-		it("returns 401 when unauthenticated", async () => {
+		it("returns 401 and does not delete when unauthenticated", async () => {
 			const createRes = await createIssue();
 			const created = await readBody(createRes);
 
@@ -398,17 +398,10 @@ describe("Issues CRUD", () => {
 			expect(res.status).toBe(401);
 			const body = await readBody(res);
 			expect(body.error).toBe("Unauthorized");
-		});
 
-		it("does not delete the issue when unauthenticated", async () => {
-			const createRes = await createIssue();
-			const created = await readBody(createRes);
-
-			mockUserId = null;
-			await app.request(`/issues/${created.id}`, { method: "DELETE" }, env);
-
-			const res = await app.request(`/issues/${created.id}`, {}, env);
-			expect(res.status).toBe(200);
+			// 401 を返すだけでなく、実際にレコードが残っていること
+			const check = await app.request(`/issues/${created.id}`, {}, env);
+			expect(check.status).toBe(200);
 		});
 	});
 
