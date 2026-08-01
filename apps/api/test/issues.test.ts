@@ -18,6 +18,12 @@ import {
 
 const app = createApp();
 
+/**
+ * 書き込み系は Origin 検証を通す必要があるため、許可オリジンを付けて叩く。
+ * Origin 検証そのもののテストは `csrf.test.ts` にある。
+ */
+const ALLOWED_ORIGIN = "http://localhost:3000";
+
 const MIGRATION =
 	"CREATE TABLE IF NOT EXISTS issues (id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), title TEXT NOT NULL, description TEXT NOT NULL, scope TEXT NOT NULL CHECK (scope IN ('personal', 'community', 'municipality', 'national', 'global')), status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'triaged', 'in_progress', 'review', 'resolved', 'closed')), latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT, user_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));";
 
@@ -55,7 +61,10 @@ async function createIssue(data: IssueInput = validIssue) {
 		"/issues",
 		{
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers: {
+				"Content-Type": "application/json",
+				Origin: ALLOWED_ORIGIN,
+			},
 			body: JSON.stringify(data),
 		},
 		env,
@@ -91,7 +100,10 @@ describe("Issues CRUD", () => {
 				`/issues/${created.id}`,
 				{
 					method: "PATCH",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
 					body: JSON.stringify({ title: "Updated" }),
 				},
 				env,
@@ -166,7 +178,10 @@ describe("Issues CRUD", () => {
 				"/issues",
 				{
 					method: "POST",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
 					body: "not json",
 				},
 				env,
@@ -600,7 +615,10 @@ describe("Issues CRUD", () => {
 				`/issues/${created.id}`,
 				{
 					method: "PATCH",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
 					body: JSON.stringify({ title: "Updated title" }),
 				},
 				env,
@@ -619,7 +637,10 @@ describe("Issues CRUD", () => {
 				`/issues/${created.id}`,
 				{
 					method: "PATCH",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
 					body: JSON.stringify({ status: "triaged" }),
 				},
 				env,
@@ -637,7 +658,10 @@ describe("Issues CRUD", () => {
 				`/issues/${created.id}`,
 				{
 					method: "PATCH",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
 					body: JSON.stringify({ title: "New title" }),
 				},
 				env,
@@ -651,7 +675,10 @@ describe("Issues CRUD", () => {
 				"/issues/nonexistent",
 				{
 					method: "PATCH",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
 					body: JSON.stringify({ title: "Updated" }),
 				},
 				env,
@@ -667,7 +694,10 @@ describe("Issues CRUD", () => {
 				`/issues/${created.id}`,
 				{
 					method: "PATCH",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
 					body: JSON.stringify({}),
 				},
 				env,
@@ -684,7 +714,7 @@ describe("Issues CRUD", () => {
 
 			const res = await app.request(
 				`/issues/${created.id}`,
-				{ method: "DELETE" },
+				{ method: "DELETE", headers: { Origin: ALLOWED_ORIGIN } },
 				env,
 			);
 			expect(res.status).toBe(200);
@@ -699,7 +729,7 @@ describe("Issues CRUD", () => {
 
 			const delRes = await app.request(
 				`/issues/${created.id}`,
-				{ method: "DELETE" },
+				{ method: "DELETE", headers: { Origin: ALLOWED_ORIGIN } },
 				env,
 			);
 			expect(delRes.status).toBe(200);
@@ -711,7 +741,7 @@ describe("Issues CRUD", () => {
 		it("returns 404 for non-existent id", async () => {
 			const res = await app.request(
 				"/issues/nonexistent",
-				{ method: "DELETE" },
+				{ method: "DELETE", headers: { Origin: ALLOWED_ORIGIN } },
 				env,
 			);
 			expect(res.status).toBe(404);
@@ -726,7 +756,7 @@ describe("Issues CRUD", () => {
 			mockUserId = null;
 			const res = await app.request(
 				`/issues/${created.id}`,
-				{ method: "DELETE" },
+				{ method: "DELETE", headers: { Origin: ALLOWED_ORIGIN } },
 				env,
 			);
 			expect(res.status).toBe(401);
@@ -757,7 +787,10 @@ describe("Issues CRUD", () => {
 				`/issues/${created.id}`,
 				{
 					method: "PATCH",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
 					body: JSON.stringify({ title: "Hijacked" }),
 				},
 				env,
@@ -774,7 +807,10 @@ describe("Issues CRUD", () => {
 				`/issues/${created.id}`,
 				{
 					method: "PATCH",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
 					body: JSON.stringify({ title: "Hijacked" }),
 				},
 				env,
@@ -790,7 +826,7 @@ describe("Issues CRUD", () => {
 
 			const res = await app.request(
 				`/issues/${created.id}`,
-				{ method: "DELETE" },
+				{ method: "DELETE", headers: { Origin: ALLOWED_ORIGIN } },
 				env,
 			);
 			expect(res.status).toBe(403);
@@ -801,7 +837,11 @@ describe("Issues CRUD", () => {
 		it("does not delete the issue on DELETE by a non-owner", async () => {
 			const created = await createIssueAsOwner();
 
-			await app.request(`/issues/${created.id}`, { method: "DELETE" }, env);
+			await app.request(
+				`/issues/${created.id}`,
+				{ method: "DELETE", headers: { Origin: ALLOWED_ORIGIN } },
+				env,
+			);
 
 			const res = await app.request(`/issues/${created.id}`, {}, env);
 			expect(res.status).toBe(200);
@@ -816,7 +856,10 @@ describe("Issues CRUD", () => {
 				`/issues/${created.id}`,
 				{
 					method: "PATCH",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
 					body: JSON.stringify({ title: "Updated by owner" }),
 				},
 				env,
@@ -825,7 +868,7 @@ describe("Issues CRUD", () => {
 
 			const delRes = await app.request(
 				`/issues/${created.id}`,
-				{ method: "DELETE" },
+				{ method: "DELETE", headers: { Origin: ALLOWED_ORIGIN } },
 				env,
 			);
 			expect(delRes.status).toBe(200);
@@ -838,7 +881,10 @@ describe("Issues CRUD", () => {
 				`/issues/${created.id}`,
 				{
 					method: "PATCH",
-					headers: { "Content-Type": "application/json" },
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
 					body: JSON.stringify({ scope: "not-a-scope" }),
 				},
 				env,
@@ -854,7 +900,7 @@ describe("Issues CRUD", () => {
 
 			const res = await app.request(
 				"/issues/legacy-1",
-				{ method: "DELETE" },
+				{ method: "DELETE", headers: { Origin: ALLOWED_ORIGIN } },
 				env,
 			);
 			expect(res.status).toBe(403);
