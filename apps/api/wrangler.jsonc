@@ -2,6 +2,12 @@
 	"name": "world-issue-tracker-api",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-04-01",
+	// 例外ハンドラ（src/index.ts の app.onError）が console.error で残すログを
+	// 本番で追跡できるようにする。これが無いと `wrangler tail` を張っている間しか
+	// 見えず、500 の原因を事後に調べられない。
+	"observability": {
+		"enabled": true
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",

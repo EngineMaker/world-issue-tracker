@@ -46,6 +46,9 @@ export const ListIssuesQuerySchema = z.object({
 	scope: IssueScope.optional(),
 	status: IssueStatus.optional(),
 	limit: z.coerce.number().int().min(1).max(100).default(20),
-	offset: z.coerce.number().int().min(0).default(0),
+	// offset にも上限が要る。無いと INT64 の範囲を超えた値がそのまま
+	// SQL の OFFSET に渡り、D1 が SQLITE_MISMATCH を投げて 500 になる。
+	// 深いページングは実用上意味がないので、limit(100) の 1 万ページ分で十分。
+	offset: z.coerce.number().int().min(0).max(1_000_000).default(0),
 });
 export type ListIssuesQuery = z.infer<typeof ListIssuesQuerySchema>;

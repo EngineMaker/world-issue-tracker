@@ -366,6 +366,29 @@ describe("Issues CRUD", () => {
 				expect(body.error.fieldErrors.offset).toBeDefined();
 			});
 
+			// 上限が無いと INT64 の範囲を超えた値がそのまま .bind() に渡り、
+			// D1 が SQLITE_MISMATCH を投げて 500（しかもプレーンテキスト）になる。
+			// 認証不要の公開エンドポイントなので、誰でもクエリ文字列だけで落とせてしまう。
+			it("rejects offset above the maximum", async () => {
+				const res = await app.request("/issues?offset=1000001", {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.offset).toBeDefined();
+			});
+
+			// 実際に D1 を壊す値。指数表記もクエリ文字列としては通る経路なので個別に置く。
+			it.each([
+				"9223372036854775807",
+				"9223372036854775808",
+				"1e20",
+				"1e30",
+			])("rejects an offset that overflows the database column (%s)", async (offset) => {
+				const res = await app.request(`/issues?offset=${offset}`, {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.offset).toBeDefined();
+			});
+
 			it("rejects an unknown scope", async () => {
 				const res = await app.request("/issues?scope=bogus", {}, env);
 				expect(res.status).toBe(400);
@@ -406,6 +429,13 @@ describe("Issues CRUD", () => {
 				expect(res.status).toBe(200);
 				const body = await readBody(res);
 				expect(body.offset).toBe(0);
+			});
+
+			it("accepts offset at the maximum", async () => {
+				const res = await app.request("/issues?offset=1000000", {}, env);
+				expect(res.status).toBe(200);
+				const body = await readBody(res);
+				expect(body.offset).toBe(1000000);
 			});
 
 			// 400 を返すだけでなく、そもそも DB にクエリを投げていないこと。

@@ -50,6 +50,28 @@ export function createApp() {
 	app.route("/health", health);
 	app.route("/issues", issues);
 
+	// 未定義ルートの 404 も JSON に揃える。
+	//
+	// Hono の既定ハンドラは text/plain の "404 Not Found" を返すが、
+	// `/issues/:id` の 404 は `{"error": "Issue not found"}` の JSON なので、
+	// 同じ 404 でも経路によって形式が変わってしまう。
+	app.notFound((c) => {
+		return c.json({ error: "Not Found" }, 404);
+	});
+
+	// 想定外の例外をアプリ全体で JSON の 500 に正規化する。
+	//
+	// これが無いと Hono の既定ハンドラが text/plain の "Internal Server Error" を
+	// 返し、他のエラーがすべて `{"error": ...}` の JSON なのと不整合になる。
+	// クライアントがエラー形式を一つに決め打ちできるようにする。
+	//
+	// 本文には固定文言だけを載せる（例外のメッセージやスタックは内部情報なので
+	// 返さない）。原因の追跡は console.error 経由のログで行う。
+	app.onError((err, c) => {
+		console.error(err);
+		return c.json({ error: "Internal Server Error" }, 500);
+	});
+
 	return app;
 }
 
