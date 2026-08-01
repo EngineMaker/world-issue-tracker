@@ -1,12 +1,12 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@hono/clerk-auth", () => ({
-	clerkMiddleware: () => async (_c: unknown, next: () => Promise<void>) => {
-		await next();
-	},
-	getAuth: () => ({ userId: null }),
-}));
+// モックの層については helpers/clerk-mock.ts を参照。
+// このファイルは認証を要求しないルートだけを見るため、未認証のまま使う。
+vi.mock("@clerk/backend", async () => {
+	const { clerkBackendMockFactory } = await import("./helpers/clerk-mock");
+	return clerkBackendMockFactory();
+});
 
 import { createApp } from "../src/index";
 

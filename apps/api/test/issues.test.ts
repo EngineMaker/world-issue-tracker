@@ -1,20 +1,23 @@
 import { env } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-let mockUserId: string | null = "test-user-123";
-
-vi.mock("@hono/clerk-auth", () => ({
-	clerkMiddleware: () => async (_c: unknown, next: () => Promise<void>) => {
-		await next();
-	},
-	getAuth: () => ({ userId: mockUserId }),
-}));
+// `@hono/clerk-auth` ではなく、その内部が使う `@clerk/backend` をモックする。
+// `clerkMiddleware` の本体は実物が動くため、ミドルウェアの適用漏れや
+// `getAuth` の戻り値の形の変化がテストに現れる。詳細は helpers/clerk-mock.ts。
+//
+// `vi.mock` はファイル先頭に巻き上げられ、import した束縛をまだ参照できない。
+// そのためファクトリはここで動的 import して呼ぶ。
+vi.mock("@clerk/backend", async () => {
+	const { clerkBackendMockFactory } = await import("./helpers/clerk-mock");
+	return clerkBackendMockFactory();
+});
 
 import { createApp } from "../src/index";
 import {
 	PUBLIC_SELECT as PUBLIC_SELECT_FOR_TEST,
 	toPublicIssue as toPublicIssueForTest,
 } from "../src/routes/issues";
+import { setMockUserId } from "./helpers/clerk-mock";
 
 const app = createApp();
 
@@ -78,13 +81,13 @@ describe("Issues CRUD", () => {
 
 	beforeEach(async () => {
 		await env.DB.exec("DELETE FROM issues");
-		mockUserId = "test-user-123";
+		setMockUserId("test-user-123");
 	});
 
 	// --- Authentication ---
 	describe("Authentication", () => {
 		it("returns 401 for unauthenticated POST", async () => {
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await createIssue();
 			expect(res.status).toBe(401);
 			const body = await readBody(res);
@@ -95,7 +98,7 @@ describe("Issues CRUD", () => {
 			const createRes = await createIssue();
 			const created = await readBody(createRes);
 
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request(
 				`/issues/${created.id}`,
 				{
@@ -112,7 +115,7 @@ describe("Issues CRUD", () => {
 		});
 
 		it("allows unauthenticated GET list", async () => {
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request("/issues", {}, env);
 			expect(res.status).toBe(200);
 		});
@@ -121,7 +124,7 @@ describe("Issues CRUD", () => {
 			const createRes = await createIssue();
 			const created = await readBody(createRes);
 
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request(`/issues/${created.id}`, {}, env);
 			expect(res.status).toBe(200);
 		});
@@ -425,13 +428,13 @@ describe("Issues CRUD", () => {
 		];
 
 		beforeEach(async () => {
-			mockUserId = "user_2abcSECRETclerkid";
+			setMockUserId("user_2abcSECRETclerkid");
 		});
 
 		it("does not expose user_id in GET list", async () => {
 			await createIssue();
 
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request("/issues", {}, env);
 			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
@@ -443,7 +446,7 @@ describe("Issues CRUD", () => {
 			const createRes = await createIssue();
 			const created = await readBody(createRes);
 
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request(`/issues/${created.id}`, {}, env);
 			const body = await readBody(res);
 			expect(body).not.toHaveProperty("user_id");
@@ -453,7 +456,7 @@ describe("Issues CRUD", () => {
 		it("returns exactly the public keys in GET list", async () => {
 			await createIssue({ ...validIssue, category: "infrastructure" });
 
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request("/issues", {}, env);
 			const body = await readBody(res);
 			expect(Object.keys(body.data[0]).sort()).toEqual([...PUBLIC_KEYS].sort());
@@ -466,7 +469,7 @@ describe("Issues CRUD", () => {
 			await createIssue();
 			await createIssue({ ...validIssue, scope: "national" });
 
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request("/issues?scope=community", {}, env);
 			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
@@ -477,7 +480,7 @@ describe("Issues CRUD", () => {
 		it("returns exactly the public keys when filtered by status", async () => {
 			await createIssue();
 
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request("/issues?status=open", {}, env);
 			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
@@ -490,7 +493,7 @@ describe("Issues CRUD", () => {
 			await createIssue({ ...validIssue, title: "Issue 2" });
 			await createIssue({ ...validIssue, title: "Issue 3" });
 
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request("/issues?limit=1&offset=1", {}, env);
 			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
@@ -505,7 +508,7 @@ describe("Issues CRUD", () => {
 			});
 			const created = await readBody(createRes);
 
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request(`/issues/${created.id}`, {}, env);
 			const body = await readBody(res);
 			expect(Object.keys(body).sort()).toEqual([...PUBLIC_KEYS].sort());
@@ -518,7 +521,7 @@ describe("Issues CRUD", () => {
 			});
 			const created = await readBody(createRes);
 
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request(`/issues/${created.id}`, {}, env);
 			const body = await readBody(res);
 			expect(body.id).toBe(created.id);
@@ -537,7 +540,7 @@ describe("Issues CRUD", () => {
 			const createRes = await createIssue();
 			const created = await readBody(createRes);
 
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request(`/issues/${created.id}`, {}, env);
 			const body = await readBody(res);
 			expect(body.category).toBeNull();
@@ -553,7 +556,7 @@ describe("Issues CRUD", () => {
 			try {
 				await createIssue();
 
-				mockUserId = null;
+				setMockUserId(null);
 				const listRes = await app.request("/issues", {}, env);
 				const listBody = await readBody(listRes);
 				expect(JSON.stringify(listBody)).not.toContain("secret-internal-note");
@@ -753,7 +756,7 @@ describe("Issues CRUD", () => {
 			const createRes = await createIssue();
 			const created = await readBody(createRes);
 
-			mockUserId = null;
+			setMockUserId(null);
 			const res = await app.request(
 				`/issues/${created.id}`,
 				{ method: "DELETE", headers: { Origin: ALLOWED_ORIGIN } },
@@ -773,10 +776,10 @@ describe("Issues CRUD", () => {
 	describe("Ownership", () => {
 		/** owner-A が作成した Issue を返す。以降 attacker-Z として操作するテスト用。 */
 		async function createIssueAsOwner() {
-			mockUserId = "owner-A";
+			setMockUserId("owner-A");
 			const res = await createIssue();
 			const created = await readBody(res);
-			mockUserId = "attacker-Z";
+			setMockUserId("attacker-Z");
 			return created;
 		}
 
@@ -848,7 +851,7 @@ describe("Issues CRUD", () => {
 		});
 
 		it("allows the owner to PATCH and DELETE", async () => {
-			mockUserId = "owner-A";
+			setMockUserId("owner-A");
 			const createRes = await createIssue();
 			const created = await readBody(createRes);
 
