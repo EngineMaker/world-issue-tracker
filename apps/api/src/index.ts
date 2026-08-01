@@ -19,7 +19,7 @@ export function createApp() {
 				"http://localhost:3000",
 				"https://world-issue-tracker.pages.dev",
 			],
-			allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+			allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
 			allowHeaders: ["Content-Type", "Authorization"],
 		}),
 	);

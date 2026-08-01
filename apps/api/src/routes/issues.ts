@@ -136,3 +136,19 @@ issues.patch("/:id", requireAuth, async (c) => {
 	}
 	return c.json(result);
 });
+
+// DELETE /issues/:id — Delete (auth required)
+issues.delete("/:id", requireAuth, async (c) => {
+	const id = c.req.param("id");
+
+	const result = await c.env.DB.prepare(
+		"DELETE FROM issues WHERE id = ? RETURNING *",
+	)
+		.bind(id)
+		.first();
+
+	if (!result) {
+		return c.json({ error: "Issue not found" }, 404);
+	}
+	return c.json(result);
+});

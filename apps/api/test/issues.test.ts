@@ -341,4 +341,74 @@ describe("Issues CRUD", () => {
 			expect(res.status).toBe(400);
 		});
 	});
+
+	// --- DELETE /issues/:id ---
+	describe("DELETE /issues/:id", () => {
+		it("deletes an issue and returns the deleted issue", async () => {
+			const createRes = await createIssue();
+			const created = await readBody(createRes);
+
+			const res = await app.request(
+				`/issues/${created.id}`,
+				{ method: "DELETE" },
+				env,
+			);
+			expect(res.status).toBe(200);
+			const body = await readBody(res);
+			expect(body.id).toBe(created.id);
+			expect(body.title).toBe(validIssue.title);
+		});
+
+		it("makes the issue unreachable via GET afterwards", async () => {
+			const createRes = await createIssue();
+			const created = await readBody(createRes);
+
+			const delRes = await app.request(
+				`/issues/${created.id}`,
+				{ method: "DELETE" },
+				env,
+			);
+			expect(delRes.status).toBe(200);
+
+			const res = await app.request(`/issues/${created.id}`, {}, env);
+			expect(res.status).toBe(404);
+		});
+
+		it("returns 404 for non-existent id", async () => {
+			const res = await app.request(
+				"/issues/nonexistent",
+				{ method: "DELETE" },
+				env,
+			);
+			expect(res.status).toBe(404);
+			const body = await readBody(res);
+			expect(body.error).toBe("Issue not found");
+		});
+
+		it("returns 401 when unauthenticated", async () => {
+			const createRes = await createIssue();
+			const created = await readBody(createRes);
+
+			mockUserId = null;
+			const res = await app.request(
+				`/issues/${created.id}`,
+				{ method: "DELETE" },
+				env,
+			);
+			expect(res.status).toBe(401);
+			const body = await readBody(res);
+			expect(body.error).toBe("Unauthorized");
+		});
+
+		it("does not delete the issue when unauthenticated", async () => {
+			const createRes = await createIssue();
+			const created = await readBody(createRes);
+
+			mockUserId = null;
+			await app.request(`/issues/${created.id}`, { method: "DELETE" }, env);
+
+			const res = await app.request(`/issues/${created.id}`, {}, env);
+			expect(res.status).toBe(200);
+		});
+	});
 });
