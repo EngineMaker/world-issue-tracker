@@ -4,7 +4,7 @@ import {
 	ListIssuesQuerySchema,
 	UpdateIssueSchema,
 } from "@world-issue-tracker/shared";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import type { Bindings } from "../index";
 import { requireAuth } from "../middleware/auth";
 
@@ -106,9 +106,45 @@ issues.get("/:id", async (c) => {
 	return c.json(row);
 });
 
-// PATCH /issues/:id — Partial update (auth required)
+/**
+ * Issue の所有者を確認する。
+ * 存在しなければ 404、別ユーザーのものなら 403 のレスポンスを返す。
+ * 操作してよい場合のみ null を返す。
+ *
+ * 一覧が公開されている以上 Issue の存在は秘匿できないので、
+ * 404 で存在を隠すのではなく 403 を素直に返す方針にしている。
+ */
+async function checkOwnership(
+	c: Context<{ Bindings: Bindings }>,
+	id: string,
+): Promise<Response | null> {
+	const row = await c.env.DB.prepare("SELECT user_id FROM issues WHERE id = ?")
+		.bind(id)
+		.first<{ user_id: string | null }>();
+
+	if (!row) {
+		return c.json({ error: "Issue not found" }, 404);
+	}
+
+	const auth = getAuth(c);
+	if (!row.user_id || row.user_id !== auth?.userId) {
+		return c.json({ error: "Forbidden" }, 403);
+	}
+
+	return null;
+}
+
+// PATCH /issues/:id — Partial update (auth required, owner only)
 issues.patch("/:id", requireAuth, async (c) => {
 	const id = c.req.param("id");
+
+	// 認可を入力バリデーションより先に行う（他人の Issue に対して
+	// バリデーションエラーの詳細を返さないため）
+	const denied = await checkOwnership(c, id);
+	if (denied) {
+		return denied;
+	}
+
 	const body = await c.req.json();
 	const parsed = UpdateIssueSchema.safeParse(body);
 	if (!parsed.success) {
@@ -125,10 +161,13 @@ issues.patch("/:id", requireAuth, async (c) => {
 	}
 	setClauses.push("updated_at = datetime('now')");
 
+	const auth = getAuth(c);
+
+	// 所有者チェックとの間で行が変わる可能性に備え、UPDATE 自体にも所有者条件を入れる
 	const result = await c.env.DB.prepare(
-		`UPDATE issues SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
+		`UPDATE issues SET ${setClauses.join(", ")} WHERE id = ? AND user_id = ? RETURNING *`,
 	)
-		.bind(...binds, id)
+		.bind(...binds, id, auth?.userId)
 		.first();
 
 	if (!result) {
@@ -137,14 +176,22 @@ issues.patch("/:id", requireAuth, async (c) => {
 	return c.json(result);
 });
 
-// DELETE /issues/:id — Delete (auth required)
+// DELETE /issues/:id — Delete (auth required, owner only)
 issues.delete("/:id", requireAuth, async (c) => {
 	const id = c.req.param("id");
 
+	const denied = await checkOwnership(c, id);
+	if (denied) {
+		return denied;
+	}
+
+	const auth = getAuth(c);
+
+	// 所有者チェックとの間で行が変わる可能性に備え、DELETE 自体にも所有者条件を入れる
 	const result = await c.env.DB.prepare(
-		"DELETE FROM issues WHERE id = ? RETURNING *",
+		"DELETE FROM issues WHERE id = ? AND user_id = ? RETURNING *",
 	)
-		.bind(id)
+		.bind(id, auth?.userId)
 		.first();
 
 	if (!result) {
