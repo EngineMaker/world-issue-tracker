@@ -237,6 +237,139 @@ describe("Issues CRUD", () => {
 			const body2 = await readBody(res2);
 			expect(body2.data).toHaveLength(1);
 		});
+
+		// クエリ検証は入力チェックであると同時にリソース保護でもある。
+		// GET /issues は認証不要の公開エンドポイントなので、limit の上限が失われると
+		// 誰でも 1 リクエストで大量の行を読ませられる（D1 は読み取り行数で課金される）。
+		// scope / status の enum 検証も WHERE 句を組み立てる前提として効いている。
+		describe("query validation", () => {
+			it("rejects limit below the minimum", async () => {
+				const res = await app.request("/issues?limit=0", {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.limit).toBeDefined();
+			});
+
+			it("rejects limit above the maximum", async () => {
+				const res = await app.request("/issues?limit=101", {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.limit).toBeDefined();
+			});
+
+			it("rejects a non-numeric limit", async () => {
+				const res = await app.request("/issues?limit=abc", {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.limit).toBeDefined();
+			});
+
+			// 非数値は z.coerce.number() の NaN 判定で落ちるため、.int() の経路は
+			// 踏まれない。小数を別途置いて .int() を外す退行も検出できるようにする。
+			it("rejects a fractional limit", async () => {
+				const res = await app.request("/issues?limit=1.5", {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.limit).toBeDefined();
+			});
+
+			it("rejects a negative offset", async () => {
+				const res = await app.request("/issues?offset=-1", {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.offset).toBeDefined();
+			});
+
+			it("rejects a non-numeric offset", async () => {
+				const res = await app.request("/issues?offset=abc", {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.offset).toBeDefined();
+			});
+
+			it("rejects a fractional offset", async () => {
+				const res = await app.request("/issues?offset=1.5", {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.offset).toBeDefined();
+			});
+
+			it("rejects an unknown scope", async () => {
+				const res = await app.request("/issues?scope=bogus", {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.scope).toBeDefined();
+			});
+
+			it("rejects an unknown status", async () => {
+				const res = await app.request("/issues?status=bogus", {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.status).toBeDefined();
+			});
+
+			// 拒否だけを固定すると max(100) を max(99) に狭めるような退行を拾えないため、
+			// 境界の「通る側」も押さえておく。
+			it("accepts limit at the maximum", async () => {
+				const res = await app.request("/issues?limit=100", {}, env);
+				expect(res.status).toBe(200);
+				const body = await readBody(res);
+				expect(body.limit).toBe(100);
+			});
+
+			it("accepts limit at the minimum", async () => {
+				await createIssue({ ...validIssue, title: "Issue 1" });
+				await createIssue({ ...validIssue, title: "Issue 2" });
+
+				const res = await app.request("/issues?limit=1", {}, env);
+				expect(res.status).toBe(200);
+				const body = await readBody(res);
+				expect(body.limit).toBe(1);
+				expect(body.data).toHaveLength(1);
+				expect(body.total).toBe(2);
+			});
+
+			it("accepts offset at the minimum", async () => {
+				const res = await app.request("/issues?offset=0", {}, env);
+				expect(res.status).toBe(200);
+				const body = await readBody(res);
+				expect(body.offset).toBe(0);
+			});
+
+			// 400 を返すだけでなく、そもそも DB にクエリを投げていないこと。
+			//
+			// limit の上限は「レスポンスの形」ではなく D1 の読み取り行数を守るための
+			// 制限なので、400 を返していても手前で SELECT が走っていれば意味がない。
+			// レスポンスの検査だけでは「検証は落とすが SQL は投げる」退行を拾えないため、
+			// prepare の呼び出し回数そのものを見る。
+			it("does not query the database when validation fails", async () => {
+				await createIssue();
+
+				const prepareSpy = vi.spyOn(env.DB, "prepare");
+				try {
+					const res = await app.request("/issues?limit=999999", {}, env);
+					expect(res.status).toBe(400);
+					expect(prepareSpy).not.toHaveBeenCalled();
+				} finally {
+					prepareSpy.mockRestore();
+				}
+			});
+
+			// 不正な検索条件が「空の結果」として素通りしないこと。
+			// enum 検証を外すと、bogus は WHERE に入って 200 + 空配列になる。
+			it("does not query the database for an unknown scope", async () => {
+				await createIssue();
+
+				const prepareSpy = vi.spyOn(env.DB, "prepare");
+				try {
+					const res = await app.request("/issues?scope=bogus", {}, env);
+					expect(res.status).toBe(400);
+					expect(prepareSpy).not.toHaveBeenCalled();
+				} finally {
+					prepareSpy.mockRestore();
+				}
+			});
+		});
 	});
 
 	// --- GET /issues/:id ---
