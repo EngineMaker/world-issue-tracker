@@ -101,10 +101,72 @@ issues.post("/", requireAuth, async (c) => {
 	return c.json(result, 201);
 });
 
+/**
+ * クエリ文字列を検証用のオブジェクトに直す。
+ *
+ * `URLSearchParams` は同名キーを複数保持できるが、`Object.fromEntries` は
+ * 後の値で上書きするため、重複が黙って握り潰されていた。その結果
+ * `?limit=5&limit=abc` は 400、`?limit=abc&limit=5` は 200 という
+ * 並び順に依存した挙動になっていた。どちらの値を採用するかを暗黙に
+ * 決めるより、曖昧な入力として明示的に拒否する。
+ *
+ * 重複があれば、そのキー名を返す。無ければオブジェクトを返す。
+ *
+ * 蓄積先は `Object.create(null)` で作る。素の `{}` だと
+ * `Object.prototype` のプロパティ名（`toString` / `constructor` /
+ * `hasOwnProperty` など）が既存キーとして見えてしまい、1 回しか
+ * 指定していない `?toString=x` を重複と誤判定する。加えて
+ * `value["__proto__"] = ...` は通常のキーにならずプロトタイプの
+ * 差し替えになり、値が黙って消える。プロトタイプを持たなければ
+ * どちらも起きず、クエリのキーをそのまま素直に扱える。
+ */
+export function parseQueryParams(
+	searchParams: URLSearchParams,
+):
+	| { ok: true; value: Record<string, string> }
+	| { ok: false; duplicated: string[] } {
+	const value: Record<string, string> = Object.create(null);
+	const duplicated: string[] = [];
+
+	for (const [key, param] of searchParams) {
+		if (key in value) {
+			if (!duplicated.includes(key)) {
+				duplicated.push(key);
+			}
+			continue;
+		}
+		value[key] = param;
+	}
+
+	if (duplicated.length) {
+		return { ok: false, duplicated };
+	}
+	return { ok: true, value };
+}
+
 // GET /issues — List (public)
 issues.get("/", async (c) => {
-	const query = Object.fromEntries(new URL(c.req.url).searchParams);
-	const parsed = ListIssuesQuerySchema.safeParse(query);
+	const query = parseQueryParams(new URL(c.req.url).searchParams);
+	if (!query.ok) {
+		return c.json(
+			{
+				error: {
+					formErrors: [
+						`Duplicated query parameters: ${query.duplicated.join(", ")}`,
+					],
+					fieldErrors: Object.fromEntries(
+						query.duplicated.map((key) => [
+							key,
+							["must not be specified more than once"],
+						]),
+					),
+				},
+			},
+			400,
+		);
+	}
+
+	const parsed = ListIssuesQuerySchema.safeParse(query.value);
 	if (!parsed.success) {
 		return c.json({ error: parsed.error.flatten() }, 400);
 	}

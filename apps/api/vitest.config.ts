@@ -1,6 +1,24 @@
+import { fileURLToPath } from "node:url";
 import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
 
 export default defineWorkersConfig({
+	resolve: {
+		alias: {
+			// `@world-issue-tracker/shared` をリポジトリ内のソースへ直接向ける。
+			//
+			// package.json の `exports.import` は `dist/index.js` を指すため、
+			// 素の解決だと「ビルド済みの成果物」を読む。git worktree では
+			// `node_modules` がメインの作業ディレクトリへのシンボリックリンクなので、
+			// worktree 内で shared を直しても、テストはメイン側の dist を読んでしまい
+			// 変更が反映されない（check は通るのに test だけ落ちる）。
+			//
+			// ここでソースを直接指すことで、ビルドの有無とリンクの向き先に関係なく
+			// 「いま編集しているコード」がテストされる。
+			"@world-issue-tracker/shared": fileURLToPath(
+				new URL("../../packages/shared/src/index.ts", import.meta.url),
+			),
+		},
+	},
 	test: {
 		include: ["test/*.test.ts"],
 		// `@hono/clerk-auth` をインライン化する。
