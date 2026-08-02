@@ -2,7 +2,18 @@
 	"extends": "../../tsconfig.json",
 	"compilerOptions": {
 		"noEmit": true,
-		"types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"]
+		"types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"],
+		// `@world-issue-tracker/shared` をこのチェックアウト内のソースへ固定する。
+		// vitest 側の `test/helpers/shared-alias.ts`（`SHARED_SRC_ALIAS`）と同じ意図で、
+		// 型チェックの解決先も揃えるためのもの。片方だけ直すともう片方から再発する。
+		//
+		// これが無いと、git worktree では node_modules 経由の解決が worktree の外
+		// （メインのチェックアウトの `packages/shared`）に着地する。その結果
+		// worktree で `packages/shared` を編集しても `tsc --noEmit` は編集前のソースを
+		// 見続け、shared のエクスポートを消しても api 側の型エラーが出ない。
+		"paths": {
+			"@world-issue-tracker/shared": ["../../packages/shared/src/index.ts"]
+		}
 	},
 	"include": ["src", "test"]
 }

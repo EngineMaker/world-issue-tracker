@@ -11,7 +11,15 @@
 			}
 		],
 		"paths": {
-			"@/*": ["./src/*"]
+			"@/*": ["./src/*"],
+			// `@world-issue-tracker/shared` をこのチェックアウト内のソースへ固定する。
+			// vitest 側の `apps/api/test/helpers/shared-alias.ts`（`SHARED_SRC_ALIAS`）と
+			// 同じ意図で、型チェックの解決先も揃えるためのもの。
+			//
+			// これが無いと、git worktree では node_modules 経由の解決が worktree の外
+			// （メインのチェックアウトの `packages/shared`）に着地し、worktree で
+			// `packages/shared` を編集しても `tsc --noEmit` が編集前のソースを見続ける。
+			"@world-issue-tracker/shared": ["../../packages/shared/src/index.ts"]
 		},
 		"allowJs": true,
 		"incremental": true
