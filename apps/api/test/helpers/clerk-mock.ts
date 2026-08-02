@@ -25,6 +25,7 @@
  */
 
 import {
+	authenticatedMachineObject,
 	signedInAuthObject,
 	signedOutAuthObject,
 } from "@clerk/backend/internal";
@@ -49,15 +50,32 @@ type SessionClaims = Parameters<typeof signedInAuthObject>[2];
 export type AuthSource = "bearer" | "cookie" | "none";
 
 /**
+ * 現在のテストが「どの種類のトークンでリクエストするか」。
+ *
+ * 実物の `clerkMiddleware` は `acceptsToken: "any"` で認証するため、
+ * ブラウザのセッション以外（OAuth トークン / API キー / M2M トークン）でも
+ * auth オブジェクトが返る。種別ごとに `userId` の有無が違い、それが
+ * `requireAuth` の判定に直結するため、モックでも区別できるようにしている。
+ */
+export type MockTokenType = "session_token" | "oauth_token" | "api_key";
+
+/**
  * 現在のテストが「誰としてリクエストするか」。
  * `null` なら未認証。テストから `setMockUserId()` で切り替える。
  */
 let mockUserId: string | null = null;
 
+/** 認証済みのとき、どの種別のトークンとして扱うか。 */
+let mockTokenType: MockTokenType = "session_token";
+
 let lastAuthSource: AuthSource = "none";
 
-export function setMockUserId(userId: string | null): void {
+export function setMockUserId(
+	userId: string | null,
+	tokenType: MockTokenType = "session_token",
+): void {
 	mockUserId = userId;
+	mockTokenType = tokenType;
 	// 認証経路の記録も一緒に落とす。前のテストの値が残っていると、
 	// 「実は一度も呼ばれていない」ケースを取り違える。
 	lastAuthSource = "none";
@@ -108,6 +126,48 @@ function buildSessionClaims(userId: string): SessionClaims {
 }
 
 /**
+ * `authenticatedMachineObject` に渡す検証結果。
+ *
+ * 実物は `APIKey` / `IdPOAuthAccessToken` クラスのインスタンスを渡すが、
+ * `authenticatedMachineObject` が読むのはプロパティだけなので、
+ * ここでは同じ形のプレーンオブジェクトを組み立てる。
+ * `userId` を決めているのは実質 `subject` で、そこから先の組み立て
+ * （`user_` 始まりなら `userId` に入る等）は実物のロジックが動く。
+ */
+type MachineVerificationResult = Parameters<
+	typeof authenticatedMachineObject
+>[2];
+
+/**
+ * マシントークン（OAuth トークン / API キー）の auth オブジェクトを組み立てる。
+ *
+ * 実物の Clerk は `acceptsToken: "any"` の下でこれらをそのまま `getAuth(c)` の
+ * 戻り値として返す。`subject` がユーザー ID なら `userId` が埋まるため、
+ * `userId` の有無しか見ない認可はこれを素通しさせてしまう。
+ */
+function buildMachineAuthObject(
+	tokenType: Exclude<MockTokenType, "session_token">,
+	userId: string,
+) {
+	// 実物のクラスインスタンスの代わりに、読まれるプロパティだけを持つ値を渡す。
+	// 型の担保は実物の `authenticatedMachineObject` のシグネチャで行う。
+	const verificationResult = {
+		id: `${tokenType === "api_key" ? "ak" : "oat"}_mock`,
+		subject: userId,
+		scopes: ["profile"],
+		claims: null,
+		name: "mock machine token",
+		clientId: "client_mock",
+	} as unknown as MachineVerificationResult;
+
+	return authenticatedMachineObject(
+		tokenType,
+		"mock-machine-token",
+		verificationResult,
+	);
+}
+
+/**
  * `authenticateRequest` の戻り値のうち、`clerkMiddleware` が実際に見る部分。
  *
  * `toAuth()` の戻り値まで厳密に書くと `@clerk/types` への参照が
@@ -147,14 +207,19 @@ export async function clerkBackendMockFactory(): Promise<
 					status: mockUserId ? "signed-in" : "signed-out",
 					// handshake ではないので追加ヘッダは無い（実物もこの場合 undefined を返す）
 					headers: undefined,
-					toAuth: () =>
-						mockUserId
-							? signedInAuthObject(
-									{},
-									"mock-session-token",
-									buildSessionClaims(mockUserId),
-								)
-							: signedOutAuthObject(),
+					toAuth: () => {
+						if (!mockUserId) {
+							return signedOutAuthObject();
+						}
+						if (mockTokenType === "session_token") {
+							return signedInAuthObject(
+								{},
+								"mock-session-token",
+								buildSessionClaims(mockUserId),
+							);
+						}
+						return buildMachineAuthObject(mockTokenType, mockUserId);
+					},
 				};
 			},
 		}),
