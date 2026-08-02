@@ -18,6 +18,7 @@ import {
 	toPublicIssue as toPublicIssueForTest,
 } from "../src/routes/issues";
 import { setMockUserId } from "./helpers/clerk-mock";
+import { applyMigrations } from "./helpers/migrate";
 
 const app = createApp();
 
@@ -26,9 +27,6 @@ const app = createApp();
  * Origin 検証そのもののテストは `csrf.test.ts` にある。
  */
 const ALLOWED_ORIGIN = "http://localhost:3000";
-
-const MIGRATION =
-	"CREATE TABLE IF NOT EXISTS issues (id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), title TEXT NOT NULL, description TEXT NOT NULL, scope TEXT NOT NULL CHECK (scope IN ('personal', 'community', 'municipality', 'national', 'global')), status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'triaged', 'in_progress', 'review', 'resolved', 'closed')), latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT, user_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));";
 
 type IssueInput = {
 	title: string;
@@ -149,7 +147,7 @@ async function createIssue(data: IssueInput = validIssue) {
 
 describe("Issues CRUD", () => {
 	beforeAll(async () => {
-		await env.DB.exec(MIGRATION);
+		await applyMigrations();
 	});
 
 	beforeEach(async () => {

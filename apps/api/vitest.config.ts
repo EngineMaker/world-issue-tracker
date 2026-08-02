@@ -1,5 +1,18 @@
-import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
+import path from "node:path";
+import {
+	defineWorkersConfig,
+	readD1Migrations,
+} from "@cloudflare/vitest-pool-workers/config";
 import { SHARED_SRC_ALIAS } from "./test/helpers/shared-alias";
+
+// 実マイグレーション（`migrations/*.sql`）をここで読み、
+// `TEST_MIGRATIONS` バインディング経由でテストへ渡す。
+//
+// テストは Workers ランタイム内で動くためファイルシステムに触れない。
+// 設定側（Node.js）で読み込むのが唯一の経路になる。
+const migrations = await readD1Migrations(
+	path.join(import.meta.dirname, "migrations"),
+);
 
 export default defineWorkersConfig({
 	// `@world-issue-tracker/shared` をこのチェックアウト内のソースへ固定する。理由は helpers/shared-alias.ts
@@ -39,6 +52,8 @@ export default defineWorkersConfig({
 					bindings: {
 						CLERK_SECRET_KEY: "sk_test_dummy",
 						CLERK_PUBLISHABLE_KEY: "pk_test_bW9jay5jbGVyay5hY2NvdW50cy5kZXYk",
+						// 実マイグレーションの中身。テスト側で `applyD1Migrations` に渡す。
+						TEST_MIGRATIONS: migrations,
 					},
 				},
 			},

@@ -9,11 +9,9 @@ vi.mock("@clerk/backend", async () => {
 
 import { ALLOWED_ORIGINS, createApp } from "../src/index";
 import { getLastAuthSource, setMockUserId } from "./helpers/clerk-mock";
+import { applyMigrations } from "./helpers/migrate";
 
 const app = createApp();
-
-const MIGRATION =
-	"CREATE TABLE IF NOT EXISTS issues (id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), title TEXT NOT NULL, description TEXT NOT NULL, scope TEXT NOT NULL CHECK (scope IN ('personal', 'community', 'municipality', 'national', 'global')), status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'triaged', 'in_progress', 'review', 'resolved', 'closed')), latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT, user_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));";
 
 const validIssue = {
 	title: "Broken streetlight",
@@ -56,7 +54,7 @@ async function countIssues(): Promise<number> {
  */
 describe("CSRF protection", () => {
 	beforeAll(async () => {
-		await env.DB.exec(MIGRATION);
+		await applyMigrations();
 	});
 
 	beforeEach(async () => {
