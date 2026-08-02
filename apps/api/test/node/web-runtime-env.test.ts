@@ -1,17 +1,17 @@
 /**
- * Web の Worker が「実行時に」読む環境変数の検査。
+ * Web の Worker のデプロイ設定（`apps/web/wrangler.jsonc`）の検査。
  *
- * `NEXT_PUBLIC_*` はビルド時にバンドルへ埋め込まれるが、埋め込まれるのは
- * Client Component だけ。Server Component の `process.env.NEXT_PUBLIC_*` は
- * 実行時に評価されるため、Workers 上に値が無ければ undefined になる。
+ * ユニットテストでも型チェックでもビルドでも素通りし、デプロイして初めて
+ * 壊れる種類の設定を、記述そのものを読んで固定する。
  *
- * `@opennextjs/cloudflare` は Worker の `env`（= wrangler.jsonc の `vars` と
- * シークレット）を `process.env` へコピーしてからハンドラを呼ぶ。したがって
- * Server Component に値を届ける唯一の経路が `vars` になる。
+ * ここで検査できるのは「設定がそう書かれているか」までで、
+ * 「実行時に本当に繋がるか」は担保しない。#55 でその限界が実際に出た
+ * （`vars` は正しく書かれていたが、Server Component へは届かない経路だった）。
+ * 経路が繋がっていることの確認は、デプロイ後に本番 URL を叩くしかない。
  *
- * deploy.yml の受け渡し（setup-docs.test.ts が検査している）はビルド時の話で、
- * 実行時の有無は担保しない。ユニットテストでも型チェックでもビルドでも
- * 素通りする種類の事故なので、設定ファイルの記述そのものを検査する。
+ * `NEXT_PUBLIC_*` の値については、Next.js が **ビルド時に静的置換する**ため
+ * Server Component にも `vars` は届かない。値を届ける経路はビルド時の
+ * `.github/workflows/deploy.yml` 一本（詳細は wrangler.jsonc のコメント）。
  */
 
 import { readFileSync } from "node:fs";
@@ -33,14 +33,36 @@ const parseEnvKeys = (content: string) =>
 		.filter((line) => line !== "" && !line.startsWith("#"))
 		.map((line) => line.split("=")[0] ?? "");
 
-function readWebWranglerVars(): Record<string, unknown> {
+function readWebWranglerConfig(): Record<string, unknown> {
 	const config = parseJsonc(readRepoFile("apps/web/wrangler.jsonc"));
 	if (typeof config !== "object" || config === null) {
 		throw new Error("apps/web/wrangler.jsonc がオブジェクトではない");
 	}
-	const vars = (config as { vars?: unknown }).vars;
+	return config as Record<string, unknown>;
+}
+
+function readWebWranglerVars(): Record<string, unknown> {
+	const vars = readWebWranglerConfig().vars;
 	if (typeof vars !== "object" || vars === null) return {};
 	return vars as Record<string, unknown>;
+}
+
+function readWebCompatibilityFlags(): string[] {
+	const flags = readWebWranglerConfig().compatibility_flags;
+	if (!Array.isArray(flags)) return [];
+	return flags.filter((flag): flag is string => typeof flag === "string");
+}
+
+/**
+ * deploy.yml がビルド時に渡す API の URL。
+ *
+ * Server Component にも Client Component にも、実際に焼き込まれるのはこちらの値
+ * （`vars` は届かない）。URL そのものを検査するときはこちらを見る。
+ */
+function readBuildTimeApiUrl(): string | undefined {
+	return readRepoFile(".github/workflows/deploy.yml").match(
+		/^\s+NEXT_PUBLIC_API_URL:\s*(\S+)$/m,
+	)?.[1];
 }
 
 describe("JSONC のパース", () => {
@@ -70,10 +92,48 @@ describe("JSONC のパース", () => {
 	});
 });
 
-describe("web の Worker が実行時に読む環境変数", () => {
+/**
+ * Web の Worker から API の Worker へ `fetch` が届くための設定。
+ *
+ * 既定の Workers ランタイムは、同一アカウント内の `*.workers.dev` 宛て
+ * subrequest を相手の Worker を起動する前に 404 で返す。Server Component は
+ * `fetch` で API を呼ぶため、この状態だと外部からの curl は 200 なのに
+ * 本番の一覧だけ「API が 404 を返しました」になる（#55）。
+ *
+ * 設定ファイルの検査なので「実際に繋がること」は担保できない。ここで守るのは
+ * 「一度直した設定が黙って外れないこと」だけ。実際に繋がるかはデプロイ後に
+ * 本番 URL を叩いて確認する。
+ */
+describe("web の Worker から API の Worker への fetch", () => {
+	it("compatibility_flags に global_fetch_strictly_public がある", () => {
+		expect(
+			readWebCompatibilityFlags(),
+			"これが無いと Worker 間の fetch が相手を起動せず 404 になる（#55）",
+		).toContain("global_fetch_strictly_public");
+	});
+
+	it("既存の nodejs_compat を落としていない", () => {
+		// フラグは配列ごと差し替える形なので、追記のつもりで上書きすると
+		// OpenNext が要求する nodejs_compat が消える。消えるとデプロイは
+		// 通るのにワーカーが起動時に落ちる
+		expect(readWebCompatibilityFlags()).toContain("nodejs_compat");
+	});
+
+	it("Server Component が呼ぶ API がフラグの対象になる別 Worker である", () => {
+		// 同一アカウントの workers.dev 宛てだからこの制約を受ける。
+		// 将来カスタムドメインへ移すなど前提が変わったら、このテストが落ちて
+		// フラグの要否を見直す機会になる。
+		//
+		// 実際に焼き込まれるのは deploy.yml の値なので、`vars` ではなく
+		// そちらを見る
+		expect(readBuildTimeApiUrl()).toMatch(
+			/^https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev$/,
+		);
+	});
+});
+
+describe("web の Worker に vars として渡す環境変数", () => {
 	it("wrangler.jsonc の vars に NEXT_PUBLIC_API_URL がある", () => {
-		// これが無いと Server Component が resolveApiBaseUrl() の既定値
-		// （http://localhost:8787）へ fetch し、一覧が丸ごと取得できなくなる
 		expect(
 			readWebWranglerVars(),
 			"apps/web/wrangler.jsonc の vars に NEXT_PUBLIC_API_URL が無い",
@@ -86,14 +146,11 @@ describe("web の Worker が実行時に読む環境変数", () => {
 		);
 	});
 
-	it("deploy.yml とビルド時・実行時で同じ URL を渡している", () => {
-		// 片方だけ書き換えると、Client Component と Server Component が
-		// 別の API を見に行く。壊れ方が「投稿はできるが閲覧できない」に
-		// なって分かりにくいため、二つの値の一致をここで固定する
-		const deployWorkflow = readRepoFile(".github/workflows/deploy.yml");
-		const buildTimeUrl = deployWorkflow.match(
-			/^\s+NEXT_PUBLIC_API_URL:\s*(\S+)$/m,
-		)?.[1];
+	it("deploy.yml と同じ URL を渡している", () => {
+		// 実際に使われるのは deploy.yml 側（ビルド時の埋め込み）だが、
+		// 二つの値がズレていると設定を読んだ人が実態を取り違える。
+		// 片方だけ書き換えられないよう一致を固定しておく
+		const buildTimeUrl = readBuildTimeApiUrl();
 
 		expect(buildTimeUrl).toBeDefined();
 		expect(readWebWranglerVars().NEXT_PUBLIC_API_URL).toBe(buildTimeUrl);
@@ -101,10 +158,10 @@ describe("web の Worker が実行時に読む環境変数", () => {
 
 	it("web が使う NEXT_PUBLIC_* がすべて vars に揃っている", () => {
 		// サンプルに載っているキーは web が使うキー。新しい NEXT_PUBLIC_* を
-		// 足したとき、実行時への渡し忘れをここで捕まえる。
+		// 足したとき、こちらへの書き忘れをここで捕まえる。
 		//
-		// Clerk の publishable key は Server Component から読まれないため
-		// 除外する（秘密ではないが、使われない値を置いても意味が無い）。
+		// Clerk の publishable key は除外する。`@clerk/nextjs` がビルド時の
+		// 埋め込みで受け取るため、ここに置いても使われない。
 		const runtimeVars = readWebWranglerVars();
 		const publicKeys = parseEnvKeys(
 			readRepoFile("apps/web/.env.local.example"),

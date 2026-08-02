@@ -2,23 +2,49 @@
 	"name": "world-issue-tracker-web",
 	"main": ".open-next/worker.js",
 	"compatibility_date": "2025-04-01",
-	"compatibility_flags": ["nodejs_compat"],
+	// `global_fetch_strictly_public` を入れている理由。
+	//
+	// Server Component が API Worker（別 Worker）を `fetch` で呼んでいるが、
+	// 既定の Workers ランタイムは同一アカウント内の `*.workers.dev` 宛て
+	// subrequest を、相手の Worker を起動する前に 404 で返す。外部からの
+	// curl は 200 なのに本番の一覧だけ「API が 404 を返しました」になるのは
+	// これが理由（#55）。`wrangler tail` を API 側に張ると、web 経由の
+	// アクセスではリクエストが 1 件も記録されないことで確認できる。
+	//
+	// このフラグを付けると `fetch` が公開インターネット経由と同じ経路を通り、
+	// 相手の Worker に届くようになる。設定するのは呼び出す側（= web）だけでよい。
+	// このフラグに既定で有効になる日付は無いので、明示しないと入らない。
+	// https://developers.cloudflare.com/workers/runtime-apis/fetch/
+	//
+	// なお `@opennextjs/cloudflare` が配っている wrangler.jsonc のひな形
+	// （node_modules/@opennextjs/cloudflare/templates/wrangler.jsonc）も
+	// この二つのフラグを既定にしている。独自の回避策ではなく本来の推奨構成で、
+	// 初期セットアップのときに取りこぼしていた。
+	//
+	// Service Binding でも解決できるが、そちらだと Server Component だけが
+	// バインディング経由・Client Component は HTTP という二経路になる。
+	// URL も CORS/Origin 検証の扱いも分岐するため、経路を一本に保てる
+	// このフラグを選んだ。
+	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 	"assets": {
 		"directory": ".open-next/assets",
 		"binding": "ASSETS"
 	},
-	// Server Component が「実行時に」読む値。
+	// Worker の env として渡す値。秘密ではないので secret ではなく vars で持つ。
 	//
-	// `NEXT_PUBLIC_*` はビルド時にバンドルへ埋め込まれるが、埋め込まれるのは
-	// Client Component だけ。Server Component（app/page.tsx、app/issues/page.tsx）の
-	// `process.env.NEXT_PUBLIC_API_URL` は Worker 上で評価されるため、ここに
-	// 無いと `resolveApiBaseUrl()` が既定値の http://localhost:8787 へ
-	// フォールバックし、Issue 一覧が取得できなくなる。
+	// 注意: この値は Server Component には届かない。`NEXT_PUBLIC_*` は
+	// Next.js が **ビルド時に静的置換する**ためで、Client Component だけでなく
+	// Server Component のバンドルでも `process.env.NEXT_PUBLIC_API_URL` は
+	// 文字列リテラルへ置き換わり、参照そのものが生成物から消える。実行時に
+	// `env` を渡しても読む側が居ない（#47 はここを取り違えて `vars` を足したが、
+	// 一覧が 404 のままだったのは真因が別だったため — #55 参照）。
 	//
-	// `@opennextjs/cloudflare` が Worker の env を `process.env` へコピーしてから
-	// ハンドラを呼ぶため、この `vars` が Server Component へ値を届ける経路になる。
-	// 秘密ではないので secret ではなく vars で持つ。
-	// ビルド時に渡す値（.github/workflows/deploy.yml）と一致させること。
+	// Server Component へ値を届ける経路はビルド時の一本だけで、
+	// `.github/workflows/deploy.yml` が担っている。
+	//
+	// それでもここに残しているのは、`wrangler dev` / `opennextjs-cloudflare preview`
+	// でバインドを確認できることと、将来 `getCloudflareContext()` 経由で
+	// 実行時に読む形へ移す余地を残すため。deploy.yml の値と一致させること。
 	"vars": {
 		"NEXT_PUBLIC_API_URL": "https://world-issue-tracker-api.mktoho.workers.dev"
 	}

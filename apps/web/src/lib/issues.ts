@@ -109,20 +109,26 @@ export function parseListIssuesResponse(
  * 「本番 API に繋がって一見動く」よりも「繋がらず失敗が見える」方が設定漏れに
  * 気付けるため。
  *
- * 本番で値を渡す経路は二つあり、両方に書く必要がある:
- * - ビルド時（Client Component に埋め込む）: `.github/workflows/deploy.yml`
- * - 実行時（Server Component が評価する）: `apps/web/wrangler.jsonc` の `vars`
+ * 本番で値を渡す経路は `.github/workflows/deploy.yml` のビルド時の一本だけ。
+ * `apps/web/wrangler.jsonc` の `vars` にも同じ値があるが、そちらは届かない
+ * （理由は `resolveApiBaseUrl` のコメント）。
  */
 const DEFAULT_API_BASE_URL = "http://localhost:8787";
 
 /**
  * API のベース URL を解決する。末尾のスラッシュは取り除く。
  *
- * `process.env.NEXT_PUBLIC_API_URL` は Next.js がビルド時に静的置換するため、
- * `process.env[key]` のような動的アクセスにしてはいけない（置換されず undefined になる）。
+ * `process.env.NEXT_PUBLIC_API_URL` は Next.js が **ビルド時に静的置換する**。
+ * Client Component だけでなく Server Component のバンドルでも置換され、
+ * 生成物からは `process.env` の参照そのものが消える。したがって実行時に
+ * Worker の `env` を渡しても読む側が居ない（`wrangler.jsonc` の `vars` が
+ * Server Component に届かないのはこのため）。
  *
- * ただし静的置換されるのは Client Component のバンドルだけで、Server Component
- * からの呼び出しでは実行時に評価される。詳細は DEFAULT_API_BASE_URL のコメント。
+ * 置換の対象になるのは静的に書かれた参照だけなので、`process.env[key]` の
+ * ような動的アクセスにしてはいけない（置換されず undefined になる）。
+ *
+ * 実行時に読む形へ変えたい場合は `@opennextjs/cloudflare` の
+ * `getCloudflareContext().env` を使う。今は必要が無いのでビルド時の一本に絞っている。
  */
 export function resolveApiBaseUrl(): string {
 	const configured = process.env.NEXT_PUBLIC_API_URL;
