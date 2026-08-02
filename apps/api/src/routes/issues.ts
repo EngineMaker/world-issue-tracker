@@ -1,7 +1,9 @@
 import { getAuth } from "@hono/clerk-auth";
 import {
+	buildIssueCursor,
 	CreateIssueSchema,
 	ListIssuesQuerySchema,
+	parseIssueCursor,
 	UpdateIssueSchema,
 } from "@world-issue-tracker/shared";
 import { type Context, Hono } from "hono";
@@ -32,6 +34,12 @@ export const PUBLIC_ISSUE_COLUMNS = [
 type PublicIssue = Record<(typeof PUBLIC_ISSUE_COLUMNS)[number], unknown>;
 
 /**
+ * 一覧の SELECT が返す行のうち、カーソル組み立てに使う分だけを型付けしたもの。
+ * 残りのカラムは `toPublicIssue` が拾うため、ここでは列挙しない。
+ */
+type CursorRow = Record<string, unknown> & { created_at: string; id: string };
+
+/**
  * 公開 GET が返すカラムだけを並べた SELECT 句。
  * `SELECT *` にすると、カラムを追加した瞬間にそれが公開されてしまう。
  */
@@ -58,7 +66,10 @@ export function toPublicIssue(row: Record<string, unknown>): PublicIssue {
  * アプリ経由の書き込みではミリ秒精度で明示的に入れる。
  *
  * 書式は `YYYY-MM-DD HH:MM:SS.SSS` で、秒精度の `YYYY-MM-DD HH:MM:SS` と
- * 先頭が共通するため、DEFAULT で入った既存行との辞書順比較も時系列順と一致する。
+ * 先頭が共通するため、DEFAULT で入った既存行との辞書順比較も概ね時系列順に並ぶ。
+ * ただし同一秒内では `'...:00' < '...:00.000'` となり、DEFAULT で入った行が
+ * 同じ瞬間のミリ秒精度の行より古い側に来る。順序は全順序として確定するので
+ * カーソルページングの前提は崩れないが、同一秒内の並びは厳密な時系列ではない。
  */
 const NOW_SQL = "strftime('%Y-%m-%d %H:%M:%f', 'now')";
 
@@ -109,7 +120,7 @@ issues.get("/", async (c) => {
 		return c.json({ error: parsed.error.flatten() }, 400);
 	}
 
-	const { scope, status, limit, offset } = parsed.data;
+	const { scope, status, limit, offset, cursor } = parsed.data;
 
 	const conditions: string[] = [];
 	const binds: unknown[] = [];
@@ -123,25 +134,52 @@ issues.get("/", async (c) => {
 		binds.push(status);
 	}
 
+	// フィルタ条件だけを使う COUNT と、カーソル条件も含む SELECT で
+	// WHERE 句が変わるため、COUNT 用を先に固定しておく。
+	const countWhere = conditions.length
+		? `WHERE ${conditions.join(" AND ")}`
+		: "";
+	const countBinds = [...binds];
+
+	// カーソルは「最後に見た行」そのものを指す。並び順が
+	// (created_at DESC, id DESC) なので、その行より厳密に後ろにある行だけを取る。
+	// created_at が同値のときに id で決着が付くため、同一秒に固まった行でも
+	// 全順序が定まり、境界をまたぐ取りこぼしが起きない。
+	if (cursor) {
+		const { createdAt, id } = parseIssueCursor(cursor);
+		conditions.push("(created_at < ? OR (created_at = ? AND id < ?))");
+		binds.push(createdAt, createdAt, id);
+	}
+
 	const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
 	const countRow = await c.env.DB.prepare(
-		`SELECT COUNT(*) as total FROM issues ${where}`,
+		`SELECT COUNT(*) as total FROM issues ${countWhere}`,
 	)
-		.bind(...binds)
+		.bind(...countBinds)
 		.first<{ total: number }>();
 
+	// 次ページの有無を判定するために 1 件多く読む。余った行はレスポンスに載せない。
+	//
+	// cursor と offset の併用はクエリ検証で弾いているため、cursor があるときの
+	// offset は必ず既定値の 0 で、そのまま OFFSET に渡してよい。
 	const rows = await c.env.DB.prepare(
-		`SELECT ${PUBLIC_SELECT} FROM issues ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+		`SELECT ${PUBLIC_SELECT} FROM issues ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
 	)
-		.bind(...binds, limit, offset)
-		.all();
+		.bind(...binds, limit + 1, offset)
+		.all<CursorRow>();
+
+	const hasMore = rows.results.length > limit;
+	const page = hasMore ? rows.results.slice(0, limit) : rows.results;
+	const lastRow = page.at(-1);
 
 	return c.json({
-		data: rows.results.map(toPublicIssue),
+		data: page.map(toPublicIssue),
 		total: countRow?.total ?? 0,
 		limit,
 		offset,
+		// 次ページが無いときは null。クライアントは null を見て打ち切れる。
+		next_cursor: hasMore && lastRow ? buildIssueCursor(lastRow) : null,
 	});
 });
 

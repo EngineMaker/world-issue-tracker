@@ -30,6 +30,15 @@ const ALLOWED_ORIGIN = "http://localhost:3000";
 const MIGRATION =
 	"CREATE TABLE IF NOT EXISTS issues (id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), title TEXT NOT NULL, description TEXT NOT NULL, scope TEXT NOT NULL CHECK (scope IN ('personal', 'community', 'municipality', 'national', 'global')), status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'triaged', 'in_progress', 'review', 'resolved', 'closed')), latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT, user_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));";
 
+/**
+ * 一覧の並び順を支えるインデックス（migrations/0003）。
+ *
+ * ページングのテストで `EXPLAIN QUERY PLAN` を見るため、本番と同じ
+ * インデックスをテスト DB にも作っておく。定義がずれるとプランも変わる。
+ */
+const INDEX_MIGRATION =
+	"CREATE INDEX IF NOT EXISTS idx_issues_created_at ON issues(created_at DESC, id DESC);";
+
 type IssueInput = {
 	title: string;
 	description: string;
@@ -114,6 +123,7 @@ async function createIssue(data: IssueInput = validIssue) {
 describe("Issues CRUD", () => {
 	beforeAll(async () => {
 		await env.DB.exec(MIGRATION);
+		await env.DB.exec(INDEX_MIGRATION);
 	});
 
 	beforeEach(async () => {
@@ -308,6 +318,329 @@ describe("Issues CRUD", () => {
 			const res2 = await app.request("/issues?limit=2&offset=2", {}, env);
 			const body2 = await readBody(res2);
 			expect(body2.data).toHaveLength(1);
+		});
+
+		// --- カーソルページング（ページ跨ぎの挿入に強い） ---
+		//
+		// offset ページングは「先頭から数えて N 件目」で位置を決めるため、
+		// ページを跨いで閲覧している間に新しい Issue が先頭に入ると全体が
+		// 1 つずつ後ろにずれ、まだ見ていない行が飛ばされて同じ行が二重に出る。
+		// Issue Tracker は新規投稿が絶えず先頭に入るデータなので、この欠陥は
+		// 「投稿されたのに誰にも表示されない Issue」として直接現れる。
+		//
+		// カーソル（最後に見た行の created_at + id）で位置を決めれば、
+		// 前に何件挿入されても「その行より古いもの」の集合は変わらないので
+		// 欠落・重複が原理的に起きない。
+		describe("cursor pagination", () => {
+			/**
+			 * created_at を明示的にずらした Issue を直接 INSERT する。
+			 *
+			 * API 経由の POST だと同一ミリ秒に固まりうるため、順序が主題の
+			 * テストでは DB に直接入れて時刻を確定させる。
+			 */
+			async function seedIssue(title: string, createdAt: string) {
+				const row = await env.DB.prepare(
+					`INSERT INTO issues (title, description, scope, latitude, longitude, created_at, updated_at)
+				   VALUES (?, ?, 'community', 35.68, 139.76, ?, ?)
+				   RETURNING id`,
+				)
+					.bind(title, `desc of ${title}`, createdAt, createdAt)
+					.first<{ id: string }>();
+				if (!row) {
+					throw new Error(`failed to seed ${title}`);
+				}
+				return row.id;
+			}
+
+			const titlesOf = (body: IssueBody): string[] =>
+				body.data.map((row: IssueBody) => row.title);
+
+			it("returns a next_cursor when more rows remain", async () => {
+				await seedIssue("t-0", "2026-01-01 00:00:00.000");
+				await seedIssue("t-1", "2026-01-01 00:00:01.000");
+				await seedIssue("t-2", "2026-01-01 00:00:02.000");
+
+				const res = await app.request("/issues?limit=2", {}, env);
+				expect(res.status).toBe(200);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["t-2", "t-1"]);
+				expect(typeof body.next_cursor).toBe("string");
+			});
+
+			it("returns a null next_cursor on the last page", async () => {
+				await seedIssue("t-0", "2026-01-01 00:00:00.000");
+				await seedIssue("t-1", "2026-01-01 00:00:01.000");
+
+				const res = await app.request("/issues?limit=2", {}, env);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["t-1", "t-0"]);
+				expect(body.next_cursor).toBeNull();
+			});
+
+			it("continues from the cursor", async () => {
+				for (let i = 0; i < 6; i++) {
+					await seedIssue(`t-${i}`, `2026-01-01 00:00:0${i}.000`);
+				}
+
+				const page1 = await readBody(
+					await app.request("/issues?limit=3", {}, env),
+				);
+				expect(titlesOf(page1)).toEqual(["t-5", "t-4", "t-3"]);
+
+				const page2 = await readBody(
+					await app.request(
+						`/issues?limit=3&cursor=${encodeURIComponent(page1.next_cursor)}`,
+						{},
+						env,
+					),
+				);
+				expect(titlesOf(page2)).toEqual(["t-2", "t-1", "t-0"]);
+				expect(page2.next_cursor).toBeNull();
+			});
+
+			// Issue #16 の本題。ページ 1 とページ 2 の間に新規投稿が入っても、
+			// 既存の行が飛ばされたり二重に出たりしないこと。
+			it("does not skip or duplicate rows when a new issue is inserted mid-pagination", async () => {
+				for (let i = 0; i < 6; i++) {
+					await seedIssue(`t-${i}`, `2026-01-01 00:00:0${i}.000`);
+				}
+
+				const seen: string[] = [];
+				const page1 = await readBody(
+					await app.request("/issues?limit=3", {}, env),
+				);
+				seen.push(...titlesOf(page1));
+
+				// ページを跨いでいる最中に誰かが新しい Issue を投稿する
+				await seedIssue("t-NEW", "2026-01-01 00:00:09.000");
+
+				let cursor: string | null = page1.next_cursor;
+				while (cursor) {
+					const next: IssueBody = await readBody(
+						await app.request(
+							`/issues?limit=3&cursor=${encodeURIComponent(cursor)}`,
+							{},
+							env,
+						),
+					);
+					seen.push(...titlesOf(next));
+					cursor = next.next_cursor;
+				}
+
+				// 最初のページより古い行は、1 件残らず 1 回ずつ見えている
+				expect(seen).toEqual(["t-5", "t-4", "t-3", "t-2", "t-1", "t-0"]);
+				expect(new Set(seen).size).toBe(seen.length);
+			});
+
+			// created_at が同一秒に固まっても順序が確定すること。
+			// ORDER BY のタイブレークが無いと、同値行の並びが実装依存になり
+			// カーソル比較の前提（全順序）が崩れる。
+			it("paginates rows sharing the same created_at without loss", async () => {
+				const sameTime = "2026-01-01 00:00:00.000";
+				for (let i = 0; i < 10; i++) {
+					await seedIssue(`s-${i}`, sameTime);
+				}
+
+				const seen: string[] = [];
+				let cursor: string | null = null;
+				for (let page = 0; page < 10; page++) {
+					const url: string = cursor
+						? `/issues?limit=3&cursor=${encodeURIComponent(cursor)}`
+						: "/issues?limit=3";
+					const body: IssueBody = await readBody(
+						await app.request(url, {}, env),
+					);
+					seen.push(...titlesOf(body));
+					cursor = body.next_cursor;
+					if (!cursor) {
+						break;
+					}
+				}
+
+				expect(cursor).toBeNull();
+				expect(seen).toHaveLength(10);
+				expect(new Set(seen).size).toBe(10);
+			});
+
+			it("keeps filters applied across cursor pages", async () => {
+				await seedIssue("t-0", "2026-01-01 00:00:00.000");
+				await seedIssue("t-1", "2026-01-01 00:00:01.000");
+				await env.DB.prepare(
+					`INSERT INTO issues (title, description, scope, latitude, longitude, created_at, updated_at)
+				   VALUES ('n-0', 'desc', 'national', 35.68, 139.76, '2026-01-01 00:00:02.000', '2026-01-01 00:00:02.000')`,
+				).run();
+
+				const page1 = await readBody(
+					await app.request("/issues?scope=community&limit=1", {}, env),
+				);
+				expect(titlesOf(page1)).toEqual(["t-1"]);
+				expect(page1.total).toBe(2);
+
+				const page2 = await readBody(
+					await app.request(
+						`/issues?scope=community&limit=1&cursor=${encodeURIComponent(page1.next_cursor)}`,
+						{},
+						env,
+					),
+				);
+				expect(titlesOf(page2)).toEqual(["t-0"]);
+				expect(page2.total).toBe(2);
+			});
+
+			it("rejects a malformed cursor", async () => {
+				const res = await app.request("/issues?cursor=not-a-cursor", {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.cursor).toBeDefined();
+			});
+
+			// カーソルの長さの上限もリソース保護。GET /issues は認証不要なので、
+			// 任意長の文字列を WHERE 句のバインド値として投げ込ませない。
+			// 200 + 空ページで受け流すと、上限が無いことに気付けない。
+			it("rejects an excessively long cursor", async () => {
+				const cursor = `2026-01-01 00:00:00.000|${"a".repeat(1000)}`;
+				const res = await app.request(
+					`/issues?cursor=${encodeURIComponent(cursor)}`,
+					{},
+					env,
+				);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.cursor).toBeDefined();
+			});
+
+			// 不正なカーソルが「空の結果」として素通りしないこと。
+			it("does not query the database for a malformed cursor", async () => {
+				await seedIssue("t-0", "2026-01-01 00:00:00.000");
+
+				const prepareSpy = vi.spyOn(env.DB, "prepare");
+				try {
+					const res = await app.request("/issues?cursor=%20", {}, env);
+					expect(res.status).toBe(400);
+					expect(prepareSpy).not.toHaveBeenCalled();
+				} finally {
+					prepareSpy.mockRestore();
+				}
+			});
+
+			// カーソルは「WHERE 句にそのまま入る値」なので、SQL 断片を仕込まれても
+			// バインド値として扱われる（= 構文エラーにも条件の改竄にもならない）こと。
+			it("treats a cursor containing SQL syntax as a literal value", async () => {
+				await seedIssue("t-0", "2026-01-01 00:00:00.000");
+
+				const res = await app.request(
+					`/issues?cursor=${encodeURIComponent("2026-01-01 00:00:05.000|' OR '1'='1")}`,
+					{},
+					env,
+				);
+				expect(res.status).toBe(200);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["t-0"]);
+			});
+
+			// cursor と offset は位置の決め方が違うため併用できない。
+			//
+			// 片方を黙って無視すると、offset ページングから移行途中のクライアント
+			// （新しい cursor を送りつつ古い offset も送り続ける）が、正しい行の
+			// 代わりに空ページを受け取り、残り全件を失ったまま打ち切ってしまう。
+			// 200 + 空配列では区別が付かないので 400 で弾く。
+			it("rejects cursor combined with a non-zero offset", async () => {
+				await seedIssue("t-0", "2026-01-01 00:00:00.000");
+				await seedIssue("t-1", "2026-01-01 00:00:01.000");
+
+				const cursor = "2026-01-01 00:00:01.000|whatever";
+				const res = await app.request(
+					`/issues?limit=1&offset=1&cursor=${encodeURIComponent(cursor)}`,
+					{},
+					env,
+				);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.cursor).toBeDefined();
+			});
+
+			// 併用の検証も「400 は返すが SQL は投げる」退行を拾えるようにしておく。
+			it("does not query the database when cursor and offset are combined", async () => {
+				await seedIssue("t-0", "2026-01-01 00:00:00.000");
+
+				const prepareSpy = vi.spyOn(env.DB, "prepare");
+				try {
+					const cursor = "2026-01-01 00:00:01.000|whatever";
+					const res = await app.request(
+						`/issues?offset=5&cursor=${encodeURIComponent(cursor)}`,
+						{},
+						env,
+					);
+					expect(res.status).toBe(400);
+					expect(prepareSpy).not.toHaveBeenCalled();
+				} finally {
+					prepareSpy.mockRestore();
+				}
+			});
+
+			// offset=0 は既定値と区別が付かないため、明示されていても通す。
+			it("accepts cursor with an explicit offset of zero", async () => {
+				await seedIssue("t-0", "2026-01-01 00:00:00.000");
+				await seedIssue("t-1", "2026-01-01 00:00:01.000");
+
+				const page1 = await readBody(
+					await app.request("/issues?limit=1", {}, env),
+				);
+				const res = await app.request(
+					`/issues?limit=1&offset=0&cursor=${encodeURIComponent(page1.next_cursor)}`,
+					{},
+					env,
+				);
+				expect(res.status).toBe(200);
+				expect(titlesOf(await readBody(res))).toEqual(["t-0"]);
+			});
+
+			// サーバが発行したカーソルは、サーバ自身が必ず受け付けられること。
+			//
+			// id は TEXT PRIMARY KEY で書式の制約が無く、区切り文字 `|` を含みうる。
+			// カーソルの組み立てと分解が非対称だと、そういう行がページ境界に来た
+			// 瞬間に自分の発行値を 400 で拒否し、それより古い Issue が全件
+			// 到達不能になる。往復できることを実際の行で確かめる。
+			it("accepts a cursor it issued for an id containing the separator", async () => {
+				await env.DB.prepare(
+					`INSERT INTO issues (id, title, description, scope, latitude, longitude, created_at, updated_at)
+				   VALUES ('we|ird|id', 'p-1', 'desc', 'community', 35.68, 139.76, '2026-01-01 00:00:01.000', '2026-01-01 00:00:01.000')`,
+				).run();
+				await seedIssue("p-0", "2026-01-01 00:00:00.000");
+
+				const page1 = await readBody(
+					await app.request("/issues?limit=1", {}, env),
+				);
+				expect(titlesOf(page1)).toEqual(["p-1"]);
+				expect(page1.next_cursor).toBe("2026-01-01 00:00:01.000|we|ird|id");
+
+				const res = await app.request(
+					`/issues?limit=1&cursor=${encodeURIComponent(page1.next_cursor)}`,
+					{},
+					env,
+				);
+				expect(res.status).toBe(200);
+				expect(titlesOf(await readBody(res))).toEqual(["p-0"]);
+			});
+
+			// 並び順にインデックスが効いていること。
+			//
+			// カーソルページングの利点は「OFFSET のスキャンを避けて深いページでも
+			// 一定コスト」だが、毎ページ全表スキャン + TEMP B-TREE ソートが走ると
+			// その利点が消える。GET /issues は認証不要の公開エンドポイントで、
+			// D1 は読み取り行数で課金されるため、これはコストに直結する。
+			// migrations/0003 のインデックスが落ちるとプランが SCAN に戻る。
+			it("uses the created_at index instead of sorting the whole table", async () => {
+				const plan = await env.DB.prepare(
+					`EXPLAIN QUERY PLAN SELECT id FROM issues WHERE (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?`,
+				)
+					.bind("2026-01-01 00:00:05.000", "2026-01-01 00:00:05.000", "x", 4)
+					.all<{ detail: string }>();
+
+				const detail = plan.results.map((row) => row.detail).join("\n");
+				expect(detail).toContain("idx_issues_created_at");
+				expect(detail).not.toContain("TEMP B-TREE");
+			});
 		});
 
 		// クエリ検証は入力チェックであると同時にリソース保護でもある。
