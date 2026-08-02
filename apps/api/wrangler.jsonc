@@ -1,4 +1,15 @@
 {
+	// 必要なシークレット（`wrangler secret put <名前>` で設定する）:
+	//   CLERK_SECRET_KEY
+	//   CLERK_PUBLISHABLE_KEY
+	//
+	// 値は Cloudflare 側にしか無いため、ここに宣言は書けない。新しい環境
+	// （プレビュー、別アカウント、CI）を立てたときの取りこぼしを防ぐために
+	// 名前だけ残している。ローカル開発では `.dev.vars` に置く。
+	//
+	// 未設定でも公開エンドポイント（`/`, `/health`, `GET /issues`）は動く。
+	// 認証が必要な書き込み系だけが 401 になり、`console.error` がログに出る
+	// （src/middleware/clerk.ts）。
 	"name": "world-issue-tracker-api",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-04-01",

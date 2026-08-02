@@ -7,6 +7,7 @@ import {
 import { type Context, Hono } from "hono";
 import type { Bindings } from "../index";
 import { requireAuth } from "../middleware/auth";
+import { clerkAuth } from "../middleware/clerk";
 
 export const issues = new Hono<{ Bindings: Bindings }>();
 
@@ -70,7 +71,7 @@ issues.onError((err, c) => {
 });
 
 // POST /issues — Create (auth required)
-issues.post("/", requireAuth, async (c) => {
+issues.post("/", clerkAuth(), requireAuth, async (c) => {
 	const body = await c.req.json();
 	const parsed = CreateIssueSchema.safeParse(body);
 	if (!parsed.success) {
@@ -189,7 +190,7 @@ async function checkOwnership(
 }
 
 // PATCH /issues/:id — Partial update (auth required, owner only)
-issues.patch("/:id", requireAuth, async (c) => {
+issues.patch("/:id", clerkAuth(), requireAuth, async (c) => {
 	const id = c.req.param("id");
 
 	// 認可を入力バリデーションより先に行う（他人の Issue に対して
@@ -231,7 +232,7 @@ issues.patch("/:id", requireAuth, async (c) => {
 });
 
 // DELETE /issues/:id — Delete (auth required, owner only)
-issues.delete("/:id", requireAuth, async (c) => {
+issues.delete("/:id", clerkAuth(), requireAuth, async (c) => {
 	const id = c.req.param("id");
 
 	const denied = await checkOwnership(c, id);

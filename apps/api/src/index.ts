@@ -1,4 +1,3 @@
-import { clerkMiddleware } from "@hono/clerk-auth";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { requireAllowedOrigin } from "./middleware/origin";
@@ -41,7 +40,9 @@ export function createApp() {
 	// 送信自体は止められない。書き込み系はサーバー側でも Origin を検証する。
 	app.use(requireAllowedOrigin(ALLOWED_ORIGINS));
 
-	app.use(clerkMiddleware());
+	// Clerk はここで全ルートに適用しない。認証を要求するルート側で個別に差す
+	// （src/middleware/clerk.ts）。公開エンドポイントを Clerk の設定・可用性から
+	// 切り離すため。
 
 	app.get("/", (c) => {
 		return c.json({ name: "World Issue Tracker API", status: "ok" });
