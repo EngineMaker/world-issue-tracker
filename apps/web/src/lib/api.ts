@@ -36,6 +36,44 @@ export type IssueFormValues = {
 /** フィールド名 → そのフィールドのエラーメッセージ。 */
 export type FieldErrors = Partial<Record<keyof IssueFormValues, string[]>>;
 
+/**
+ * 起票フォームで提示するカテゴリの入力候補。
+ *
+ * `CreateIssueSchema` の `category` は自由入力（`z.string().min(1).max(100)`）の
+ * ままにしている。enum にすると候補に無い困りごとが起票できなくなるうえ、
+ * 既存データの移行も要るため、まずは候補を提示して表記ゆれを減らす。
+ * 実際に集まった値を見てから、`packages/shared` へ引き上げて enum 化するかを
+ * 別途判断する。
+ *
+ * 置き場所について。API は自由文字列を受けるだけで候補を知る必要がないため、
+ * `packages/shared`（API と Web の双方が使う定義の置き場）ではなく画面側に置いた。
+ * ただし候補を `page.tsx` に直書きすると「語彙を一箇所に集める」という目的が
+ * 崩れるので、定数として切り出している。
+ *
+ * このファイル（API との通信を担う）に置いたのは、web にテストランナーが無く、
+ * `apps/api/test/node/` から相対 import して検証する必要があるため。
+ * `lib/issues.ts` は Workers の型と噛み合わない記述（`fetch` の `cache`）を含み、
+ * api 側の `tsc` に巻き込むと型エラーになる。責務としては表示用の語彙なので、
+ * web にテストを置ける環境が整ったら移し直す余地がある。
+ *
+ * 各候補はスキーマの制約（1〜100 文字）に収まること。
+ * 順序は日常的に起票されやすいと思われる順。
+ */
+export const ISSUE_CATEGORY_SUGGESTIONS: readonly string[] = [
+	"道路・交通",
+	"防犯・安全",
+	"衛生・ごみ",
+	"公園・緑地",
+	"上下水道",
+	"福祉・介護",
+	"子育て・教育",
+	"医療・健康",
+	"住まい",
+	"災害・防災",
+	"環境・気候",
+	"行政手続き",
+];
+
 export type ValidationResult =
 	| { success: true; data: CreateIssue }
 	| { success: false; fieldErrors: FieldErrors; formErrors: string[] };

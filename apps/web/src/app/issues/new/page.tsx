@@ -12,6 +12,7 @@ import {
 	CreateIssueError,
 	createIssue,
 	type FieldErrors,
+	ISSUE_CATEGORY_SUGGESTIONS,
 	type IssueFormValues,
 	validateIssueForm,
 } from "@/lib/api";
@@ -19,6 +20,10 @@ import {
 // スコープの表示ラベルは `packages/shared` に一本化している。
 // ここで独自に定義すると、トップページの説明と選択肢の文言がずれる
 const SCOPE_LABELS = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
+
+// カテゴリの候補も定数から引く（`@/lib/api`）。
+// ここに直書きすると、表記ゆれを防ぐという目的そのものが崩れる
+const CATEGORY_SUGGESTIONS = ISSUE_CATEGORY_SUGGESTIONS;
 
 const INITIAL_VALUES: IssueFormValues = {
 	title: "",
@@ -29,6 +34,9 @@ const INITIAL_VALUES: IssueFormValues = {
 	category: "",
 };
 
+/** 現在地の取得状態。押しても何も起きないように見える時間を作らないため */
+type GeolocationState = "idle" | "loading" | "failed";
+
 export default function NewIssuePage() {
 	const { isLoaded, isSignedIn, getToken } = useAuth();
 
@@ -37,23 +45,34 @@ export default function NewIssuePage() {
 	const [submitError, setSubmitError] = useState<string | null>(null);
 	const [createdId, setCreatedId] = useState<string | null>(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [geolocation, setGeolocation] = useState<GeolocationState>("idle");
 
 	const update = (field: keyof IssueFormValues) => (value: string) => {
 		setValues((current) => ({ ...current, [field]: value }));
 	};
 
+	// 選択中のスコープが何を指すかを、選ぶその場に出す。
+	// `values.scope` は select の値なので通常は enum に収まるが、
+	// 収まらなかったときに説明のせいで画面全体が落ちては本末転倒なので、
+	// 既定のスコープにフォールバックする（送信時は検証で弾かれる）
+	const parsedScope = IssueScope.safeParse(values.scope);
+	const selectedScope =
+		SCOPE_LABELS[parsedScope.success ? parsedScope.data : "personal"];
+
 	/**
 	 * 端末の位置情報を緯度経度の欄に入れる。
 	 *
 	 * 地図 UI は未導入なので、手入力の負担を減らす補助として置いている。
-	 * 失敗しても手入力できるため、エラーは送信エラーとは別に扱わず
-	 * フォーム全体のエラー表示に流す。
+	 * 失敗しても手入力できるため、送信を妨げるエラーとしては扱わず、
+	 * ボタンの近くに状態として出す。送信エラーの表示を上書きすると、
+	 * 直前の失敗理由が読めなくなるため場所を分けている。
 	 */
 	const fillCurrentPosition = () => {
 		if (!navigator.geolocation) {
-			setSubmitError("この環境では位置情報を取得できません。");
+			setGeolocation("failed");
 			return;
 		}
+		setGeolocation("loading");
 		navigator.geolocation.getCurrentPosition(
 			(position) => {
 				setValues((current) => ({
@@ -61,11 +80,10 @@ export default function NewIssuePage() {
 					latitude: String(position.coords.latitude),
 					longitude: String(position.coords.longitude),
 				}));
+				setGeolocation("idle");
 			},
 			() => {
-				setSubmitError(
-					"位置情報を取得できませんでした。緯度経度を直接入力してください。",
-				);
+				setGeolocation("failed");
 			},
 		);
 	};
@@ -116,25 +134,35 @@ export default function NewIssuePage() {
 				<output style={{ display: "block", color: "#b45309" }}>
 					投稿にはサインインが必要です。
 					<SignInButton mode="modal">
-						<button type="button">サインイン</button>
+						<button type="button" className="button-secondary">
+							サインイン
+						</button>
 					</SignInButton>
 				</output>
 			)}
 
-			<form onSubmit={handleSubmit} noValidate>
-				<FormField id="title" label="タイトル" errors={fieldErrors.title}>
+			<form className="issue-form" onSubmit={handleSubmit} noValidate>
+				<FormField
+					id="title"
+					label="タイトル"
+					hint="何が起きているかを一文で。場所と、いつから続いているかまで書くと伝わります。"
+					errors={fieldErrors.title}
+				>
 					<input
 						id="title"
 						type="text"
 						value={values.title}
 						onChange={(event) => update("title")(event.target.value)}
 						maxLength={200}
+						placeholder="例: 〇〇公園の街灯が3ヶ月間消えたまま"
+						aria-describedby="title-hint"
 					/>
 				</FormField>
 
 				<FormField
 					id="description"
 					label="説明"
+					hint="いつから / どこで / 誰が困っているか を書くと、解決に動く人が判断しやすくなります。試したこと（連絡先に問い合わせた等）があれば、それも書いてください。"
 					errors={fieldErrors.description}
 				>
 					<textarea
@@ -143,14 +171,24 @@ export default function NewIssuePage() {
 						onChange={(event) => update("description")(event.target.value)}
 						rows={6}
 						maxLength={5000}
+						placeholder={
+							"例: 3ヶ月ほど前から公園南口の街灯が2本消えています。\n夜に子どもの下校路になっていて、保護者から不安の声が出ています。\n市の窓口には一度電話しましたが、その後の連絡はありません。"
+						}
+						aria-describedby="description-hint"
 					/>
 				</FormField>
 
-				<FormField id="scope" label="スコープ" errors={fieldErrors.scope}>
+				<FormField
+					id="scope"
+					label="スコープ"
+					hint={`どこまで広がる課題かを選びます。${selectedScope.label}: ${selectedScope.description}`}
+					errors={fieldErrors.scope}
+				>
 					<select
 						id="scope"
 						value={values.scope}
 						onChange={(event) => update("scope")(event.target.value)}
+						aria-describedby="scope-hint"
 					>
 						{IssueScope.options.map((scope) => (
 							<option key={scope} value={scope}>
@@ -163,42 +201,98 @@ export default function NewIssuePage() {
 				<FormField
 					id="category"
 					label="カテゴリ（任意）"
+					hint="入力欄をクリックするか文字を入力すると候補が出ます。当てはまるものが無ければ自由に入力してください。後から同じ種類の Issue を探すときの手がかりになります。"
 					errors={fieldErrors.category}
 				>
+					{/*
+					  自由入力を残したまま候補を出すため `<select>` ではなく
+					  `<datalist>` を使う。候補に無い困りごとを起票できなくする
+					  ことの方が、表記ゆれより損失が大きいと判断した。
+					  スキーマの enum 化は、集まった値を見てから別途判断する。
+					*/}
 					<input
 						id="category"
 						type="text"
 						value={values.category}
 						onChange={(event) => update("category")(event.target.value)}
 						maxLength={100}
+						list="category-suggestions"
+						placeholder="例: 道路・交通"
+						aria-describedby="category-hint"
 					/>
+					<datalist id="category-suggestions">
+						{CATEGORY_SUGGESTIONS.map((suggestion) => (
+							<option key={suggestion} value={suggestion} />
+						))}
+					</datalist>
 				</FormField>
 
-				<FormField id="latitude" label="緯度" errors={fieldErrors.latitude}>
-					<input
-						id="latitude"
-						type="number"
-						step="any"
-						value={values.latitude}
-						onChange={(event) => update("latitude")(event.target.value)}
-					/>
-				</FormField>
+				<fieldset className="location">
+					<legend>場所</legend>
+					<p id="location-hint">
+						困りごとが起きている場所の座標です。「現在地から入力」を押すと、
+						ブラウザが位置情報の使用許可を確認します（許可すると緯度経度が
+						自動で入ります）。現地にいないときは、地図サービスで目的の地点を
+						右クリックすると座標を調べられます。
+					</p>
 
-				<FormField id="longitude" label="経度" errors={fieldErrors.longitude}>
-					<input
-						id="longitude"
-						type="number"
-						step="any"
-						value={values.longitude}
-						onChange={(event) => update("longitude")(event.target.value)}
-					/>
-				</FormField>
+					<div className="coordinates">
+						<FormField
+							id="latitude"
+							label="緯度"
+							hint="-90 〜 90"
+							errors={fieldErrors.latitude}
+						>
+							<input
+								id="latitude"
+								type="number"
+								step="any"
+								inputMode="decimal"
+								className="field-narrow"
+								value={values.latitude}
+								onChange={(event) => update("latitude")(event.target.value)}
+								placeholder="例: 35.681236"
+								aria-describedby="latitude-hint location-hint"
+							/>
+						</FormField>
 
-				<p>
-					<button type="button" onClick={fillCurrentPosition}>
-						現在地から入力
-					</button>
-				</p>
+						<FormField
+							id="longitude"
+							label="経度"
+							hint="-180 〜 180"
+							errors={fieldErrors.longitude}
+						>
+							<input
+								id="longitude"
+								type="number"
+								step="any"
+								inputMode="decimal"
+								className="field-narrow"
+								value={values.longitude}
+								onChange={(event) => update("longitude")(event.target.value)}
+								placeholder="例: 139.767125"
+								aria-describedby="longitude-hint location-hint"
+							/>
+						</FormField>
+					</div>
+
+					<p>
+						<button
+							type="button"
+							className="button-secondary"
+							onClick={fillCurrentPosition}
+							disabled={geolocation === "loading"}
+						>
+							{geolocation === "loading" ? "取得中…" : "現在地から入力"}
+						</button>
+					</p>
+
+					{geolocation === "failed" && (
+						<output style={{ display: "block", color: "#b45309" }}>
+							位置情報を取得できませんでした。緯度経度を直接入力してください。
+						</output>
+					)}
+				</fieldset>
 
 				{submitError && (
 					<output style={{ display: "block", color: "#b91c1c" }}>
@@ -210,7 +304,9 @@ export default function NewIssuePage() {
 						*/}
 						{!isSignedIn && (
 							<SignInButton mode="modal">
-								<button type="button">サインイン</button>
+								<button type="button" className="button-secondary">
+									サインイン
+								</button>
 							</SignInButton>
 						)}
 					</output>
@@ -222,7 +318,11 @@ export default function NewIssuePage() {
 					</output>
 				)}
 
-				<button type="submit" disabled={isSubmitting}>
+				<button
+					type="submit"
+					className="button-primary"
+					disabled={isSubmitting}
+				>
 					{isSubmitting ? "送信中…" : "起票する"}
 				</button>
 			</form>
@@ -238,26 +338,39 @@ export default function NewIssuePage() {
 }
 
 /**
- * ラベル・入力欄・そのフィールドのエラー表示をまとめる。
+ * ラベル・補助テキスト・入力欄・そのフィールドのエラー表示をまとめる。
  *
  * `id` は呼び出し側が入力欄にも同じ値を渡す前提で、`htmlFor` と対応させる。
+ * 補助テキストの id は `${id}-hint` に固定し、呼び出し側は入力欄の
+ * `aria-describedby` に同じ値を書く。`placeholder` は入力を始めると
+ * 消えてしまうため、書いている最中に読める場所として別に置いている。
+ *
+ * `hint` は任意ではなく必須にしている。省略や空文字を許すと、
+ * 呼び出し側に残った `aria-describedby` が存在しない id を指し、
+ * 「説明がある」と支援技術に伝えながら何も読まれない状態になるため。
+ * この画面に「補助テキストの要らない入力欄」は無いという判断でもある。
  */
 function FormField({
 	id,
 	label,
+	hint,
 	errors,
 	children,
 }: {
 	id: string;
 	label: string;
+	hint: string;
 	errors?: string[];
 	children: React.ReactNode;
 }) {
 	return (
-		<p>
+		<p className="form-field">
 			<label htmlFor={id} style={{ display: "block" }}>
 				{label}
 			</label>
+			<span className="field-hint" id={`${id}-hint`}>
+				{hint}
+			</span>
 			{children}
 			{errors && errors.length > 0 && (
 				<output style={{ display: "block", color: "#b91c1c" }}>
