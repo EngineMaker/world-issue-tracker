@@ -767,6 +767,149 @@ describe("Issues CRUD", () => {
 					prepareSpy.mockRestore();
 				}
 			});
+
+			// limit / offset が受け付けるのは「10進の整数表記」だけ。
+			//
+			// z.coerce.number() は内部で Number() を呼ぶため、16進・2進・8進・
+			// 指数表記・空文字・空白付き・符号付きがそのまま数値になっていた。
+			// バリデーションのつもりのコードが、意図より広い入力を通していた。
+			describe("rejects non-decimal numeric notations", () => {
+				const REJECTED_NOTATIONS = [
+					"", // 空文字（Number("") === 0）
+					" 5", // 前後の空白
+					"5 ",
+					"0x10", // 16 進
+					"0b101", // 2 進
+					"0o17", // 8 進
+					"1e1", // 指数表記
+					"+5", // 符号付き
+					"5.0", // 小数点付き（整数値だが 10 進整数表記ではない）
+					"Infinity",
+				];
+
+				for (const value of REJECTED_NOTATIONS) {
+					it(`rejects limit=${JSON.stringify(value)}`, async () => {
+						const res = await app.request(
+							`/issues?limit=${encodeURIComponent(value)}`,
+							{},
+							env,
+						);
+						expect(res.status).toBe(400);
+						const body = await readBody(res);
+						expect(body.error.fieldErrors.limit).toBeDefined();
+					});
+
+					it(`rejects offset=${JSON.stringify(value)}`, async () => {
+						const res = await app.request(
+							`/issues?offset=${encodeURIComponent(value)}`,
+							{},
+							env,
+						);
+						expect(res.status).toBe(400);
+						const body = await readBody(res);
+						expect(body.error.fieldErrors.offset).toBeDefined();
+					});
+				}
+			});
+
+			// 重複したクエリパラメータは 400 で弾く。
+			//
+			// Object.fromEntries(searchParams) は同名キーを後勝ちで潰すため、
+			// ?limit=5&limit=abc は 400、?limit=abc&limit=5 は 200 という
+			// 並び順に依存した挙動になっていた。どちらの値を採用するかを
+			// 暗黙に決めるより、曖昧な入力として明示的に拒否する。
+			describe("rejects duplicated query parameters", () => {
+				const DUPLICATES = [
+					"limit=5&limit=1",
+					"limit=1&limit=5",
+					"limit=abc&limit=5",
+					"offset=0&offset=7",
+					"scope=community&scope=global",
+					"status=open&status=closed",
+				];
+
+				for (const queryString of DUPLICATES) {
+					it(`rejects ?${queryString}`, async () => {
+						await createIssue();
+
+						const prepareSpy = vi.spyOn(env.DB, "prepare");
+						try {
+							const res = await app.request(`/issues?${queryString}`, {}, env);
+							expect(res.status).toBe(400);
+							// 曖昧な入力は DB に到達させない
+							expect(prepareSpy).not.toHaveBeenCalled();
+						} finally {
+							prepareSpy.mockRestore();
+						}
+					});
+				}
+
+				// 同名でも値が同一なら、実質的な曖昧さは無いが
+				// 「複数回指定された」という事実は変わらないため一律で弾く。
+				it("rejects duplicates even when the values are identical", async () => {
+					const res = await app.request("/issues?limit=5&limit=5", {}, env);
+					expect(res.status).toBe(400);
+				});
+
+				// 重複判定の蓄積先に `Object.prototype` を継いだオブジェクトを使うと、
+				// `toString` のようなプロパティ名が「既にある」と見えてしまい、
+				// 1 回しか指定していないパラメータを重複と誤判定する。
+				// 未知のパラメータが 1 つ付いただけで一覧 API が 400 になるため、
+				// 単発指定が通ることを明示的に固定しておく。
+				const PROTOTYPE_KEYS = [
+					"toString",
+					"constructor",
+					"hasOwnProperty",
+					"valueOf",
+					"isPrototypeOf",
+					"__proto__",
+				];
+
+				for (const key of PROTOTYPE_KEYS) {
+					it(`does not treat a single ?${key}= as a duplicate`, async () => {
+						await createIssue();
+
+						const res = await app.request(
+							`/issues?${encodeURIComponent(key)}=x&limit=5`,
+							{},
+							env,
+						);
+						expect(res.status).toBe(200);
+						const body = await readBody(res);
+						expect(body.limit).toBe(5);
+						expect(body.data).toHaveLength(1);
+					});
+
+					// 誤検出を直した結果として、本当の重複まで見逃していないこと。
+					it(`still rejects a duplicated ?${key}=`, async () => {
+						const encoded = encodeURIComponent(key);
+						const res = await app.request(
+							`/issues?${encoded}=a&${encoded}=b`,
+							{},
+							env,
+						);
+						expect(res.status).toBe(400);
+						const body = await readBody(res);
+						expect(body.error.fieldErrors[key]).toBeDefined();
+					});
+				}
+
+				// 重複していない限り、複数のパラメータの併用は従来どおり通る。
+				it("accepts distinct parameters used together", async () => {
+					await createIssue();
+
+					const res = await app.request(
+						"/issues?scope=community&status=open&limit=5&offset=0",
+						{},
+						env,
+					);
+					expect(res.status).toBe(200);
+					const body = await readBody(res);
+					expect(body.limit).toBe(5);
+					expect(body.offset).toBe(0);
+					expect(body.data).toHaveLength(1);
+				});
+			});
 		});
 	});
 
