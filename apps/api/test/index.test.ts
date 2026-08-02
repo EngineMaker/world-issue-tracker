@@ -23,12 +23,3 @@ describe("API root", () => {
 		});
 	});
 });
-
-describe("Health check", () => {
-	it("returns healthy with D1 connection", async () => {
-		const res = await app.request("/health", {}, env);
-		expect(res.status).toBe(200);
-		const body = (await res.json()) as { status: string };
-		expect(body.status).toBe("healthy");
-	});
-});

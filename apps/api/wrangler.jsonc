@@ -13,6 +13,12 @@
 	"name": "world-issue-tracker-api",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-04-01",
+	// エラー詳細はレスポンスに載せずログにだけ残す方針（routes/health.ts 参照）。
+	// Observability が無効だと console.error はどこにも保存されず、tail 中でなければ
+	// 障害時の手がかりが残らないため有効にする。
+	"observability": {
+		"enabled": true
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",
