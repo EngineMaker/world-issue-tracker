@@ -60,6 +60,7 @@ cp apps/api/.dev.vars.example apps/api/.dev.vars
 # Web 用の環境変数を設定
 cp apps/web/.env.local.example apps/web/.env.local
 # apps/web/.env.local に Clerk のキーを記入
+# NEXT_PUBLIC_API_URL はローカル開発なら既定値のままでよい
 
 # D1 のローカルマイグレーションを適用
 cd apps/api && bun wrangler d1 migrations apply world-issue-tracker --local && cd ../..
@@ -90,6 +91,10 @@ API は `http://localhost:8787`、Web は `http://localhost:3000` で起動し�
 - `CLERK_SECRET_KEY` — Clerk シークレットキー（Web ビルド用）
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` — Clerk パブリッシャブルキー（Web ビルド用）
 
+Web が参照する API の URL (`NEXT_PUBLIC_API_URL`) はシークレットではないため、
+`.github/workflows/deploy.yml` に直接書いています。`NEXT_PUBLIC_` の値は
+ビルド時にバンドルへ埋め込まれるので、デプロイ先を変えたときはここも更新してください。
+
 ### 手動デプロイ
 
 ```bash
@@ -97,7 +102,10 @@ API は `http://localhost:8787`、Web は `http://localhost:3000` で起動し�
 cd apps/api && bun wrangler deploy
 
 # Web
-cd apps/web && bun run deploy
+# NEXT_PUBLIC_API_URL を明示すること。指定しないと .env.local の値
+# （ローカル開発では http://localhost:8787）がバンドルに焼き付き、
+# 本番サイトが利用者のブラウザから localhost へ投げて起票が全件失敗する
+cd apps/web && NEXT_PUBLIC_API_URL=https://world-issue-tracker-api.mktoho.workers.dev bun run deploy
 ```
 
 ## ライセンス

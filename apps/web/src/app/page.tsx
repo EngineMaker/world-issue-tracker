@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { fetchIssues } from "../lib/issues";
 import { IssueList } from "./components/IssueList";
 
@@ -19,6 +20,10 @@ export default async function Home() {
 			<p style={{ color: "#666" }}>
 				個人の困りごとから国際問題まで、あらゆるスコープの課題を Issue
 				として起票し、みんなで解決に導くサービスです。
+			</p>
+
+			<p>
+				<Link href="/issues/new">Issue を起票する</Link>
 			</p>
 
 			<section>

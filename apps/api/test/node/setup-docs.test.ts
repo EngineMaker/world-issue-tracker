@@ -68,17 +68,6 @@ describe("環境変数のサンプルファイル", () => {
 		expect(exampleKeys).toContain("CLERK_SECRET_KEY");
 	});
 
-	/**
-	 * 認証情報を含まない、そのまま書いてよい URL か。
-	 *
-	 * サンプルとして役に立つには API の URL は実値で載せたい。一方
-	 * `https://user:pass@host/...`（Sentry DSN 等）は秘密が URL に埋まるので
-	 * 除外する。キー名で「秘密かどうか」を判定すると `CLERK_SECRET` のような
-	 * 命名を取りこぼすため、値の形だけで判断している。
-	 */
-	const isPlainUrl = (value: string) =>
-		/^https?:\/\/[^@\s]+$/.test(value) && !value.includes("@");
-
 	it("サンプルファイルが実際の値を含まない", () => {
 		const examples = [
 			"apps/api/.dev.vars.example",
@@ -89,8 +78,21 @@ describe("環境変数のサンプルファイル", () => {
 			for (const line of readRepoFile(path).split("\n")) {
 				const trimmed = line.trim();
 				if (trimmed === "" || trimmed.startsWith("#")) continue;
-				const value = trimmed.slice(trimmed.indexOf("=") + 1);
-				if (isPlainUrl(value)) continue;
+				const separator = trimmed.indexOf("=");
+				const key = trimmed.slice(0, separator);
+				const value = trimmed.slice(separator + 1);
+
+				// URL のような公開してよい設定値は実値のままサンプルに書く。
+				// 秘匿すべきなのは資格情報なので、検査対象をそちらに限定する。
+				// ここを緩めすぎると実キーの混入を見逃すため、
+				// 「除外してよいキー」を列挙する側（許可リスト）にしている。
+				if (key === "NEXT_PUBLIC_API_URL") {
+					expect(value, `${path} の ${key} が URL でない`).toMatch(
+						/^https?:\/\//,
+					);
+					continue;
+				}
+
 				// Clerk の実キーはランダム文字列が続く。
 				// プレースホルダは `xxxx` で終わることを必須とする
 				expect(value, `${path} に実値らしき文字列がある: ${line}`).toMatch(
