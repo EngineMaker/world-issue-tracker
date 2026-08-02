@@ -6,5 +6,20 @@
 	"assets": {
 		"directory": ".open-next/assets",
 		"binding": "ASSETS"
+	},
+	// Server Component が「実行時に」読む値。
+	//
+	// `NEXT_PUBLIC_*` はビルド時にバンドルへ埋め込まれるが、埋め込まれるのは
+	// Client Component だけ。Server Component（app/page.tsx、app/issues/page.tsx）の
+	// `process.env.NEXT_PUBLIC_API_URL` は Worker 上で評価されるため、ここに
+	// 無いと `resolveApiBaseUrl()` が既定値の http://localhost:8787 へ
+	// フォールバックし、Issue 一覧が取得できなくなる。
+	//
+	// `@opennextjs/cloudflare` が Worker の env を `process.env` へコピーしてから
+	// ハンドラを呼ぶため、この `vars` が Server Component へ値を届ける経路になる。
+	// 秘密ではないので secret ではなく vars で持つ。
+	// ビルド時に渡す値（.github/workflows/deploy.yml）と一致させること。
+	"vars": {
+		"NEXT_PUBLIC_API_URL": "https://world-issue-tracker-api.mktoho.workers.dev"
 	}
 }

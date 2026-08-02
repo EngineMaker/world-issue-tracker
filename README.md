@@ -92,8 +92,17 @@ API は `http://localhost:8787`、Web は `http://localhost:3000` で起動し�
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` — Clerk パブリッシャブルキー（Web ビルド用）
 
 Web が参照する API の URL (`NEXT_PUBLIC_API_URL`) はシークレットではないため、
-`.github/workflows/deploy.yml` に直接書いています。`NEXT_PUBLIC_` の値は
-ビルド時にバンドルへ埋め込まれるので、デプロイ先を変えたときはここも更新してください。
+設定ファイルに直接書いています。デプロイ先を変えたときは **2 箇所**を更新してください:
+
+- `.github/workflows/deploy.yml` — ビルド時。Client Component のバンドルに埋め込まれる
+- `apps/web/wrangler.jsonc` の `vars` — 実行時。Server Component が `process.env` から読む
+
+`NEXT_PUBLIC_` の値がバンドルへ埋め込まれるのは Client Component だけです。
+一覧を取得する Server Component（`app/page.tsx`、`app/issues/page.tsx`）は
+Workers 上で `process.env` を評価するため、`vars` が無いと既定値の
+`http://localhost:8787` へ fetch して一覧が取得できなくなります。
+片方だけ更新すると値がズレるので、両者の一致は
+`apps/api/test/node/web-runtime-env.test.ts` で検査しています。
 
 ### 手動デプロイ
 
@@ -104,7 +113,8 @@ cd apps/api && bun wrangler deploy
 # Web
 # NEXT_PUBLIC_API_URL を明示すること。指定しないと .env.local の値
 # （ローカル開発では http://localhost:8787）がバンドルに焼き付き、
-# 本番サイトが利用者のブラウザから localhost へ投げて起票が全件失敗する
+# 本番サイトが利用者のブラウザから localhost へ投げて起票が全件失敗する。
+# 一覧側（Server Component）は wrangler.jsonc の vars が使われる
 cd apps/web && NEXT_PUBLIC_API_URL=https://world-issue-tracker-api.mktoho.workers.dev bun run deploy
 ```
 
