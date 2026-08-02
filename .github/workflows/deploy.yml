@@ -52,3 +52,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          # NEXT_PUBLIC_* はビルド時に埋め込まれるため、ここで渡さないと
+          # 本番の Web がローカルの API を見に行って一覧が空になる。
+          # 秘密ではないので secrets ではなく直接書いている
+          NEXT_PUBLIC_API_URL: https://world-issue-tracker-api.mktoho.workers.dev

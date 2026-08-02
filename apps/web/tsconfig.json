@@ -16,6 +16,8 @@
 		"allowJs": true,
 		"incremental": true
 	},
+	// test は含めていない。`bun:test` の型（bun-types）が未導入で
+	// `tsc --noEmit` が `bun:test` を解決できないため
 	"include": ["src", "next-env.d.ts", "*.config.ts", ".next/types/**/*.ts"],
 	"exclude": ["node_modules"]
 }
