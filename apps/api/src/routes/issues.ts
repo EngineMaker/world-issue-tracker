@@ -140,8 +140,17 @@ issues.get("/", async (c) => {
 		.bind(...binds)
 		.first<{ total: number }>();
 
+	// 一覧は新しい順。`created_at` はミリ秒精度だが、同一ミリ秒に複数件作られると
+	// それだけでは順序が決まらず、SQLite が返す順（実装依存）に委ねられてしまう。
+	// 順序が不定だとページング境界で行の欠落・重複が起きるため、
+	// 一意な `id` を第二キーに置いて全順序を確定させる。
+	//
+	// `id` は `lower(hex(randomblob(16)))` のランダム値なので、同一ミリ秒内の
+	// 数件については「新しい順」ではなく安定した任意順になる。ここで保証したいのは
+	// 時系列そのものではなく、ページを跨いでも順序がぶれないことなので、これで足りる。
+	// 同一ミリ秒内まで時系列で並べたい場合は id を ULID / UUIDv7 に変える必要がある。
 	const rows = await c.env.DB.prepare(
-		`SELECT ${PUBLIC_SELECT} FROM issues ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+		`SELECT ${PUBLIC_SELECT} FROM issues ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
 	)
 		.bind(...binds, limit, offset)
 		.all();

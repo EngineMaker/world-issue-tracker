@@ -88,6 +88,11 @@ async function readStoredIssue(id: string): Promise<IssueBody> {
 	return row;
 }
 
+/** 一覧レスポンスの `data` からタイトルを並び順のまま取り出す。 */
+function titlesOf(body: IssueBody): string[] {
+	return (body.data as IssueBody[]).map((issue) => issue.title as string);
+}
+
 const validIssue: IssueInput = {
 	title: "Broken streetlight",
 	description: "The streetlight on Main St is not working",
@@ -95,6 +100,37 @@ const validIssue: IssueInput = {
 	latitude: 35.68,
 	longitude: 139.76,
 };
+
+/**
+ * `created_at` を明示指定した Issue を DB へ直接投入する。
+ *
+ * 並び順の検証を API 経由の連続作成だけで行うと、実行が速い環境では
+ * 同一ミリ秒に収まって時刻差が消え、テストが非決定的になる。
+ * 時刻を固定した行を入れることで、DESC を検証する意図を実行環境に依存させない。
+ */
+async function insertIssueAt(
+	id: string,
+	title: string,
+	createdAt: string,
+	userId = "test-user-123",
+): Promise<void> {
+	await env.DB.prepare(
+		`INSERT INTO issues (id, title, description, scope, latitude, longitude, user_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	)
+		.bind(
+			id,
+			title,
+			validIssue.description,
+			validIssue.scope,
+			validIssue.latitude,
+			validIssue.longitude,
+			userId,
+			createdAt,
+			createdAt,
+		)
+		.run();
+}
 
 async function createIssue(data: IssueInput = validIssue) {
 	return app.request(
@@ -411,6 +447,8 @@ describe("Issues CRUD", () => {
 			expect(body.total).toBe(2);
 			expect(body.limit).toBe(20);
 			expect(body.offset).toBe(0);
+			// 件数だけでは「何を返したか」を見ていないので、中身も確認する
+			expect(titlesOf(body)).toEqual(["Second issue", validIssue.title]);
 		});
 
 		it("filters by scope", async () => {
@@ -437,18 +475,137 @@ describe("Issues CRUD", () => {
 		});
 
 		it("supports limit and offset", async () => {
-			await createIssue({ ...validIssue, title: "Issue 1" });
-			await createIssue({ ...validIssue, title: "Issue 2" });
-			await createIssue({ ...validIssue, title: "Issue 3" });
+			// 件数だけを見ていると offset を無視する実装（毎回同じ 2 件を返す）でも
+			// 通ってしまうため、各ページの中身まで固定する。
+			await insertIssueAt("order-1", "Issue 1", "2026-01-01 00:00:01.000");
+			await insertIssueAt("order-2", "Issue 2", "2026-01-01 00:00:02.000");
+			await insertIssueAt("order-3", "Issue 3", "2026-01-01 00:00:03.000");
 
 			const res = await app.request("/issues?limit=2&offset=0", {}, env);
 			const body = await readBody(res);
 			expect(body.data).toHaveLength(2);
 			expect(body.total).toBe(3);
+			expect(titlesOf(body)).toEqual(["Issue 3", "Issue 2"]);
 
 			const res2 = await app.request("/issues?limit=2&offset=2", {}, env);
 			const body2 = await readBody(res2);
 			expect(body2.data).toHaveLength(1);
+			expect(body2.total).toBe(3);
+			expect(titlesOf(body2)).toEqual(["Issue 1"]);
+
+			// ページを跨いで重複せず、全件を覆うこと
+			const paged = [...titlesOf(body), ...titlesOf(body2)];
+			expect(new Set(paged).size).toBe(paged.length);
+			expect([...paged].sort()).toEqual(["Issue 1", "Issue 2", "Issue 3"]);
+		});
+
+		// 一覧の並び順（新しい順）は API のユーザー可視な仕様そのもので、
+		// フロントの一覧・地図はこれに依存している。件数しか見ないテストでは
+		// `ORDER BY` を反転しても削っても通ってしまうため、明示的に固定する。
+		describe("ordering", () => {
+			it("returns issues newest first", async () => {
+				// 投入順と返却順が逆になることを見る（投入順のまま返す実装で落ちる）
+				await insertIssueAt("order-old", "Oldest", "2026-01-01 00:00:01.000");
+				await insertIssueAt("order-mid", "Middle", "2026-01-01 00:00:02.000");
+				await insertIssueAt("order-new", "Newest", "2026-01-01 00:00:03.000");
+
+				const res = await app.request("/issues", {}, env);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["Newest", "Middle", "Oldest"]);
+			});
+
+			it("keeps the newest-first order when filtered by scope", async () => {
+				// フィルタ有りは WHERE 句の組み立てが変わる別経路なので、
+				// そこでも並び順が保たれることを確認する。
+				await insertIssueAt(
+					"scoped-old",
+					"Old community",
+					"2026-01-01 00:00:01.000",
+				);
+				await insertIssueAt(
+					"scoped-new",
+					"New community",
+					"2026-01-01 00:00:03.000",
+				);
+				await createIssue({ ...validIssue, scope: "national" });
+
+				const res = await app.request("/issues?scope=community", {}, env);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["New community", "Old community"]);
+			});
+
+			it("keeps the newest-first order when filtered by status", async () => {
+				// scope と status は別々の条件として組み立てられるため、
+				// 片方の経路だけ並び順が壊れる退行があり得る。両方を押さえる。
+				await insertIssueAt(
+					"status-old",
+					"Old open",
+					"2026-01-01 00:00:01.000",
+				);
+				await insertIssueAt(
+					"status-new",
+					"New open",
+					"2026-01-01 00:00:03.000",
+				);
+				await env.DB.prepare(
+					"UPDATE issues SET status = 'closed' WHERE id = 'status-old'",
+				).run();
+				await insertIssueAt(
+					"status-mid",
+					"Mid open",
+					"2026-01-01 00:00:02.000",
+				);
+
+				const res = await app.request("/issues?status=open", {}, env);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["New open", "Mid open"]);
+			});
+
+			it("orders by id when created_at ties", async () => {
+				// `created_at` がミリ秒精度でも、同一ミリ秒に複数件作られると
+				// それだけでは順序が決まらず、SQLite が返す順（実測では rowid 順、
+				// つまり挿入順）に委ねられる。第二キー `id DESC` が効いていることを、
+				// 挿入順とも rowid 順とも一致しない並びで確認する。
+				//
+				// 本番の `id` はランダム値なので、この並びは時系列を意味しない。
+				// ここで見ているのは「順序が id で一意に決まること」であり、
+				// テスト用の id を辞書順に振ることでその結果を予測可能にしている。
+				// 挿入順（b → a → c）と id の降順（c → b → a）が一致しないよう仕込む。
+				// これにより「rowid 順を返しているだけ」でも「その逆順」でも落ちる。
+				const sameMoment = "2026-01-01 00:00:00.000";
+				await insertIssueAt("tie-b", "Tie B", sameMoment);
+				await insertIssueAt("tie-a", "Tie A", sameMoment);
+				await insertIssueAt("tie-c", "Tie C", sameMoment);
+
+				const res = await app.request("/issues", {}, env);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["Tie C", "Tie B", "Tie A"]);
+			});
+
+			it("does not drop or duplicate rows when paging through ties", async () => {
+				// 順序が不定だとページ境界で行が欠落・重複する。
+				// 同一時刻の 4 件を 1 件ずつ辿り、全件がちょうど 1 度ずつ現れること。
+				const sameMoment = "2026-01-01 00:00:00.000";
+				const titles = ["Tie A", "Tie B", "Tie C", "Tie D"];
+				for (const [index, title] of titles.entries()) {
+					await insertIssueAt(`tie-${index}`, title, sameMoment);
+				}
+
+				const seen: string[] = [];
+				for (let offset = 0; offset < titles.length; offset++) {
+					const res = await app.request(
+						`/issues?limit=1&offset=${offset}`,
+						{},
+						env,
+					);
+					const body = await readBody(res);
+					expect(body.data).toHaveLength(1);
+					seen.push(...titlesOf(body));
+				}
+
+				expect(new Set(seen).size).toBe(titles.length);
+				expect([...seen].sort()).toEqual([...titles].sort());
+			});
 		});
 
 		// クエリ検証は入力チェックであると同時にリソース保護でもある。
@@ -709,14 +866,35 @@ describe("Issues CRUD", () => {
 		});
 
 		it("returns exactly the public keys on a paginated page", async () => {
-			await createIssue({ ...validIssue, title: "Issue 1" });
-			await createIssue({ ...validIssue, title: "Issue 2" });
-			await createIssue({ ...validIssue, title: "Issue 3" });
+			// どの行が返るかまで固定したいので、時刻を明示した行を直接入れる。
+			// user_id は漏洩検証の対象なので、この describe が使う値に合わせる。
+			const owner = "user_2abcSECRETclerkid";
+			await insertIssueAt(
+				"page-1",
+				"Issue 1",
+				"2026-01-01 00:00:01.000",
+				owner,
+			);
+			await insertIssueAt(
+				"page-2",
+				"Issue 2",
+				"2026-01-01 00:00:02.000",
+				owner,
+			);
+			await insertIssueAt(
+				"page-3",
+				"Issue 3",
+				"2026-01-01 00:00:03.000",
+				owner,
+			);
 
 			setMockUserId(null);
 			const res = await app.request("/issues?limit=1&offset=1", {}, env);
 			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
+			// 2 ページ目が「新しい順で 2 番目」の行であること。
+			// キーの集合だけを見ていると、どの行を返しても通ってしまう。
+			expect(titlesOf(body)).toEqual(["Issue 2"]);
 			expect(Object.keys(body.data[0]).sort()).toEqual([...PUBLIC_KEYS].sort());
 			expect(JSON.stringify(body)).not.toContain("user_2abcSECRETclerkid");
 		});
