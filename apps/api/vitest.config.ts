@@ -1,6 +1,11 @@
 import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
+import { SHARED_SRC_ALIAS } from "./test/helpers/shared-alias";
 
 export default defineWorkersConfig({
+	// `@world-issue-tracker/shared` をこのチェックアウト内のソースへ固定する。理由は helpers/shared-alias.ts
+	resolve: {
+		alias: SHARED_SRC_ALIAS,
+	},
 	test: {
 		include: ["test/*.test.ts"],
 		// `@hono/clerk-auth` をインライン化する。
