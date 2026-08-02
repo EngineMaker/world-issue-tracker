@@ -176,9 +176,15 @@ describe("Issues CRUD", () => {
 			expect(body.title).toBe(validIssue.title);
 			expect(body.scope).toBe(validIssue.scope);
 			expect(body.status).toBe("open");
-			expect(body.user_id).toBe("test-user-123");
 			expect(body.id).toBeDefined();
 			expect(body.created_at).toBeDefined();
+
+			// `user_id` は内部フィールドなのでレスポンスには載せない。
+			// 保存されたことは DB を直接読んで確認する（レスポンスに出すことで
+			// 確認すると、公開してはいけない値を仕様として固定してしまう）。
+			expect(body).not.toHaveProperty("user_id");
+			const stored = await readStoredIssue(body.id);
+			expect(stored.user_id).toBe("test-user-123");
 		});
 
 		it("stamps created_at and updated_at with millisecond precision", async () => {
@@ -620,6 +626,31 @@ describe("Issues CRUD", () => {
 			setMockUserId("user_2abcSECRETclerkid");
 		});
 
+		/** 所有者として PATCH を叩く。書き込み系のレスポンス検査で使う。 */
+		async function patchIssue(id: string, data: Record<string, unknown>) {
+			return app.request(
+				`/issues/${id}`,
+				{
+					method: "PATCH",
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
+					body: JSON.stringify(data),
+				},
+				env,
+			);
+		}
+
+		/** 所有者として DELETE を叩く。書き込み系のレスポンス検査で使う。 */
+		async function deleteIssue(id: string) {
+			return app.request(
+				`/issues/${id}`,
+				{ method: "DELETE", headers: { Origin: ALLOWED_ORIGIN } },
+				env,
+			);
+		}
+
 		it("does not expose user_id in GET list", async () => {
 			await createIssue();
 
@@ -703,6 +734,86 @@ describe("Issues CRUD", () => {
 			expect(Object.keys(body).sort()).toEqual([...PUBLIC_KEYS].sort());
 		});
 
+		// 書き込み系（POST / PATCH / DELETE）は認証必須だが、返しているのは
+		// GET と同じテーブルの行である以上、公開してよいキーの集合は同じ。
+		// 経路ごとにレスポンスの形が違うと、フロントが内部フィールドに依存する
+		// コードを書いてしまい、後から消せなくなる。
+		it("returns exactly the public keys in POST", async () => {
+			const res = await createIssue({
+				...validIssue,
+				category: "infrastructure",
+			});
+			expect(res.status).toBe(201);
+			const body = await readBody(res);
+			expect(body).not.toHaveProperty("user_id");
+			expect(Object.keys(body).sort()).toEqual([...PUBLIC_KEYS].sort());
+			expect(JSON.stringify(body)).not.toContain("user_2abcSECRETclerkid");
+		});
+
+		it("returns exactly the public keys in PATCH", async () => {
+			const createRes = await createIssue({
+				...validIssue,
+				category: "infrastructure",
+			});
+			const created = await readBody(createRes);
+
+			const res = await patchIssue(created.id, { title: "Updated title" });
+			expect(res.status).toBe(200);
+			const body = await readBody(res);
+			expect(body).not.toHaveProperty("user_id");
+			expect(Object.keys(body).sort()).toEqual([...PUBLIC_KEYS].sort());
+			expect(JSON.stringify(body)).not.toContain("user_2abcSECRETclerkid");
+		});
+
+		it("returns exactly the public keys in DELETE", async () => {
+			const createRes = await createIssue({
+				...validIssue,
+				category: "infrastructure",
+			});
+			const created = await readBody(createRes);
+
+			const res = await deleteIssue(created.id);
+			expect(res.status).toBe(200);
+			const body = await readBody(res);
+			expect(body).not.toHaveProperty("user_id");
+			expect(Object.keys(body).sort()).toEqual([...PUBLIC_KEYS].sort());
+			expect(JSON.stringify(body)).not.toContain("user_2abcSECRETclerkid");
+		});
+
+		// キーを落とすだけの実装（例: 全カラムを undefined で返す）に退行しても
+		// キー集合の検査は通ってしまうため、値がそのまま返っていることも見る。
+		it("keeps the public field values intact in write responses", async () => {
+			const createRes = await createIssue({
+				...validIssue,
+				category: "infrastructure",
+			});
+			const created = await readBody(createRes);
+
+			expect(created.title).toBe(validIssue.title);
+			expect(created.description).toBe(validIssue.description);
+			expect(created.scope).toBe(validIssue.scope);
+			expect(created.status).toBe("open");
+			expect(created.latitude).toBe(validIssue.latitude);
+			expect(created.longitude).toBe(validIssue.longitude);
+			expect(created.category).toBe("infrastructure");
+			expect(created.id).toBeDefined();
+			expect(created.created_at).toBeDefined();
+			expect(created.updated_at).toBeDefined();
+
+			const patchRes = await patchIssue(created.id, { title: "Updated title" });
+			const patched = await readBody(patchRes);
+			expect(patched.id).toBe(created.id);
+			expect(patched.title).toBe("Updated title");
+			expect(patched.description).toBe(validIssue.description);
+			expect(patched.category).toBe("infrastructure");
+
+			const delRes = await deleteIssue(created.id);
+			const deleted = await readBody(delRes);
+			expect(deleted.id).toBe(created.id);
+			expect(deleted.title).toBe("Updated title");
+			expect(deleted.category).toBe("infrastructure");
+		});
+
 		it("keeps the public field values intact", async () => {
 			const createRes = await createIssue({
 				...validIssue,
@@ -743,7 +854,17 @@ describe("Issues CRUD", () => {
 				"ALTER TABLE issues ADD COLUMN internal_note TEXT DEFAULT 'secret-internal-note'",
 			);
 			try {
-				await createIssue();
+				// POST（書き込み系も同じ防御が効いていること）
+				const createRes = await createIssue();
+				const created = await readBody(createRes);
+				expect(JSON.stringify(created)).not.toContain("secret-internal-note");
+				expect(created).not.toHaveProperty("internal_note");
+
+				// PATCH
+				const patchRes = await patchIssue(created.id, { title: "Updated" });
+				const patched = await readBody(patchRes);
+				expect(JSON.stringify(patched)).not.toContain("secret-internal-note");
+				expect(patched).not.toHaveProperty("internal_note");
 
 				setMockUserId(null);
 				const listRes = await app.request("/issues", {}, env);
@@ -756,6 +877,13 @@ describe("Issues CRUD", () => {
 				const byIdBody = await readBody(byIdRes);
 				expect(JSON.stringify(byIdBody)).not.toContain("secret-internal-note");
 				expect(byIdBody).not.toHaveProperty("internal_note");
+
+				// DELETE（レコードを消すので最後に叩く）
+				setMockUserId("user_2abcSECRETclerkid");
+				const delRes = await deleteIssue(created.id);
+				const deleted = await readBody(delRes);
+				expect(JSON.stringify(deleted)).not.toContain("secret-internal-note");
+				expect(deleted).not.toHaveProperty("internal_note");
 			} finally {
 				await env.DB.exec("ALTER TABLE issues DROP COLUMN internal_note");
 			}
@@ -777,6 +905,37 @@ describe("Issues CRUD", () => {
 				expect(row).not.toBeNull();
 				expect(row).not.toHaveProperty("user_id");
 				expect(Object.keys(row ?? {}).sort()).toEqual([...PUBLIC_KEYS].sort());
+			});
+
+			// 書き込み系も SELECT 層（= RETURNING 句）で絞っていること。
+			//
+			// 二段構えの片方だけを外しても、もう片方が防いでしまうため
+			// レスポンスの検査では退行に気づけない（例: POST だけ
+			// `RETURNING *` に戻しても toPublicIssue が落としてしまう）。
+			// 発行された SQL そのものを見て、各経路が公開カラムだけを
+			// 返すよう書かれていることを確かめる。
+			it("returns only public columns from write queries", async () => {
+				const prepareSpy = vi.spyOn(env.DB, "prepare");
+				try {
+					const createRes = await createIssue();
+					const created = await readBody(createRes);
+					await patchIssue(created.id, { title: "Updated" });
+					await deleteIssue(created.id);
+
+					const returningQueries = prepareSpy.mock.calls
+						.map(([sql]) => sql)
+						.filter((sql) => sql.includes("RETURNING"));
+
+					// POST / PATCH / DELETE の 3 本が拾えていること
+					// （経路が RETURNING を使わなくなったらここで気づく）
+					expect(returningQueries).toHaveLength(3);
+					for (const sql of returningQueries) {
+						expect(sql).not.toMatch(/RETURNING\s+\*/);
+						expect(sql).toContain(`RETURNING ${PUBLIC_SELECT_FOR_TEST}`);
+					}
+				} finally {
+					prepareSpy.mockRestore();
+				}
 			});
 
 			it("strips internal fields even when the row carries them", async () => {

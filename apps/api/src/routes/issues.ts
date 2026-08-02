@@ -11,10 +11,13 @@ import { requireAuth } from "../middleware/auth";
 export const issues = new Hono<{ Bindings: Bindings }>();
 
 /**
- * 認証不要の GET が返してよいカラム。
+ * レスポンスに載せてよいカラム。
  *
  * `user_id`（Clerk User ID）のような内部フィールドは意図的に含めていない。
  * カラムを追加したときは、ここに足すかどうかで「公開してよいか」を明示的に判断する。
+ *
+ * 書き込み系（POST / PATCH / DELETE）は認証必須だが、返しているのは GET と
+ * 同じテーブルの行なので、公開してよいキーの集合も同じものを使う。
  */
 export const PUBLIC_ISSUE_COLUMNS = [
 	"id",
@@ -32,16 +35,16 @@ export const PUBLIC_ISSUE_COLUMNS = [
 type PublicIssue = Record<(typeof PUBLIC_ISSUE_COLUMNS)[number], unknown>;
 
 /**
- * 公開 GET が返すカラムだけを並べた SELECT 句。
- * `SELECT *` にすると、カラムを追加した瞬間にそれが公開されてしまう。
+ * レスポンスに載せるカラムだけを並べた SELECT / RETURNING 句。
+ * `SELECT *`・`RETURNING *` にすると、カラムを追加した瞬間にそれが公開されてしまう。
  */
 export const PUBLIC_SELECT = PUBLIC_ISSUE_COLUMNS.join(", ");
 
 /**
  * DB の行から公開してよいカラムだけを取り出す。
  *
- * SELECT でカラムを絞ったうえで、返す直前にもここを通す二段構えにしている。
- * SELECT 句の書き漏れがあっても、内部フィールドはここで落ちる。
+ * SELECT / RETURNING でカラムを絞ったうえで、返す直前にもここを通す二段構えに
+ * している。句の書き漏れがあっても、内部フィールドはここで落ちる。
  */
 export function toPublicIssue(row: Record<string, unknown>): PublicIssue {
 	return Object.fromEntries(
@@ -85,7 +88,7 @@ issues.post("/", requireAuth, async (c) => {
 	const result = await c.env.DB.prepare(
 		`INSERT INTO issues (title, description, scope, latitude, longitude, category, user_id, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ${NOW_SQL}, ${NOW_SQL})
-     RETURNING *`,
+     RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(
 			title,
@@ -98,7 +101,13 @@ issues.post("/", requireAuth, async (c) => {
 		)
 		.first();
 
-	return c.json(result, 201);
+	// INSERT が成功すれば RETURNING は必ず 1 行返すため、ここは実際には通らない。
+	// `first()` の戻り値が null を含む型であることに対する処理で、
+	// 握り潰して空の Issue を返さないよう 500 にしている。
+	if (!result) {
+		return c.json({ error: "Failed to create issue" }, 500);
+	}
+	return c.json(toPublicIssue(result), 201);
 });
 
 // GET /issues — List (public)
@@ -219,7 +228,7 @@ issues.patch("/:id", requireAuth, async (c) => {
 
 	// 所有者チェックとの間で行が変わる可能性に備え、UPDATE 自体にも所有者条件を入れる
 	const result = await c.env.DB.prepare(
-		`UPDATE issues SET ${setClauses.join(", ")} WHERE id = ? AND user_id = ? RETURNING *`,
+		`UPDATE issues SET ${setClauses.join(", ")} WHERE id = ? AND user_id = ? RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(...binds, id, auth?.userId)
 		.first();
@@ -227,7 +236,7 @@ issues.patch("/:id", requireAuth, async (c) => {
 	if (!result) {
 		return c.json({ error: "Issue not found" }, 404);
 	}
-	return c.json(result);
+	return c.json(toPublicIssue(result));
 });
 
 // DELETE /issues/:id — Delete (auth required, owner only)
@@ -243,7 +252,7 @@ issues.delete("/:id", requireAuth, async (c) => {
 
 	// 所有者チェックとの間で行が変わる可能性に備え、DELETE 自体にも所有者条件を入れる
 	const result = await c.env.DB.prepare(
-		"DELETE FROM issues WHERE id = ? AND user_id = ? RETURNING *",
+		`DELETE FROM issues WHERE id = ? AND user_id = ? RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(id, auth?.userId)
 		.first();
@@ -251,5 +260,5 @@ issues.delete("/:id", requireAuth, async (c) => {
 	if (!result) {
 		return c.json({ error: "Issue not found" }, 404);
 	}
-	return c.json(result);
+	return c.json(toPublicIssue(result));
 });
