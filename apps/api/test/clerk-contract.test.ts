@@ -92,13 +92,51 @@ describe("Clerk middleware contract (no mocks)", () => {
 	});
 
 	// キーが無い環境では実物のミドルウェアが例外を投げる。
-	// 「認証なしで素通りする」のではなく 500 で止まる（フェイルクローズ）ことを固定する。
-	// 設定漏れのままデプロイしても、無防備に開くのではなく壊れて気づける。
+	// 書き込みは「認証なしで素通りする」のではなく 500 で止まる（フェイルクローズ）。
+	// 一方で公開読み取りは Clerk と無関係なので、設定不備に巻き込まれてはいけない。
 	describe("without Clerk keys", () => {
 		/** `CLERK_SECRET_KEY` を空にした env。他のバインディングはそのまま使う。 */
 		const envWithoutKeys = { ...env, CLERK_SECRET_KEY: "" };
 
-		it("fails closed on a write instead of allowing it", async () => {
+		// 公開エンドポイントは Clerk の設定状態に依存しない。
+		// シークレットの設定漏れ・ローテーション失敗で読み取りまで落ちないこと。
+		it.each([
+			["/", "root"],
+			["/health", "health check"],
+			["/issues", "issue list"],
+		])("still serves %s (%s) without Clerk keys", async (path) => {
+			const res = await app.request(path, {}, envWithoutKeys);
+			expect(res.status).toBe(200);
+		});
+
+		it("still serves a public GET by id without Clerk keys", async () => {
+			await env.DB.prepare(
+				"INSERT INTO issues (id, title, description, scope, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?)",
+			)
+				.bind(
+					"public-get-without-keys",
+					"Readable",
+					"should be readable without Clerk",
+					"community",
+					0,
+					0,
+				)
+				.run();
+
+			const res = await app.request(
+				"/issues/public-get-without-keys",
+				{},
+				envWithoutKeys,
+			);
+			expect(res.status).toBe(200);
+			const body = (await res.json()) as { title?: string };
+			expect(body.title).toBe("Readable");
+		});
+
+		// 書き込みはキーが無くても開かない。Clerk の初期化に失敗した場合は
+		// 「認証情報を取得できなかった」＝未認証として扱われ、`requireAuth` が閉じる。
+		// ステータスだけでなく、副作用が起きていないことまで確認する。
+		it("fails closed on a create instead of allowing it", async () => {
 			const res = await app.request(
 				"/issues",
 				{
@@ -117,15 +155,83 @@ describe("Clerk middleware contract (no mocks)", () => {
 				},
 				envWithoutKeys,
 			);
-			expect(res.status).toBe(500);
+			expect(res.status).toBe(401);
 
-			// 500 を返すだけでなく、実際に書き込まれていないこと
+			// 401 を返すだけでなく、実際に書き込まれていないこと
 			const row = await env.DB.prepare(
 				"SELECT COUNT(*) as total FROM issues WHERE title = ?",
 			)
 				.bind("No clerk key")
 				.first<{ total: number }>();
 			expect(row?.total).toBe(0);
+		});
+
+		it("fails closed on an update instead of applying it", async () => {
+			await env.DB.prepare(
+				"INSERT INTO issues (id, title, description, scope, latitude, longitude, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			)
+				.bind(
+					"no-keys-update",
+					"Original title",
+					"should not be updated",
+					"community",
+					0,
+					0,
+					"user_owner",
+				)
+				.run();
+
+			const res = await app.request(
+				"/issues/no-keys-update",
+				{
+					method: "PATCH",
+					headers: {
+						"Content-Type": "application/json",
+						Origin: "http://localhost:3000",
+					},
+					body: JSON.stringify({ title: "Hijacked title" }),
+				},
+				envWithoutKeys,
+			);
+			expect(res.status).toBe(401);
+
+			const row = await env.DB.prepare("SELECT title FROM issues WHERE id = ?")
+				.bind("no-keys-update")
+				.first<{ title: string }>();
+			expect(row?.title).toBe("Original title");
+		});
+
+		it("fails closed on a delete instead of performing it", async () => {
+			await env.DB.prepare(
+				"INSERT INTO issues (id, title, description, scope, latitude, longitude, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			)
+				.bind(
+					"no-keys-delete",
+					"Survivor",
+					"should not be deleted",
+					"community",
+					0,
+					0,
+					"user_owner",
+				)
+				.run();
+
+			const res = await app.request(
+				"/issues/no-keys-delete",
+				{
+					method: "DELETE",
+					headers: { Origin: "http://localhost:3000" },
+				},
+				envWithoutKeys,
+			);
+			expect(res.status).toBe(401);
+
+			const row = await env.DB.prepare(
+				"SELECT COUNT(*) as total FROM issues WHERE id = ?",
+			)
+				.bind("no-keys-delete")
+				.first<{ total: number }>();
+			expect(row?.total).toBe(1);
 		});
 	});
 });
