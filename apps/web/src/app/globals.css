@@ -89,3 +89,130 @@ main p {
 	text-align: center;
 	color: #888;
 }
+
+/*
+ * ここから下は起票フォーム（/issues/new）のスタイル。
+ * ブラウザ既定のままだと、緯度の入力欄と説明文の入力欄が同じ幅で並び、
+ * どちらも同じ重みに見えてしまう。項目のまとまりと、入力の長さの
+ * 見当がつくようにする。
+ *
+ * 入力要素には要素セレクタ（`input { ... }`）を使わず、`.issue-form` の
+ * 中だけに閉じている。globals.css は全ページに効くため、素の要素セレクタは
+ * Clerk のモーダル（同じ document に描画される）や Header の
+ * サインインボタンにも当たってしまう。上の ul / li が .actions / .scopes で
+ * 打ち消す羽目になっているのと同じ問題を繰り返さないための措置。
+ */
+
+.issue-form input,
+.issue-form textarea,
+.issue-form select {
+	font: inherit;
+	color: inherit;
+	padding: 0.375rem 0.5rem;
+	border: 1px solid #c7c7c7;
+	border-radius: 4px;
+	background: #fff;
+}
+
+.issue-form input:focus-visible,
+.issue-form textarea:focus-visible,
+.issue-form select:focus-visible,
+.button-primary:focus-visible,
+.button-secondary:focus-visible {
+	outline: 2px solid #2563eb;
+	outline-offset: 1px;
+}
+
+/* 既定では横幅いっぱい。短い入力は下の .field-narrow で絞る */
+.issue-form input[type="text"],
+.issue-form textarea {
+	width: 100%;
+}
+
+.issue-form textarea {
+	resize: vertical;
+}
+
+/*
+ * ボタンもクラス指定に閉じる。素の `button { ... }` にすると、
+ * class を持たない Header のサインインボタン（apps/web/src/app/components/Header.tsx）が
+ * 主要操作でも補助操作でもない第三の見た目になってしまう。
+ *
+ * 共通指定をまとめず各クラスに書いているのは、二つの見た目が
+ * 実際に違うことを一目で比べられるようにするため。
+ */
+
+/* 主要操作（起票する）。補助操作と同じ見た目にすると優先度が伝わらない */
+.button-primary {
+	font: inherit;
+	cursor: pointer;
+	border-radius: 4px;
+	background: #1d4ed8;
+	color: #fff;
+	border: 1px solid #1d4ed8;
+	padding: 0.5rem 1.25rem;
+	font-weight: 600;
+}
+
+/* 補助操作（現在地から入力・サインイン）。押しても主要操作ではないと分かる見た目 */
+.button-secondary {
+	font: inherit;
+	cursor: pointer;
+	border-radius: 4px;
+	background: #fff;
+	color: #1d4ed8;
+	border: 1px solid #c7c7c7;
+	padding: 0.375rem 0.875rem;
+}
+
+.button-primary:disabled,
+.button-secondary:disabled {
+	cursor: default;
+	opacity: 0.6;
+}
+
+/* 1 項目のまとまり。ラベル・補助テキスト・入力欄の間より、項目間を広く取る */
+.form-field {
+	margin-bottom: 1.25rem;
+}
+
+.form-field label {
+	font-weight: 600;
+}
+
+/*
+ * placeholder は入力を始めると消えるため、書いている最中に読める
+ * 補助テキストを入力欄の上に置く。本文より一段弱い見た目にして、
+ * ラベルと取り違えないようにする。
+ */
+.field-hint {
+	display: block;
+	font-size: 0.875rem;
+	color: #555;
+	margin-bottom: 0.25rem;
+}
+
+/* 緯度・経度のように桁数の決まった入力は短く見せる */
+.field-narrow {
+	width: 12rem;
+	max-width: 100%;
+}
+
+/* 場所に関する項目のまとまり。狭い画面では緯度・経度を縦に積む */
+.location {
+	border: 1px solid #e0e0e0;
+	border-radius: 4px;
+	padding: 0.75rem 1rem;
+	margin-bottom: 1.25rem;
+}
+
+.location legend {
+	font-weight: 600;
+	padding: 0 0.25rem;
+}
+
+.coordinates {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0 1rem;
+}
