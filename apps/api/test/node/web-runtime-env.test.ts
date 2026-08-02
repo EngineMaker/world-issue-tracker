@@ -18,84 +18,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { parseJsonc } from "../helpers/jsonc";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 const readRepoFile = (relativePath: string) =>
 	readFileSync(join(repoRoot, relativePath), "utf8");
-
-/**
- * JSONC（コメント付き JSON）をパースする。
- *
- * wrangler の設定ファイルはコメントを許すため `JSON.parse` に直接は渡せない。
- * JSONC パーサは直接の依存に無いので、文字列リテラルの内側を避けながら
- * コメントだけを落としてから `JSON.parse` する。`vars` には
- * `https://...` のような `//` を含む値が入るため、文字列の追跡は省略できない。
- */
-function parseJsonc(source: string): unknown {
-	let result = "";
-	let inString = false;
-	let inLineComment = false;
-	let inBlockComment = false;
-
-	for (let i = 0; i < source.length; i++) {
-		const char = source[i];
-		const next = source[i + 1];
-
-		if (inLineComment) {
-			// 改行はそのまま残す。JSON.parse の失敗位置を元の行と対応させるため
-			if (char === "\n") {
-				inLineComment = false;
-				result += char;
-			}
-			continue;
-		}
-
-		if (inBlockComment) {
-			if (char === "*" && next === "/") {
-				inBlockComment = false;
-				i++;
-			} else if (char === "\n") {
-				result += char;
-			}
-			continue;
-		}
-
-		if (inString) {
-			result += char;
-			// エスケープされた文字は次の 1 文字ごと取り込む（`\"` で閉じない）
-			if (char === "\\") {
-				result += next ?? "";
-				i++;
-			} else if (char === '"') {
-				inString = false;
-			}
-			continue;
-		}
-
-		if (char === '"') {
-			inString = true;
-			result += char;
-			continue;
-		}
-
-		if (char === "/" && next === "/") {
-			inLineComment = true;
-			i++;
-			continue;
-		}
-
-		if (char === "/" && next === "*") {
-			inBlockComment = true;
-			i++;
-			continue;
-		}
-
-		result += char;
-	}
-
-	return JSON.parse(result);
-}
 
 /** `KEY=value` 形式の行からキー名を取り出す。コメント行と空行は無視する。 */
 const parseEnvKeys = (content: string) =>
