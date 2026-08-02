@@ -107,7 +107,11 @@ export function parseListIssuesResponse(
  * ローカル開発の API（`bun dev` で起動する wrangler）を指す。本番 URL ではなく
  * ローカルを既定にしているのは、CI やデプロイで環境変数を渡し忘れたときに
  * 「本番 API に繋がって一見動く」よりも「繋がらず失敗が見える」方が設定漏れに
- * 気付けるため。デプロイ時の受け渡しは `.github/workflows/deploy.yml` を参照。
+ * 気付けるため。
+ *
+ * 本番で値を渡す経路は二つあり、両方に書く必要がある:
+ * - ビルド時（Client Component に埋め込む）: `.github/workflows/deploy.yml`
+ * - 実行時（Server Component が評価する）: `apps/web/wrangler.jsonc` の `vars`
  */
 const DEFAULT_API_BASE_URL = "http://localhost:8787";
 
@@ -116,6 +120,9 @@ const DEFAULT_API_BASE_URL = "http://localhost:8787";
  *
  * `process.env.NEXT_PUBLIC_API_URL` は Next.js がビルド時に静的置換するため、
  * `process.env[key]` のような動的アクセスにしてはいけない（置換されず undefined になる）。
+ *
+ * ただし静的置換されるのは Client Component のバンドルだけで、Server Component
+ * からの呼び出しでは実行時に評価される。詳細は DEFAULT_API_BASE_URL のコメント。
  */
 export function resolveApiBaseUrl(): string {
 	const configured = process.env.NEXT_PUBLIC_API_URL;
