@@ -247,6 +247,141 @@ describe("Issues CRUD", () => {
 			const body = await readBody(res);
 			expect(body.error).toBe("Invalid JSON");
 		});
+
+		// 文字列フィールドの長さ制限は、入力チェックであると同時にリソース保護でもある。
+		// `description` の max(5000) が失われると、1 リクエストで任意サイズの文字列を
+		// D1 に書き込める（D1 は書き込み量で課金される）。POST は認証必須だが、
+		// Clerk の無料枠で誰でもアカウントを作れるため、実質的に第三者が到達できる経路。
+		// `min(1)` が失われると、一覧・地図 UI に表示できない空タイトルの行が混入する
+		// （テーブルの NOT NULL は空文字列を弾かないので DB でも止まらない）。
+		describe("body string length validation", () => {
+			it("rejects an empty title", async () => {
+				const res = await createIssue({ ...validIssue, title: "" });
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.title).toBeDefined();
+			});
+
+			it("rejects a title above the maximum length", async () => {
+				const res = await createIssue({
+					...validIssue,
+					title: "a".repeat(201),
+				});
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.title).toBeDefined();
+			});
+
+			// 拒否だけを固定すると max(200) を max(100) に狭めるような退行を拾えないため、
+			// 境界の「通る側」も押さえておく（GET のクエリ検証と同じ理由）。
+			it("accepts a title at the maximum length", async () => {
+				const title = "a".repeat(200);
+				const res = await createIssue({ ...validIssue, title });
+				expect(res.status).toBe(201);
+				const body = await readBody(res);
+				expect(body.title).toBe(title);
+			});
+
+			it("rejects an empty description", async () => {
+				const res = await createIssue({ ...validIssue, description: "" });
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.description).toBeDefined();
+			});
+
+			it("rejects a description above the maximum length", async () => {
+				const res = await createIssue({
+					...validIssue,
+					description: "d".repeat(5001),
+				});
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.description).toBeDefined();
+			});
+
+			it("accepts a description at the maximum length", async () => {
+				const description = "d".repeat(5000);
+				const res = await createIssue({ ...validIssue, description });
+				expect(res.status).toBe(201);
+				const body = await readBody(res);
+				expect(body.description).toBe(description);
+			});
+
+			it("rejects an empty category", async () => {
+				const res = await createIssue({ ...validIssue, category: "" });
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.category).toBeDefined();
+			});
+
+			it("rejects a category above the maximum length", async () => {
+				const res = await createIssue({
+					...validIssue,
+					category: "c".repeat(101),
+				});
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.category).toBeDefined();
+			});
+
+			it("accepts a category at the maximum length", async () => {
+				const category = "c".repeat(100);
+				const res = await createIssue({ ...validIssue, category });
+				expect(res.status).toBe(201);
+				const body = await readBody(res);
+				expect(body.category).toBe(category);
+			});
+
+			// 400 を返すだけでなく、そもそも DB に書いていないこと。
+			//
+			// 長さ制限は「レスポンスの形」ではなく D1 への書き込み量を守るための
+			// 制限なので、400 を返していても手前で INSERT が走っていれば意味がない。
+			// レスポンスの検査だけでは「検証は落とすが INSERT はする」退行を拾えない。
+			it("does not insert a row when the length check fails", async () => {
+				const res = await createIssue({
+					...validIssue,
+					description: "d".repeat(5001),
+				});
+				expect(res.status).toBe(400);
+
+				const row = await env.DB.prepare(
+					"SELECT COUNT(*) as total FROM issues",
+				).first<{ total: number }>();
+				expect(row?.total).toBe(0);
+			});
+		});
+
+		// 型を取り違えた値が、暗黙の変換で通ってしまわないこと。
+		// zod は文字列フィールドに数値を渡しても coerce しないが、
+		// `z.coerce.string()` への変更などで静かに緩む余地がある。
+		describe("body type validation", () => {
+			it("rejects a numeric title", async () => {
+				const res = await createIssue({ ...validIssue, title: 123 } as never);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.title).toBeDefined();
+			});
+
+			it("rejects a string latitude", async () => {
+				const res = await createIssue({
+					...validIssue,
+					latitude: "35.68",
+				} as never);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.latitude).toBeDefined();
+			});
+
+			it("rejects a null body", async () => {
+				const res = await createIssue(null as never);
+				expect(res.status).toBe(400);
+			});
+
+			it("rejects an array body", async () => {
+				const res = await createIssue([] as never);
+				expect(res.status).toBe(400);
+			});
+		});
 	});
 
 	// --- GET /issues ---
@@ -884,6 +1019,184 @@ describe("Issues CRUD", () => {
 				env,
 			);
 			expect(res.status).toBe(400);
+		});
+
+		// `UpdateIssueSchema` は `CreateIssueSchema` とは別定義なので、
+		// POST 側の境界を固めても PATCH 側は守られない。同じ制限を独立に押さえる。
+		describe("body string length validation", () => {
+			/** 作成済みの Issue に対して PATCH を投げる。 */
+			async function patchIssue(id: string, data: unknown) {
+				return app.request(
+					`/issues/${id}`,
+					{
+						method: "PATCH",
+						headers: {
+							"Content-Type": "application/json",
+							Origin: ALLOWED_ORIGIN,
+						},
+						body: JSON.stringify(data),
+					},
+					env,
+				);
+			}
+
+			it("rejects an empty title", async () => {
+				const created = await readBody(await createIssue());
+
+				const res = await patchIssue(created.id, { title: "" });
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.title).toBeDefined();
+			});
+
+			it("rejects a title above the maximum length", async () => {
+				const created = await readBody(await createIssue());
+
+				const res = await patchIssue(created.id, { title: "a".repeat(201) });
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.title).toBeDefined();
+			});
+
+			it("accepts a title at the maximum length", async () => {
+				const created = await readBody(await createIssue());
+				const title = "a".repeat(200);
+
+				const res = await patchIssue(created.id, { title });
+				expect(res.status).toBe(200);
+				const body = await readBody(res);
+				expect(body.title).toBe(title);
+			});
+
+			it("rejects an empty description", async () => {
+				const created = await readBody(await createIssue());
+
+				const res = await patchIssue(created.id, { description: "" });
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.description).toBeDefined();
+			});
+
+			it("rejects a description above the maximum length", async () => {
+				const created = await readBody(await createIssue());
+
+				const res = await patchIssue(created.id, {
+					description: "d".repeat(5001),
+				});
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.description).toBeDefined();
+			});
+
+			it("accepts a description at the maximum length", async () => {
+				const created = await readBody(await createIssue());
+				const description = "d".repeat(5000);
+
+				const res = await patchIssue(created.id, { description });
+				expect(res.status).toBe(200);
+				const body = await readBody(res);
+				expect(body.description).toBe(description);
+			});
+
+			it("rejects an empty category", async () => {
+				const created = await readBody(await createIssue());
+
+				const res = await patchIssue(created.id, { category: "" });
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.category).toBeDefined();
+			});
+
+			it("rejects a category above the maximum length", async () => {
+				const created = await readBody(await createIssue());
+
+				const res = await patchIssue(created.id, {
+					category: "c".repeat(101),
+				});
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.category).toBeDefined();
+			});
+
+			it("accepts a category at the maximum length", async () => {
+				const created = await readBody(await createIssue());
+				const category = "c".repeat(100);
+
+				const res = await patchIssue(created.id, { category });
+				expect(res.status).toBe(200);
+				const body = await readBody(res);
+				expect(body.category).toBe(category);
+			});
+
+			// `category` は nullable なので、null は長さ検証の対象外として通る。
+			// 「空文字列は弾くが null は通す」の区別が失われていないことを見る。
+			it("accepts a null category", async () => {
+				const created = await readBody(
+					await createIssue({ ...validIssue, category: "infrastructure" }),
+				);
+
+				const res = await patchIssue(created.id, { category: null });
+				expect(res.status).toBe(200);
+				const body = await readBody(res);
+				expect(body.category).toBeNull();
+			});
+
+			// 400 を返すだけでなく、行が書き換わっていないこと。
+			// 「検証は落とすが UPDATE はする」退行はレスポンスの検査では拾えない。
+			it("does not update the row when the length check fails", async () => {
+				const created = await readBody(await createIssue());
+
+				const res = await patchIssue(created.id, {
+					description: "d".repeat(5001),
+				});
+				expect(res.status).toBe(400);
+
+				const stored = await readStoredIssue(created.id);
+				expect(stored.description).toBe(validIssue.description);
+				expect(stored.updated_at).toBe(created.updated_at);
+			});
+		});
+
+		describe("body type validation", () => {
+			it("rejects a numeric title", async () => {
+				const created = await readBody(await createIssue());
+
+				const res = await app.request(
+					`/issues/${created.id}`,
+					{
+						method: "PATCH",
+						headers: {
+							"Content-Type": "application/json",
+							Origin: ALLOWED_ORIGIN,
+						},
+						body: JSON.stringify({ title: 123 }),
+					},
+					env,
+				);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.title).toBeDefined();
+			});
+
+			it("rejects an unknown status", async () => {
+				const created = await readBody(await createIssue());
+
+				const res = await app.request(
+					`/issues/${created.id}`,
+					{
+						method: "PATCH",
+						headers: {
+							"Content-Type": "application/json",
+							Origin: ALLOWED_ORIGIN,
+						},
+						body: JSON.stringify({ status: "bogus" }),
+					},
+					env,
+				);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.status).toBeDefined();
+			});
 		});
 	});
 
