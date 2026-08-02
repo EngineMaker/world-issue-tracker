@@ -150,6 +150,64 @@ export const LIST_ISSUES_DEFAULT_LIMIT = 20;
 export const LIST_ISSUES_DEFAULT_OFFSET = 0;
 
 /**
+ * 一覧のカーソル。「最後に見た行の created_at と id」を `|` で連結した文字列。
+ *
+ * created_at は SQLite が返す `YYYY-MM-DD HH:MM:SS[.SSS]` 書式なので、
+ * `|` を含まないことが書式から保証される。よって**最初の** `|` が常に区切りで、
+ * それ以降はすべて id とみなせる。id 側は `TEXT PRIMARY KEY` で書式の制約が無く
+ * `|` を含みうるため、id に区切り文字を禁じると `buildIssueCursor` が発行した
+ * カーソルを `IssueCursorSchema` が拒否する（= その行より古い Issue に
+ * 到達できなくなる）。組み立てと分解を対称に保つため、id 側は非空とだけ決める。
+ *
+ * 値は WHERE 句のバインド値としてしか使わないので中身は信用しなくてよいが、
+ * 区切りを欠いたカーソルを黙って「該当なし」にすると、クライアント側の
+ * 組み立てミスが空ページとして素通りしてしまうため 400 で弾く。
+ * 逆に「書式は妥当だが実在しない日付」までは検証しない（空ページになる）。
+ *
+ * 長さの上限は、認証不要の公開エンドポイントに任意長の文字列を投げ込ませない
+ * ためのもの。`limit` の上限と同じく、レスポンスの形ではなくリソース保護が目的。
+ * 実際の id（16 進 32 文字）に対しては十分な余裕がある。
+ */
+export const IssueCursorSchema = z
+	.string()
+	.max(256, "Invalid cursor")
+	.regex(
+		/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,3})?\|.+$/s,
+		"Invalid cursor",
+	);
+
+/**
+ * カーソル文字列を created_at と id に分解する。
+ *
+ * `IssueCursorSchema` を通っていない文字列を渡されても
+ * もっともらしい壊れた値を返さないよう、区切りが無ければ投げる。
+ */
+export function parseIssueCursor(cursor: string): {
+	createdAt: string;
+	id: string;
+} {
+	const separator = cursor.indexOf("|");
+	if (separator === -1) {
+		throw new Error("Invalid cursor");
+	}
+	return {
+		createdAt: cursor.slice(0, separator),
+		id: cursor.slice(separator + 1),
+	};
+}
+
+/**
+ * 行から次ページ用のカーソル文字列を組み立てる。
+ * `parseIssueCursor` と往復して同じ値に戻ることが前提。
+ */
+export function buildIssueCursor(row: {
+	created_at: string;
+	id: string;
+}): string {
+	return `${row.created_at}|${row.id}`;
+}
+
+/**
  * 未指定時の既定値は `.default()` ではなくオブジェクト側の `.transform()` で埋める。
  *
  * `.default()` は「変換前の入力型」に対して働くため、
@@ -171,10 +229,22 @@ export const ListIssuesQuerySchema = z
 		offset: DecimalIntQueryParam.pipe(
 			z.number().int().min(0).max(1_000_000),
 		).optional(),
+		cursor: IssueCursorSchema.optional(),
 	})
 	.transform((query) => ({
 		...query,
 		limit: query.limit ?? LIST_ISSUES_DEFAULT_LIMIT,
 		offset: query.offset ?? LIST_ISSUES_DEFAULT_OFFSET,
-	}));
+	}))
+	// cursor と offset は位置の決め方が違うので併用できない。
+	// 片方を黙って無視すると「offset が効いたつもりの空ページ」が返り、
+	// クライアントからは残りの行が失われたようにしか見えない。
+	// offset=0 は既定値と区別が付かないため、0 より大きいときだけ弾く。
+	//
+	// `.transform()` の後に置いているのは、既定値が埋まった後の値を見るため。
+	// 前に置くと offset 未指定（undefined）と 0 の区別が付かない。
+	.refine((data) => !(data.cursor && data.offset > 0), {
+		message: "cursor and offset cannot be used together",
+		path: ["cursor"],
+	});
 export type ListIssuesQuery = z.infer<typeof ListIssuesQuerySchema>;

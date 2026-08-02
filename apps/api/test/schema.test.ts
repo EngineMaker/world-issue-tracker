@@ -64,12 +64,19 @@ describe("Test database schema", () => {
 
 	// 手書き定数はインデックスを一本も作っていなかった。
 	// 実マイグレーションに乗せ替えた効果が最も分かりやすく出る箇所。
+	//
+	// 期待値はあえてここにベタ書きする。マイグレーションの SQL から導出すると
+	// 両辺が同じ源から来るため、インデックスを削除する変更に対して期待値も
+	// 一緒に消え、常に一致して検出力がゼロになる（実際に変異体で確認した）。
+	// インデックスを増減させたらこの一覧も手で更新すること。
 	it("has every index the migrations define", async () => {
 		const { results } = await env.DB.prepare(
 			"SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'issues' AND name NOT LIKE 'sqlite_%' ORDER BY name",
 		).all<{ name: string }>();
 
 		expect(results.map((row) => row.name)).toEqual([
+			// 0003_add_created_at_index.sql — 一覧の並び順とカーソルページング用
+			"idx_issues_created_at",
 			"idx_issues_location",
 			"idx_issues_scope",
 			"idx_issues_status",
