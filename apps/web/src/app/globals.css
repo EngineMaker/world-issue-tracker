@@ -39,3 +39,53 @@ li {
 	border-radius: 4px;
 	font-size: 0.875rem;
 }
+
+main p {
+	margin-bottom: 0.75rem;
+}
+
+/*
+ * 上の ul / li は値をタグ状に並べるためのスタイル。
+ * 説明文を伴うリストは縦に積みたいので、以下のクラスで打ち消す。
+ */
+.actions,
+.scopes {
+	display: block;
+	list-style: none;
+}
+
+.actions li,
+.scopes li {
+	background: none;
+	padding: 0;
+	font-size: 1rem;
+	margin-bottom: 0.5rem;
+}
+
+.actions li {
+	font-size: 1.05rem;
+}
+
+/* ステータスは順序のある流れなので、矢印で繋いだタグとして見せる */
+.statuses {
+	list-style: none;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+}
+
+.statuses li:not(:last-child) {
+	/* 矢印はタグの外に置きたいので、右余白を空けてそこに描く */
+	position: relative;
+	margin-right: 1rem;
+}
+
+.statuses li:not(:last-child)::after {
+	content: "→";
+	position: absolute;
+	right: -1rem;
+	width: 1rem;
+	text-align: center;
+	color: #888;
+}

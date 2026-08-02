@@ -1,7 +1,12 @@
 "use client";
 
 import { SignInButton, useAuth } from "@clerk/nextjs";
-import { IssueScope } from "@world-issue-tracker/shared";
+import {
+	DEFAULT_LOCALE,
+	ISSUE_SCOPE_LABELS,
+	IssueScope,
+} from "@world-issue-tracker/shared";
+import Link from "next/link";
 import { useState } from "react";
 import {
 	CreateIssueError,
@@ -11,14 +16,9 @@ import {
 	validateIssueForm,
 } from "@/lib/api";
 
-/** スコープの選択肢。ラベルは `IssueScope` の値に対応させる。 */
-const SCOPE_LABELS: Record<IssueScope, string> = {
-	personal: "個人",
-	community: "近隣・コミュニティ",
-	municipality: "自治体",
-	national: "国",
-	global: "世界",
-};
+// スコープの表示ラベルは `packages/shared` に一本化している。
+// ここで独自に定義すると、トップページの説明と選択肢の文言がずれる
+const SCOPE_LABELS = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
 
 const INITIAL_VALUES: IssueFormValues = {
 	title: "",
@@ -154,7 +154,7 @@ export default function NewIssuePage() {
 					>
 						{IssueScope.options.map((scope) => (
 							<option key={scope} value={scope}>
-								{SCOPE_LABELS[scope]}
+								{SCOPE_LABELS[scope].label}
 							</option>
 						))}
 					</select>
@@ -226,6 +226,13 @@ export default function NewIssuePage() {
 					{isSubmitting ? "送信中…" : "起票する"}
 				</button>
 			</form>
+
+			{/* 書くのをやめたときに行き止まりにしない */}
+			<p>
+				<Link href="/issues">Issue 一覧を見る</Link>
+				{" / "}
+				<Link href="/">トップへ戻る</Link>
+			</p>
 		</main>
 	);
 }
