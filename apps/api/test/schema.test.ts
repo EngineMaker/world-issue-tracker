@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { PUBLIC_HELP_OFFER_COLUMNS } from "../src/routes/help-offers";
 import { PUBLIC_ISSUE_COLUMNS } from "../src/routes/issues";
 import { applyMigrations } from "./helpers/migrate";
 
@@ -117,5 +118,88 @@ describe("Test database schema", () => {
 				.bind("t", "d", "bogus-scope", 0, 0)
 				.run(),
 		).rejects.toThrow(/CHECK constraint failed/);
+	});
+
+	// `help_offers`（0004）にも `issues` と同じ検査を掛ける。
+	//
+	// 公開判断とインデックスの見張りをテーブルごとに用意しないと、
+	// 後から足したテーブルだけが素通りする。`issues` 側で防いだ穴（#8）が
+	// 別のテーブルで開く。
+	describe("help_offers", () => {
+		/** `help_offers` テーブルのカラム名を宣言順に返す。 */
+		async function helpOfferColumns(): Promise<string[]> {
+			const { results } = await env.DB.prepare(
+				"PRAGMA table_info(help_offers)",
+			).all<{ name: string }>();
+			return results.map((row) => row.name);
+		}
+
+		it("has the columns the migration defines, in migration order", async () => {
+			expect(await helpOfferColumns()).toEqual([
+				"id",
+				"issue_id",
+				"user_id",
+				"created_at",
+			]);
+		});
+
+		// `issues` 側と同じ理由で期待値はベタ書きする（マイグレーションから
+		// 導出すると、インデックスを消す変更で期待値も一緒に消えて検出力が消える）。
+		//
+		// `UNIQUE (issue_id, user_id)` が張る索引は SQLite が
+		// `sqlite_autoindex_help_offers_1` という名前で自動生成するため、
+		// `sqlite_%` を除外している他のテーブルと違ってここでは数えられない。
+		// UNIQUE 制約そのものは「二重に表明できない」テストで担保している。
+		it("has every index the migration defines", async () => {
+			const { results } = await env.DB.prepare(
+				"SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'help_offers' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+			).all<{ name: string }>();
+
+			expect(results.map((row) => row.name)).toEqual([
+				// 0004_create_help_offers.sql — 「自分が表明した Issue」を引く経路用
+				"idx_help_offers_user_id",
+			]);
+		});
+
+		// `issues` 側と違い、`user_id` は公開側に入っている。
+		// 本人が自分の意思で名乗り出た記録なので秘匿対象ではない
+		// （判断の理由は `routes/help-offers.ts` のコメント）。
+		// ここが保証するのは「カラムを足したら公開可否を書かされる」ところまで。
+		it("classifies every column as either public or explicitly internal", async () => {
+			/** 公開してはいけないカラム。追加したら意図的にここへ足す。 */
+			const INTERNAL_COLUMNS = ["issue_id"];
+
+			expect(await helpOfferColumns()).toEqual(
+				expect.arrayContaining([...PUBLIC_HELP_OFFER_COLUMNS]),
+			);
+			expect([...(await helpOfferColumns())].sort()).toEqual(
+				[...PUBLIC_HELP_OFFER_COLUMNS, ...INTERNAL_COLUMNS].sort(),
+			);
+		});
+
+		// 同一ユーザーの二重表明を DB 側で止めていること。
+		//
+		// アプリ側は `ON CONFLICT` で冪等に倒しているため、制約が消えても
+		// 通常の経路では気づけない。ここは制約そのものを直接叩く。
+		it("enforces the unique constraint on (issue_id, user_id)", async () => {
+			await env.DB.prepare(
+				"INSERT INTO issues (id, title, description, scope, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?)",
+			)
+				.bind("schema-test-issue", "t", "d", "community", 0, 0)
+				.run();
+			await env.DB.prepare(
+				"INSERT INTO help_offers (issue_id, user_id) VALUES (?, ?)",
+			)
+				.bind("schema-test-issue", "user_dup")
+				.run();
+
+			await expect(
+				env.DB.prepare(
+					"INSERT INTO help_offers (issue_id, user_id) VALUES (?, ?)",
+				)
+					.bind("schema-test-issue", "user_dup")
+					.run(),
+			).rejects.toThrow(/UNIQUE constraint failed/);
+		});
 	});
 });

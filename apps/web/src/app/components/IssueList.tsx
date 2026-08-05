@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { FetchIssuesResult, PublicIssue } from "../../lib/issues";
 
 /**
@@ -30,7 +31,14 @@ function IssueCard({ issue }: { issue: PublicIssue }) {
 				listStyle: "none",
 			}}
 		>
-			<h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem" }}>{issue.title}</h3>
+			{/*
+			  タイトルを詳細ページ (`/issues/[id]`) へのリンクにする。
+			  「手伝います」ボタンは詳細ページにあるため、ここに導線が無いと
+			  一覧から解決へ進む経路が存在しないことになる。
+			*/}
+			<h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem" }}>
+				<Link href={`/issues/${issue.id}`}>{issue.title}</Link>
+			</h3>
 			<p style={{ margin: "0 0 0.5rem", color: "#444" }}>{issue.description}</p>
 			<p style={{ margin: 0, fontSize: "0.85rem", color: "#666" }}>
 				<span>{issue.scope}</span>

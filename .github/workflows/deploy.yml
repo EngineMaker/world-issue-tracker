@@ -21,6 +21,24 @@ jobs:
         run: bun run build
         working-directory: packages/shared
 
+      # マイグレーションはデプロイの「前」に流す。
+      #
+      # 逆順にすると、新しいテーブルを前提にしたコードが先に本番へ出て、
+      # 適用が終わるまでの間そのエンドポイントが 500 を返す。
+      # 先に適用しておけば、失敗したときもデプロイまで到達せず旧コードが生き残る。
+      #
+      # `--remote` が無いとローカルの .wrangler ディレクトリに当ててしまい、
+      # 本番の D1 は一切変わらないまま成功扱いになる。
+      #
+      # 適用済みのマイグレーションは D1 側の `d1_migrations` テーブルで
+      # 管理されるため、毎回の push で流しても二重適用にはならない。
+      - name: Apply D1 migrations
+        run: bun wrangler d1 migrations apply world-issue-tracker --remote
+        working-directory: apps/api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Deploy API to Cloudflare Workers
         run: bun wrangler deploy
         working-directory: apps/api

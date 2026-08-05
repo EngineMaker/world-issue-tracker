@@ -188,3 +188,64 @@ export async function fetchIssues({
 		return { ok: false, error: "API に接続できませんでした" };
 	}
 }
+
+/**
+ * Issue 1 件の取得結果。
+ *
+ * 「存在しない」(`notFound`) を失敗と別に持つ。ページ側で 404 を返すか
+ * エラー表示にするかを分けるためで、両方を同じ失敗にすると、API が
+ * 落ちているだけの Issue まで「存在しません」と断言してしまう。
+ */
+export type FetchIssueResult =
+	| { ok: true; issue: PublicIssue }
+	| { ok: false; notFound: true }
+	| { ok: false; notFound: false; error: string };
+
+type FetchIssueOptions = {
+	/** テストから差し替えるための `fetch`。通常は省略する。 */
+	fetchImpl?: typeof globalThis.fetch;
+};
+
+/** API から Issue を 1 件取得する。 */
+export async function fetchIssue(
+	id: string,
+	{ fetchImpl = globalThis.fetch }: FetchIssueOptions = {},
+): Promise<FetchIssueResult> {
+	// id は URL のパスセグメントに入る。任意の文字列が来うるので、
+	// `/` や `?` がパスを書き換えないようエスケープする
+	const url = `${resolveApiBaseUrl()}/issues/${encodeURIComponent(id)}`;
+
+	try {
+		// 更新が次のアクセスで見えるよう、キャッシュしない（一覧と同じ方針）
+		const res = await fetchImpl(url, { cache: "no-store" });
+
+		if (res.status === 404) {
+			return { ok: false, notFound: true };
+		}
+		if (!res.ok) {
+			return {
+				ok: false,
+				notFound: false,
+				error: `API が ${res.status} を返しました`,
+			};
+		}
+
+		const issue = parsePublicIssue(await res.json());
+		if (!issue) {
+			return {
+				ok: false,
+				notFound: false,
+				error: "API のレスポンス形式が想定と異なります",
+			};
+		}
+
+		return { ok: true, issue };
+	} catch (err) {
+		console.error("GET /issues/:id に失敗", err);
+		return {
+			ok: false,
+			notFound: false,
+			error: "API に接続できませんでした",
+		};
+	}
+}
