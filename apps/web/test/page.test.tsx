@@ -1,8 +1,17 @@
 import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { IssueFilterForm } from "../src/app/components/IssueFilterForm";
 import { formatCreatedAt, IssueList } from "../src/app/components/IssueList";
+import { IssuePagination } from "../src/app/components/IssuePagination";
+import IssuesPage from "../src/app/issues/page";
 import Home from "../src/app/page";
-import type { FetchIssuesResult } from "../src/lib/issues";
+import {
+	DEFAULT_ISSUE_FILTERS,
+	type FetchIssuesResult,
+	type IssueFilters,
+	parseIssueFilters,
+	type RawSearchParams,
+} from "../src/lib/issues";
 
 const sampleIssue = {
 	id: "ebbcf9d7680ad57cedeeb513a90d461f",
@@ -17,9 +26,24 @@ const sampleIssue = {
 	updated_at: "2026-08-01 12:00:00.000",
 } as const;
 
-/** Server Component を呼び出して静的 HTML にする。 */
-function render(result: FetchIssuesResult) {
-	return renderToStaticMarkup(IssueList({ result }));
+/**
+ * Server Component を呼び出して静的 HTML にする。
+ *
+ * ページングの検証以外は limit / offset に関心が無いので、
+ * 省略時は 1 ページ目（先頭 20 件）とみなす。
+ */
+function render(
+	result:
+		| (Omit<Extract<FetchIssuesResult, { ok: true }>, "limit" | "offset"> & {
+				limit?: number;
+				offset?: number;
+		  })
+		| Extract<FetchIssuesResult, { ok: false }>,
+) {
+	const filled: FetchIssuesResult = result.ok
+		? { ...result, limit: result.limit ?? 20, offset: result.offset ?? 0 }
+		: result;
+	return renderToStaticMarkup(IssueList({ result: filled }));
 }
 
 describe("IssueList", () => {
@@ -43,11 +67,41 @@ describe("IssueList", () => {
 		const html = render({
 			ok: true,
 			issues: [sampleIssue],
-			// 全 42 件のうち 1 件だけ受け取っている状況
+			// 全 42 件のうち 1 件だけ受け取っている状況。
+			// limit を総件数より大きくして、ページ分割されていない状態にする
 			total: 42,
+			limit: 100,
 		});
 
 		expect(html).toContain("42 件中 1 件を表示");
+	});
+
+	// 複数ページに分かれているときは、何件目を見ているかまで出す。
+	// ページを送っても「N 件中 M 件」のままだと、どこにいるのか分からない
+	it("複数ページに分かれているときは表示中の範囲を出す", () => {
+		const html = render({
+			ok: true,
+			issues: [sampleIssue],
+			total: 42,
+			limit: 20,
+			offset: 20,
+		});
+
+		expect(html).toContain("42 件中 21 〜 21 件目を表示");
+	});
+
+	// 1 ページ目とそれ以降で様式が変わると、ページを送った瞬間に
+	// 表記が切り替わって見える
+	it("複数ページの 1 ページ目でも範囲の様式で出す", () => {
+		const html = render({
+			ok: true,
+			issues: [sampleIssue],
+			total: 42,
+			limit: 20,
+			offset: 0,
+		});
+
+		expect(html).toContain("42 件中 1 〜 1 件目を表示");
 	});
 
 	it("複数件をすべて表示する", () => {
@@ -180,6 +234,341 @@ describe("トップページ", () => {
 
 			expect(html).toContain("Issue を取得できませんでした");
 			expect(html).not.toContain("まだ Issue がありません");
+		} finally {
+			console.error = originalError;
+		}
+	});
+});
+
+describe("IssueFilterForm", () => {
+	function renderForm(filters: IssueFilters = DEFAULT_ISSUE_FILTERS) {
+		return renderToStaticMarkup(IssueFilterForm({ filters }));
+	}
+
+	// GET フォームでなければ、送信しても URL に条件が載らない。
+	// `searchParams` で状態を持つ設計そのものが成立しなくなる
+	it("GET メソッドで /issues に送るフォームである", () => {
+		const html = renderForm();
+
+		expect(html).toContain('method="get"');
+		expect(html).toContain('action="/issues"');
+	});
+
+	it("スコープの選択肢を表示ラベルで出す", () => {
+		const html = renderForm();
+
+		// 生の enum 値ではなく、トップページの説明と同じ日本語ラベルで出す
+		expect(html).toContain('value="municipality"');
+		expect(html).toContain("自治体");
+		expect(html).toContain("コミュニティ");
+	});
+
+	it("ステータスの選択肢を表示ラベルで出す", () => {
+		const html = renderForm();
+
+		expect(html).toContain('value="in_progress"');
+		expect(html).toContain("対応中");
+	});
+
+	it("並べ替えの選択肢を出す", () => {
+		const html = renderForm();
+
+		expect(html).toContain('value="oldest"');
+		expect(html).toContain("古い順");
+		expect(html).toContain("新しい順");
+	});
+
+	it("カテゴリの候補を起票フォームと同じ一覧から出す", () => {
+		const html = renderForm();
+
+		expect(html).toContain("道路・交通");
+		expect(html).toContain("衛生・ごみ");
+	});
+
+	it("入力欄の name が API のクエリ名と一致している", () => {
+		const html = renderForm();
+
+		for (const name of ["q", "scope", "status", "category", "sort"]) {
+			expect(html).toContain(`name="${name}"`);
+		}
+	});
+
+	// フォームに offset を含めると、条件を変えたときに前のページ位置が
+	// 残り「絞り込んだのに空に見える」状態になる
+	it("offset をフォームに含めない（条件変更で 1 ページ目に戻る）", () => {
+		const html = renderForm({ ...DEFAULT_ISSUE_FILTERS, offset: 40 });
+
+		expect(html).not.toContain('name="offset"');
+	});
+
+	it("いま適用されている条件を入力欄の初期値として復元する", () => {
+		const html = renderForm({
+			scope: "national",
+			status: "resolved",
+			category: "道路・交通",
+			q: "街灯",
+			sort: "oldest",
+			offset: 0,
+		});
+
+		// 再送信したときに条件が消えないこと
+		expect(html).toContain('value="街灯"');
+		expect(html).toMatch(/<option value="national"[^>]*selected/);
+		expect(html).toMatch(/<option value="resolved"[^>]*selected/);
+		expect(html).toMatch(/<option value="oldest"[^>]*selected/);
+	});
+
+	it("条件が付いているときだけ解除の導線を出す", () => {
+		expect(renderForm()).not.toContain("条件をすべて解除");
+		expect(renderForm({ ...DEFAULT_ISSUE_FILTERS, scope: "global" })).toContain(
+			"条件をすべて解除",
+		);
+	});
+});
+
+describe("IssuePagination", () => {
+	function renderPagination({
+		filters = DEFAULT_ISSUE_FILTERS,
+		total,
+		limit = 20,
+		offset = 0,
+	}: {
+		filters?: IssueFilters;
+		total: number;
+		limit?: number;
+		offset?: number;
+	}) {
+		// 1 ページに収まるときは null を返す。`renderToStaticMarkup` は
+		// null をそのまま受け取って空文字を返すので、そのまま渡してよい
+		return renderToStaticMarkup(
+			IssuePagination({ filters, total, limit, offset }),
+		);
+	}
+
+	it("1 ページに収まるならページ送りを出さない", () => {
+		expect(renderPagination({ total: 20, limit: 20 })).toBe("");
+		expect(renderPagination({ total: 3, limit: 20 })).toBe("");
+	});
+
+	it("次のページがあればリンクを出す", () => {
+		const html = renderPagination({ total: 45, limit: 20, offset: 0 });
+
+		expect(html).toContain("次のページ");
+		expect(html).toContain('href="/issues?offset=20"');
+	});
+
+	it("先頭ページでは「前のページ」をリンクにしない", () => {
+		const html = renderPagination({ total: 45, limit: 20, offset: 0 });
+
+		// リンクとして出ていたら、押しても同じページに戻るだけの導線になる
+		expect(html).not.toContain('href="/issues?offset=-20"');
+		expect(html).not.toMatch(/<a[^>]*>前のページ<\/a>/);
+	});
+
+	it("最終ページでは「次のページ」をリンクにしない", () => {
+		const html = renderPagination({ total: 45, limit: 20, offset: 40 });
+
+		expect(html).not.toMatch(/<a[^>]*>次のページ<\/a>/);
+		expect(html).toMatch(/<a[^>]*>前のページ<\/a>/);
+	});
+
+	// 総件数が limit の倍数ちょうどのとき、最終ページの次は必ず空になる。
+	// 境界の判定を 1 つずらすと、ここだけリンクが出て空ページに飛ぶ
+	it("総件数が limit の倍数ちょうどでも、最終ページに「次のページ」を出さない", () => {
+		const html = renderPagination({ total: 40, limit: 20, offset: 20 });
+
+		expect(html).toContain("2 / 2 ページ");
+		expect(html).not.toMatch(/<a[^>]*>次のページ<\/a>/);
+		expect(html).not.toContain("offset=40");
+	});
+
+	it("倍数ちょうどの手前のページには「次のページ」を出す", () => {
+		const html = renderPagination({ total: 40, limit: 20, offset: 0 });
+
+		expect(html).toMatch(/<a[^>]*>次のページ<\/a>/);
+		expect(html).toContain('href="/issues?offset=20"');
+	});
+
+	it("いま何ページ目かを出す", () => {
+		const html = renderPagination({ total: 45, limit: 20, offset: 20 });
+
+		expect(html).toContain("2 / 3 ページ");
+	});
+
+	// ページを送った瞬間に絞り込みが外れると、一覧としては使い物にならない
+	it("ページ送りのリンクが絞り込み条件を引き継ぐ", () => {
+		const html = renderPagination({
+			filters: parseIssueFilters({
+				scope: "global",
+				q: "街灯",
+				sort: "oldest",
+			}),
+			total: 45,
+			limit: 20,
+			offset: 0,
+		});
+
+		const href = html.match(/href="([^"]*offset=20[^"]*)"/)?.[1];
+		expect(href).toBeDefined();
+		const url = new URL(
+			(href ?? "").replaceAll("&amp;", "&"),
+			"https://x.test",
+		);
+		expect(url.searchParams.get("scope")).toBe("global");
+		expect(url.searchParams.get("q")).toBe("街灯");
+		expect(url.searchParams.get("sort")).toBe("oldest");
+	});
+});
+
+/**
+ * 一覧ページが searchParams を実際に読んで API に渡しているかを見る。
+ *
+ * `parseIssueFilters` と `fetchIssues` が個別に正しくても、`page.tsx` が
+ * 両者を繋いでいなければ「フィルタ UI はあるのに何も絞られない」状態になる。
+ * その結線はページを描画してみないと確認できない。
+ */
+describe("Issue 一覧ページ", () => {
+	async function renderIssuesPage(
+		searchParams: RawSearchParams,
+		response: Response,
+	) {
+		const originalFetch = globalThis.fetch;
+		const calls: string[] = [];
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			calls.push(typeof input === "string" ? input : input.toString());
+			return response;
+		}) as unknown as typeof globalThis.fetch;
+
+		try {
+			const html = renderToStaticMarkup(
+				await IssuesPage({ searchParams: Promise.resolve(searchParams) }),
+			);
+			return { html, calls };
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	}
+
+	it("URL の絞り込み条件を API のクエリに渡す", async () => {
+		const { calls } = await renderIssuesPage(
+			{
+				scope: "municipality",
+				status: "open",
+				category: "道路・交通",
+				q: "街灯",
+				sort: "oldest",
+				offset: "20",
+			},
+			Response.json({ data: [], total: 0, limit: 20, offset: 20 }),
+		);
+
+		expect(calls).toHaveLength(1);
+		const url = new URL(calls[0] ?? "");
+		expect(url.searchParams.get("scope")).toBe("municipality");
+		expect(url.searchParams.get("status")).toBe("open");
+		expect(url.searchParams.get("category")).toBe("道路・交通");
+		expect(url.searchParams.get("q")).toBe("街灯");
+		expect(url.searchParams.get("sort")).toBe("oldest");
+		expect(url.searchParams.get("offset")).toBe("20");
+	});
+
+	it("条件が無ければ絞り込み無しで取得する", async () => {
+		const { calls, html } = await renderIssuesPage(
+			{},
+			Response.json({ data: [sampleIssue], total: 1, limit: 20, offset: 0 }),
+		);
+
+		const url = new URL(calls[0] ?? "");
+		expect(url.searchParams.get("scope")).toBeNull();
+		expect(url.searchParams.get("q")).toBeNull();
+		expect(html).toContain("駅前の街灯が切れている");
+	});
+
+	it("絞り込みフォームを表示する", async () => {
+		const { html } = await renderIssuesPage(
+			{},
+			Response.json({ data: [], total: 0, limit: 20, offset: 0 }),
+		);
+
+		expect(html).toContain("絞り込み・並べ替え");
+		expect(html).toContain('name="scope"');
+		expect(html).toContain('name="q"');
+	});
+
+	// 「投稿が 1 件も無い」と「条件に合わなかった」は原因も次の行動も違う
+	it("絞り込みで 0 件になったときは条件のせいだと伝える", async () => {
+		const { html } = await renderIssuesPage(
+			{ q: "見つからない語" },
+			Response.json({ data: [], total: 0, limit: 20, offset: 0 }),
+		);
+
+		expect(html).toContain("条件に合う Issue はありませんでした");
+		expect(html).not.toContain("まだ Issue がありません");
+	});
+
+	it("条件無しで 0 件なら、まだ投稿が無いことを伝える", async () => {
+		const { html } = await renderIssuesPage(
+			{},
+			Response.json({ data: [], total: 0, limit: 20, offset: 0 }),
+		);
+
+		expect(html).toContain("まだ Issue がありません");
+		expect(html).not.toContain("条件に合う Issue はありませんでした");
+	});
+
+	it("総件数が 1 ページを超えるならページ送りを出す", async () => {
+		const { html } = await renderIssuesPage(
+			{},
+			Response.json({ data: [sampleIssue], total: 45, limit: 20, offset: 0 }),
+		);
+
+		expect(html).toContain("次のページ");
+		expect(html).toContain("1 / 3 ページ");
+	});
+
+	it("1 ページに収まるならページ送りを出さない", async () => {
+		const { html } = await renderIssuesPage(
+			{},
+			Response.json({ data: [sampleIssue], total: 1, limit: 20, offset: 0 }),
+		);
+
+		expect(html).not.toContain("次のページ");
+	});
+
+	it("2 ページ目では表示中の範囲を出す", async () => {
+		const { html } = await renderIssuesPage(
+			{ offset: "20" },
+			Response.json({ data: [sampleIssue], total: 45, limit: 20, offset: 20 }),
+		);
+
+		expect(html).toContain("45 件中 21 〜 21 件目を表示");
+	});
+
+	// URL は手で編集できる。壊れた値で 500 を返さず、既定の一覧として成立させる
+	it("壊れたクエリでもエラーにせず既定の一覧を出す", async () => {
+		const { html, calls } = await renderIssuesPage(
+			{ scope: "galactic", offset: "-1", sort: "random" },
+			Response.json({ data: [sampleIssue], total: 1, limit: 20, offset: 0 }),
+		);
+
+		const url = new URL(calls[0] ?? "");
+		expect(url.searchParams.get("scope")).toBeNull();
+		expect(url.searchParams.get("sort")).toBeNull();
+		expect(url.searchParams.get("offset")).toBeNull();
+		expect(html).toContain("駅前の街灯が切れている");
+	});
+
+	it("API が落ちていてもフォームは出す（条件を変えて再試行できる）", async () => {
+		const originalError = console.error;
+		console.error = () => {};
+		try {
+			const { html } = await renderIssuesPage(
+				{ q: "街灯" },
+				new Response("boom", { status: 500 }),
+			);
+
+			expect(html).toContain("Issue を取得できませんでした");
+			expect(html).toContain("絞り込み・並べ替え");
 		} finally {
 			console.error = originalError;
 		}

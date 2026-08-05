@@ -111,18 +111,20 @@ async function insertIssueAt(
 	title: string,
 	createdAt: string,
 	userId = "test-user-123",
+	overrides: { description?: string; category?: string | null } = {},
 ): Promise<void> {
 	await env.DB.prepare(
-		`INSERT INTO issues (id, title, description, scope, latitude, longitude, user_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO issues (id, title, description, scope, latitude, longitude, category, user_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 		.bind(
 			id,
 			title,
-			validIssue.description,
+			overrides.description ?? validIssue.description,
 			validIssue.scope,
 			validIssue.latitude,
 			validIssue.longitude,
+			overrides.category ?? null,
 			userId,
 			createdAt,
 			createdAt,
@@ -470,6 +472,272 @@ describe("Issues CRUD", () => {
 			const res2 = await app.request("/issues?status=closed", {}, env);
 			const body2 = await readBody(res2);
 			expect(body2.data).toHaveLength(0);
+		});
+
+		// カテゴリでの絞り込み。表記ゆれを抑えるために候補を出している以上、
+		// 「後から同じ種類の Issue を探す」手段が API に無いと候補の意味が無い。
+		describe("filters by category", () => {
+			it("returns only the issues in the given category", async () => {
+				await createIssue({ ...validIssue, category: "道路・交通" });
+				await createIssue({
+					...validIssue,
+					title: "Other",
+					category: "衛生・ごみ",
+				});
+				await createIssue({ ...validIssue, title: "No category" });
+
+				const res = await app.request(
+					`/issues?category=${encodeURIComponent("道路・交通")}`,
+					{},
+					env,
+				);
+				const body = await readBody(res);
+				expect(res.status).toBe(200);
+				expect(titlesOf(body)).toEqual([validIssue.title]);
+				// total もフィルタ後の件数であること（ページング UI が使う）
+				expect(body.total).toBe(1);
+			});
+
+			it("matches the whole value, not a prefix", async () => {
+				await createIssue({ ...validIssue, category: "道路・交通" });
+
+				const res = await app.request(
+					`/issues?category=${encodeURIComponent("道路")}`,
+					{},
+					env,
+				);
+				const body = await readBody(res);
+				expect(body.data).toHaveLength(0);
+			});
+
+			it("does not match issues without a category", async () => {
+				await createIssue();
+
+				const res = await app.request("/issues?category=x", {}, env);
+				const body = await readBody(res);
+				expect(body.data).toHaveLength(0);
+				expect(body.total).toBe(0);
+			});
+
+			it("combines with the scope filter", async () => {
+				await createIssue({ ...validIssue, category: "道路・交通" });
+				await createIssue({
+					...validIssue,
+					title: "National road",
+					scope: "national",
+					category: "道路・交通",
+				});
+
+				const res = await app.request(
+					`/issues?scope=national&category=${encodeURIComponent("道路・交通")}`,
+					{},
+					env,
+				);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["National road"]);
+				expect(body.total).toBe(1);
+			});
+		});
+
+		// キーワード検索。件数が増えたときに目的の Issue へ辿り着く主要な導線。
+		describe("keyword search", () => {
+			it("matches a substring of the title", async () => {
+				await createIssue({ ...validIssue, title: "駅前の街灯が切れている" });
+				await createIssue({ ...validIssue, title: "ゴミ集積所があふれている" });
+
+				const res = await app.request(
+					`/issues?q=${encodeURIComponent("街灯")}`,
+					{},
+					env,
+				);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["駅前の街灯が切れている"]);
+				expect(body.total).toBe(1);
+			});
+
+			it("matches a substring of the description", async () => {
+				await insertIssueAt(
+					"q-desc",
+					"Title only",
+					"2026-01-01 00:00:01.000",
+					"test-user-123",
+					{ description: "夜道が暗くて危ない" },
+				);
+
+				const res = await app.request(
+					`/issues?q=${encodeURIComponent("夜道")}`,
+					{},
+					env,
+				);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["Title only"]);
+			});
+
+			it("treats % as a literal character, not a wildcard", async () => {
+				await createIssue({ ...validIssue, title: "電気代が100%上がった" });
+				// `%` をワイルドカードのまま送ると「100 …… 上」にも当たる行。
+				// エスケープしていなければ、この 2 件目まで返ってしまう
+				await createIssue({ ...validIssue, title: "気温が100度から上がった" });
+
+				const res = await app.request(
+					`/issues?q=${encodeURIComponent("100%上")}`,
+					{},
+					env,
+				);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["電気代が100%上がった"]);
+			});
+
+			it("treats _ as a literal character, not a single-character wildcard", async () => {
+				await createIssue({ ...validIssue, title: "snake_case" });
+				await createIssue({ ...validIssue, title: "snakeXcase" });
+
+				const res = await app.request(
+					`/issues?q=${encodeURIComponent("snake_case")}`,
+					{},
+					env,
+				);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["snake_case"]);
+			});
+
+			it("treats a backslash as a literal character", async () => {
+				await createIssue({ ...validIssue, title: "path\\to\\file" });
+
+				const res = await app.request(
+					`/issues?q=${encodeURIComponent("path\\to")}`,
+					{},
+					env,
+				);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["path\\to\\file"]);
+			});
+
+			it("returns an empty list when nothing matches (not everything)", async () => {
+				await createIssue();
+
+				const res = await app.request("/issues?q=zzzznotfound", {}, env);
+				const body = await readBody(res);
+				expect(body.data).toHaveLength(0);
+				expect(body.total).toBe(0);
+			});
+
+			it("treats a blank keyword as unspecified", async () => {
+				await createIssue();
+
+				// フォームから空文字が送られてくるのは「未指定」であって
+				// 「空文字に一致するものを探せ」ではない
+				const res = await app.request("/issues?q=", {}, env);
+				const body = await readBody(res);
+				expect(res.status).toBe(200);
+				expect(body.data).toHaveLength(1);
+
+				const spaces = await app.request(
+					`/issues?q=${encodeURIComponent("   ")}`,
+					{},
+					env,
+				);
+				const spacesBody = await readBody(spaces);
+				expect(spaces.status).toBe(200);
+				expect(spacesBody.data).toHaveLength(1);
+			});
+
+			it("combines with the status filter", async () => {
+				await createIssue({ ...validIssue, title: "街灯 open" });
+				await insertIssueAt(
+					"q-closed",
+					"街灯 closed",
+					"2026-01-01 00:00:01.000",
+				);
+				await env.DB.prepare("UPDATE issues SET status = 'closed' WHERE id = ?")
+					.bind("q-closed")
+					.run();
+
+				const res = await app.request(
+					`/issues?q=${encodeURIComponent("街灯")}&status=open`,
+					{},
+					env,
+				);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["街灯 open"]);
+				expect(body.total).toBe(1);
+			});
+		});
+
+		// 並べ替え。既定は新しい順で、`sort=oldest` でその逆順になる。
+		describe("sorting", () => {
+			beforeEach(async () => {
+				await insertIssueAt("sort-1", "Oldest", "2026-01-01 00:00:01.000");
+				await insertIssueAt("sort-2", "Middle", "2026-01-01 00:00:02.000");
+				await insertIssueAt("sort-3", "Newest", "2026-01-01 00:00:03.000");
+			});
+
+			it("defaults to newest first", async () => {
+				const res = await app.request("/issues", {}, env);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["Newest", "Middle", "Oldest"]);
+				expect(body.sort).toBe("newest");
+			});
+
+			it("returns oldest first with sort=oldest", async () => {
+				const res = await app.request("/issues?sort=oldest", {}, env);
+				const body = await readBody(res);
+				expect(titlesOf(body)).toEqual(["Oldest", "Middle", "Newest"]);
+				expect(body.sort).toBe("oldest");
+			});
+
+			it("applies the sort order to offset paging", async () => {
+				const first = await app.request(
+					"/issues?sort=oldest&limit=2&offset=0",
+					{},
+					env,
+				);
+				expect(titlesOf(await readBody(first))).toEqual(["Oldest", "Middle"]);
+
+				const second = await app.request(
+					"/issues?sort=oldest&limit=2&offset=2",
+					{},
+					env,
+				);
+				expect(titlesOf(await readBody(second))).toEqual(["Newest"]);
+			});
+
+			it("keeps the sort order across cursor pages without loss", async () => {
+				const first = await app.request("/issues?sort=oldest&limit=2", {}, env);
+				const firstBody = await readBody(first);
+				expect(titlesOf(firstBody)).toEqual(["Oldest", "Middle"]);
+				expect(firstBody.next_cursor).not.toBeNull();
+
+				// カーソル条件の不等号を反転し忘れていると、ここで
+				// 「今見たページの手前」が返って重複・欠落が起きる
+				const second = await app.request(
+					`/issues?sort=oldest&limit=2&cursor=${encodeURIComponent(firstBody.next_cursor)}`,
+					{},
+					env,
+				);
+				const secondBody = await readBody(second);
+				expect(titlesOf(secondBody)).toEqual(["Newest"]);
+				expect(secondBody.next_cursor).toBeNull();
+
+				const paged = [...titlesOf(firstBody), ...titlesOf(secondBody)];
+				expect(new Set(paged).size).toBe(paged.length);
+				expect([...paged].sort()).toEqual(["Middle", "Newest", "Oldest"]);
+			});
+
+			it("breaks created_at ties by id in the same direction", async () => {
+				await insertIssueAt("tie-b", "Tie B", "2026-02-01 00:00:00.000");
+				await insertIssueAt("tie-a", "Tie A", "2026-02-01 00:00:00.000");
+
+				const newest = await app.request("/issues?limit=2", {}, env);
+				expect(titlesOf(await readBody(newest))).toEqual(["Tie B", "Tie A"]);
+
+				const oldest = await app.request(
+					"/issues?sort=oldest&limit=2&offset=3",
+					{},
+					env,
+				);
+				expect(titlesOf(await readBody(oldest))).toEqual(["Tie A", "Tie B"]);
+			});
 		});
 
 		it("supports limit and offset", async () => {
@@ -1020,6 +1288,54 @@ describe("Issues CRUD", () => {
 				expect(res.status).toBe(400);
 				const body = await readBody(res);
 				expect(body.error.fieldErrors.status).toBeDefined();
+			});
+
+			it("rejects an unknown sort", async () => {
+				const res = await app.request("/issues?sort=random", {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.sort).toBeDefined();
+			});
+
+			it("rejects an empty category (would match nothing meaningful)", async () => {
+				const res = await app.request("/issues?category=", {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.category).toBeDefined();
+			});
+
+			it("rejects a category above the maximum length", async () => {
+				const res = await app.request(
+					`/issues?category=${"a".repeat(101)}`,
+					{},
+					env,
+				);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.category).toBeDefined();
+			});
+
+			it("accepts a category at the maximum length", async () => {
+				const res = await app.request(
+					`/issues?category=${"a".repeat(100)}`,
+					{},
+					env,
+				);
+				expect(res.status).toBe(200);
+			});
+
+			// 認証不要の公開エンドポイントなので、任意長の文字列を
+			// LIKE パターンに変換させない
+			it("rejects a keyword above the maximum length", async () => {
+				const res = await app.request(`/issues?q=${"a".repeat(201)}`, {}, env);
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.q).toBeDefined();
+			});
+
+			it("accepts a keyword at the maximum length", async () => {
+				const res = await app.request(`/issues?q=${"a".repeat(200)}`, {}, env);
+				expect(res.status).toBe(200);
 			});
 
 			// 拒否だけを固定すると max(100) を max(99) に狭めるような退行を拾えないため、
