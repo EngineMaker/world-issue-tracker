@@ -104,9 +104,9 @@ export default function NewIssuePage() {
 		setIsSubmitting(true);
 		try {
 			const created = await createIssue(result.data, await getToken());
-			// 詳細画面 (`/issues/[id]`) はまだ無いので、遷移せずにこの画面で
-			// 完了を伝える。作った Issue の ID を出しておけば、
-			// API から直接引くことはできる。
+			// 自動では遷移させず、詳細画面 (`/issues/[id]`) へのリンクを出すに留める。
+			// 続けてもう 1 件書く人がこの画面に残れることと、
+			// 「送ったのに画面が変わらない」と思わせないことの両立を取った。
 			setCreatedId(created.id);
 			setValues(INITIAL_VALUES);
 		} catch (error) {
@@ -314,7 +314,8 @@ export default function NewIssuePage() {
 
 				{createdId && (
 					<output style={{ display: "block", color: "#15803d" }}>
-						起票しました（ID: {createdId}）
+						起票しました。
+						<Link href={`/issues/${createdId}`}>投稿した Issue を見る</Link>
 					</output>
 				)}
 

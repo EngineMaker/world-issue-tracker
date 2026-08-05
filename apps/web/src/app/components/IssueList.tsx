@@ -1,4 +1,16 @@
+import {
+	DEFAULT_LOCALE,
+	ISSUE_SCOPE_LABELS,
+	ISSUE_STATUS_LABELS,
+} from "@world-issue-tracker/shared";
+import Link from "next/link";
 import type { FetchIssuesResult, PublicIssue } from "../../lib/issues";
+
+// 表示ラベルは packages/shared に一本化している。
+// 一覧が生の enum 値（`community` / `open`）、詳細ページが日本語ラベルだと、
+// リンクで繋がった 2 画面で同じ Issue が別物に見える
+const SCOPE_LABELS = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
+const STATUS_LABELS = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
 
 /**
  * API が返す `created_at` を表示用の文字列にする。
@@ -30,12 +42,18 @@ function IssueCard({ issue }: { issue: PublicIssue }) {
 				listStyle: "none",
 			}}
 		>
-			<h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem" }}>{issue.title}</h3>
+			{/*
+			  カード全体ではなくタイトルをリンクにする。カード全体を <a> で
+			  包むと、読み上げ時に説明文まで一続きのリンク名として読まれる
+			*/}
+			<h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem" }}>
+				<Link href={`/issues/${issue.id}`}>{issue.title}</Link>
+			</h3>
 			<p style={{ margin: "0 0 0.5rem", color: "#444" }}>{issue.description}</p>
 			<p style={{ margin: 0, fontSize: "0.85rem", color: "#666" }}>
-				<span>{issue.scope}</span>
+				<span>{SCOPE_LABELS[issue.scope].label}</span>
 				{" / "}
-				<span>{issue.status}</span>
+				<span>{STATUS_LABELS[issue.status]}</span>
 				{issue.category ? (
 					<>
 						{" / "}

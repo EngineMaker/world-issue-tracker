@@ -1,4 +1,9 @@
 import { describe, expect, it } from "bun:test";
+import {
+	DEFAULT_LOCALE,
+	ISSUE_SCOPE_LABELS,
+	ISSUE_STATUS_LABELS,
+} from "@world-issue-tracker/shared";
 import { renderToStaticMarkup } from "react-dom/server";
 import { formatCreatedAt, IssueList } from "../src/app/components/IssueList";
 import Home from "../src/app/page";
@@ -31,8 +36,13 @@ describe("IssueList", () => {
 		});
 
 		expect(html).toContain("駅前の街灯が切れている");
-		expect(html).toContain("community");
-		expect(html).toContain("open");
+		// スコープとステータスは日本語ラベルで出す（詳細ページと同じ文言）。
+		// 期待値は shared の定数から引く。ここに直書きすると、
+		// ラベルを変えたときにテストだけが古い文言を守り続ける
+		expect(html).toContain(ISSUE_SCOPE_LABELS[DEFAULT_LOCALE].community.label);
+		expect(html).toContain(ISSUE_STATUS_LABELS[DEFAULT_LOCALE].open);
+		// enum の生値がそのまま出ていないこと
+		expect(html).not.toContain(">community<");
 		// `dateTime` 属性ではなく、画面に見えるテキストとして日時が出ていること。
 		// 属性値だけを見ると、表示から日時が消えても気付けない
 		const visibleText = html.replace(/<[^>]*>/g, "");
