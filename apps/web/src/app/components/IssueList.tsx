@@ -1,4 +1,23 @@
+import {
+	DEFAULT_LOCALE,
+	ISSUE_SCOPE_LABELS,
+	ISSUE_STATUS_LABELS,
+} from "@world-issue-tracker/shared";
 import type { FetchIssuesResult, PublicIssue } from "../../lib/issues";
+
+/**
+ * 画面に出すスコープ・ステータスのラベル。
+ *
+ * `municipality` / `open` のような enum の生の値はユーザー向けの語彙ではない。
+ * 対応表はここに写さず `packages/shared` から引く（`page.tsx` と同じ経路）。
+ * 写すと二重管理になって片方だけ古くなるうえ、
+ * 同じ概念が同一画面の中で違う表記になる（Issue #59）。
+ *
+ * export しているのはテストのため。ラベルを写した実装でも描画結果は同じになるため、
+ * 描画からは二重管理を見分けられない。shared の辞書と同一かをテストが直接見る。
+ */
+export const scopeLabels = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
+export const statusLabels = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
 
 /**
  * API が返す `created_at` を表示用の文字列にする。
@@ -33,9 +52,9 @@ function IssueCard({ issue }: { issue: PublicIssue }) {
 			<h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem" }}>{issue.title}</h3>
 			<p style={{ margin: "0 0 0.5rem", color: "#444" }}>{issue.description}</p>
 			<p style={{ margin: 0, fontSize: "0.85rem", color: "#666" }}>
-				<span>{issue.scope}</span>
+				<span>{scopeLabels[issue.scope].label}</span>
 				{" / "}
-				<span>{issue.status}</span>
+				<span>{statusLabels[issue.status]}</span>
 				{issue.category ? (
 					<>
 						{" / "}

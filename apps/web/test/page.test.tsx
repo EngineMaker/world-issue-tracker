@@ -1,6 +1,18 @@
 import { describe, expect, it } from "bun:test";
+import {
+	DEFAULT_LOCALE,
+	ISSUE_SCOPE_LABELS,
+	ISSUE_STATUS_LABELS,
+	IssueScope,
+	IssueStatus,
+} from "@world-issue-tracker/shared";
 import { renderToStaticMarkup } from "react-dom/server";
-import { formatCreatedAt, IssueList } from "../src/app/components/IssueList";
+import {
+	formatCreatedAt,
+	IssueList,
+	scopeLabels,
+	statusLabels,
+} from "../src/app/components/IssueList";
 import Home from "../src/app/page";
 import type { FetchIssuesResult } from "../src/lib/issues";
 
@@ -31,12 +43,62 @@ describe("IssueList", () => {
 		});
 
 		expect(html).toContain("駅前の街灯が切れている");
-		expect(html).toContain("community");
-		expect(html).toContain("open");
+		// スコープ・ステータスは日本語ラベルで出す（Issue #59）
+		expect(html).toContain("コミュニティ");
+		expect(html).toContain("受付");
 		// `dateTime` 属性ではなく、画面に見えるテキストとして日時が出ていること。
 		// 属性値だけを見ると、表示から日時が消えても気付けない
 		const visibleText = html.replace(/<[^>]*>/g, "");
 		expect(visibleText).toContain("2026-08-01 12:00 UTC");
+	});
+
+	it("スコープ・ステータスの enum の生の値を画面に出さない", () => {
+		// Issue #59。`municipality` / `open` がそのまま見えていた。
+		// 属性値には含まれ得るので、タグを剥がした可視テキストだけを見る
+		for (const scope of IssueScope.options) {
+			for (const status of IssueStatus.options) {
+				const html = render({
+					ok: true,
+					issues: [{ ...sampleIssue, scope, status }],
+					total: 1,
+				});
+				const visibleText = html.replace(/<[^>]*>/g, "");
+
+				expect(visibleText).not.toContain(scope);
+				expect(visibleText).not.toContain(status);
+			}
+		}
+	});
+
+	it("全スコープ・全ステータスを shared のラベルで、この順に表示する", () => {
+		const expectedScopeLabels = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
+		const expectedStatusLabels = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
+
+		for (const scope of IssueScope.options) {
+			for (const status of IssueStatus.options) {
+				const html = render({
+					ok: true,
+					issues: [{ ...sampleIssue, scope, status }],
+					total: 1,
+				});
+				const visibleText = html.replace(/<[^>]*>/g, "");
+
+				// 「含まれているか」だけを見ると、スコープとステータスを
+				// 逆の位置に出す実装を見逃す（どちらのラベルも画面には出るため）。
+				// 並び順まで固定する
+				expect(visibleText).toContain(
+					`${expectedScopeLabels[scope].label} / ${expectedStatusLabels[status]} /`,
+				);
+			}
+		}
+	});
+
+	it("ラベルの対応表を shared から引いている（写していない）", () => {
+		// ラベルを写した実装でも描画結果は同じになるため、描画では見分けられない。
+		// 二重管理になると shared 側を直しても一覧だけ古いまま残る。
+		// 中身の一致（toEqual）ではなく同一のオブジェクトであること（toBe）を見る
+		expect(scopeLabels).toBe(ISSUE_SCOPE_LABELS[DEFAULT_LOCALE]);
+		expect(statusLabels).toBe(ISSUE_STATUS_LABELS[DEFAULT_LOCALE]);
 	});
 
 	it("表示件数と総件数を取り違えずに出す", () => {
