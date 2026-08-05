@@ -3,6 +3,10 @@ import type {
 	IssueStatus as IssueStatusType,
 } from "@world-issue-tracker/shared";
 import { IssueScope, IssueStatus } from "@world-issue-tracker/shared";
+import {
+	type FetchCommentsResult,
+	parseListCommentsResponse,
+} from "./comments";
 
 /**
  * 公開 GET が返す Issue 1 件の形。
@@ -152,6 +156,114 @@ type FetchIssuesOptions = {
 	/** テストから差し替えるための `fetch`。通常は省略する。 */
 	fetchImpl?: typeof globalThis.fetch;
 };
+
+/**
+ * Issue 1 件の取得結果。
+ *
+ * 「存在しない」（404）と「取得に失敗した」を分けている。前者は詳細ページで
+ * Next.js の `notFound()` に落とすが、後者で 404 を出すと API の一時的な障害が
+ * 「Issue が消えた」ように見えてしまうため。
+ */
+export type FetchIssueResult =
+	| { ok: true; issue: PublicIssue }
+	| { ok: false; notFound: true }
+	| { ok: false; notFound: false; error: string };
+
+type FetchIssueOptions = {
+	/** テストから差し替えるための `fetch`。通常は省略する。 */
+	fetchImpl?: typeof globalThis.fetch;
+};
+
+/**
+ * API から Issue を 1 件取得する。
+ *
+ * Server Component から呼ぶことを前提にしている（`fetchIssues` と同じ）。
+ */
+export async function fetchIssue(
+	id: string,
+	{ fetchImpl = globalThis.fetch }: FetchIssueOptions = {},
+): Promise<FetchIssueResult> {
+	// id はパスセグメントとして埋め込むので、`/` や `?` を含む値が
+	// 別のエンドポイントを指してしまわないようエスケープする
+	const url = `${resolveApiBaseUrl()}/issues/${encodeURIComponent(id)}`;
+
+	try {
+		// 投稿・更新が次のアクセスで見えるよう、キャッシュしない
+		const res = await fetchImpl(url, { cache: "no-store" });
+
+		if (res.status === 404) {
+			return { ok: false, notFound: true };
+		}
+		if (!res.ok) {
+			return {
+				ok: false,
+				notFound: false,
+				error: `API が ${res.status} を返しました`,
+			};
+		}
+
+		const issue = parsePublicIssue(await res.json());
+		if (!issue) {
+			return {
+				ok: false,
+				notFound: false,
+				error: "API のレスポンス形式が想定と異なります",
+			};
+		}
+
+		return { ok: true, issue };
+	} catch (err) {
+		console.error("GET /issues/:id に失敗", err);
+		return {
+			ok: false,
+			notFound: false,
+			error: "API に接続できませんでした",
+		};
+	}
+}
+
+/**
+ * API から Issue のコメント一覧を取得する。
+ *
+ * Server Component から呼ぶ前提（`fetchIssue` と同じ）。取得関数をこのファイルに
+ * まとめているのは、`cache: "no-store"` を含む記述が Workers の型と噛み合わず、
+ * api 側の `tsc` に巻き込むと型エラーになるため（`lib/api.ts` の同種のコメント参照）。
+ * 形の検証や投稿など、api 側からテストしたい純粋なロジックは `lib/comments.ts` にある。
+ *
+ * 親 Issue が存在しないとき（404）は「取得に失敗した」ではなく空の一覧を返す。
+ * 詳細ページは Issue 本体とコメントを並行に取りに行くため、その隙に Issue が
+ * 削除されると、コメント側だけが 404 を返すことがある。これを失敗として扱うと
+ * 「時間をおいて再度お試しください」という、時間をおいても直らない案内が出る。
+ * 404 は「読むべきコメントが無い」であって障害ではないので、空として扱う。
+ */
+export async function fetchComments(
+	issueId: string,
+	{ fetchImpl = globalThis.fetch }: FetchIssueOptions = {},
+): Promise<FetchCommentsResult> {
+	const url = `${resolveApiBaseUrl()}/issues/${encodeURIComponent(issueId)}/comments`;
+
+	try {
+		// 投稿したコメントが次のアクセスで見えるよう、キャッシュしない
+		const res = await fetchImpl(url, { cache: "no-store" });
+
+		if (res.status === 404) {
+			return { ok: true, comments: [], total: 0 };
+		}
+		if (!res.ok) {
+			return { ok: false, error: `API が ${res.status} を返しました` };
+		}
+
+		const parsed = parseListCommentsResponse(await res.json());
+		if (!parsed) {
+			return { ok: false, error: "API のレスポンス形式が想定と異なります" };
+		}
+
+		return { ok: true, comments: parsed.comments, total: parsed.total };
+	} catch (err) {
+		console.error("GET /issues/:id/comments に失敗", err);
+		return { ok: false, error: "API に接続できませんでした" };
+	}
+}
 
 /**
  * API から Issue 一覧を取得する。

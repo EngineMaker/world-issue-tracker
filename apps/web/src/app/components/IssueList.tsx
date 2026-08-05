@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { FetchIssuesResult, PublicIssue } from "../../lib/issues";
 
 /**
@@ -30,7 +31,14 @@ function IssueCard({ issue }: { issue: PublicIssue }) {
 				listStyle: "none",
 			}}
 		>
-			<h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem" }}>{issue.title}</h3>
+			{/*
+			  タイトルを詳細ページ (`/issues/[id]`) への入口にする。
+			  コメント欄はその画面にあるため、ここに導線が無いと
+			  一覧から議論に辿り着けない。
+			*/}
+			<h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem" }}>
+				<Link href={`/issues/${issue.id}`}>{issue.title}</Link>
+			</h3>
 			<p style={{ margin: "0 0 0.5rem", color: "#444" }}>{issue.description}</p>
 			<p style={{ margin: 0, fontSize: "0.85rem", color: "#666" }}>
 				<span>{issue.scope}</span>
