@@ -570,6 +570,7 @@ describe("fetchMyIssues", () => {
 
 		await fetchMyIssues({ token: "tok_1", fetchImpl: fetch });
 
+		expect(calls).toHaveLength(1);
 		expect(calls[0]?.init?.cache).toBe("no-store");
 	});
 

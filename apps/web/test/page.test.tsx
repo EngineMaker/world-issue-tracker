@@ -278,8 +278,7 @@ describe("IssueCreated", () => {
 
 		expect(html).toContain('href="/my-issues"');
 		// リンクの文言が空だと、あることに気付けない
-		const visibleText = html.replace(/<[^>]*>/g, "");
-		expect(visibleText).toContain("自分が起票した Issue");
+		expect(html).toContain("自分が起票した Issue");
 	});
 });
 
