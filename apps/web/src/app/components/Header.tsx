@@ -19,6 +19,14 @@ export function Header() {
 			</h1>
 			<nav style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
 				<Link href="/issues/new">Issue を起票</Link>
+				<SignedIn>
+					{/*
+					  自分の Issue へ戻る導線（Issue #68）。サインイン中だけ出す。
+					  未サインインで押しても中身が無く、サインインを促すだけの
+					  画面に飛ばすことになるため。
+					*/}
+					<Link href="/my-issues">自分の Issue</Link>
+				</SignedIn>
 				<SignedOut>
 					<SignInButton mode="modal">
 						<button type="button">Sign In</button>

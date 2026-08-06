@@ -81,6 +81,8 @@ describe("Test database schema", () => {
 			"idx_issues_scope",
 			"idx_issues_status",
 			"idx_issues_user_id",
+			// 0004_add_user_id_created_at_index.sql — 自分の Issue 一覧の並び順用
+			"idx_issues_user_id_created_at",
 		]);
 	});
 

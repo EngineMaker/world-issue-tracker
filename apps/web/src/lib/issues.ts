@@ -285,19 +285,17 @@ type FetchIssuesOptions = {
 };
 
 /**
- * API から Issue 一覧を取得する。
+ * 一覧エンドポイントを叩いて結果を組み立てる。
+ * 公開一覧（`/issues`）と自分の一覧（`/issues/mine`）で共有する。
  *
- * Server Component から呼ぶことを前提にしている（サーバー間通信なので
- * ブラウザの CORS を経由しない）。
+ * `token` があれば `Authorization: Bearer` を付ける。Web と API は別オリジンで
+ * Clerk の Cookie が届かないため、認証が要る経路はこのヘッダが唯一の手段になる。
  */
-export async function fetchIssues({
-	limit = 20,
-	filters = DEFAULT_ISSUE_FILTERS,
-	fetchImpl = globalThis.fetch,
-}: FetchIssuesOptions = {}): Promise<FetchIssuesResult> {
+function buildListQueryParams(limit: number, filters?: IssueFilters): URLSearchParams {
 	// 値のエスケープは `URLSearchParams` に任せる。手で連結すると
 	// カテゴリやキーワードに含まれる `&` `=` `#` がクエリを壊す
 	const params = new URLSearchParams({ limit: String(limit) });
+	if (!filters) return params;
 	if (filters.scope) params.set("scope", filters.scope);
 	if (filters.status) params.set("status", filters.status);
 	if (filters.category) params.set("category", filters.category);
@@ -306,15 +304,39 @@ export async function fetchIssues({
 		params.set("sort", filters.sort);
 	}
 	if (filters.offset > 0) params.set("offset", String(filters.offset));
+	return params;
+}
 
-	const url = `${resolveApiBaseUrl()}/issues?${params.toString()}`;
+async function fetchIssueList(
+	path: string,
+	{
+		limit,
+		token,
+		filters,
+		fetchImpl,
+	}: {
+		limit: number;
+		token?: string;
+		filters?: IssueFilters;
+		fetchImpl: typeof globalThis.fetch;
+	},
+): Promise<FetchIssuesResult & { unauthorized?: boolean }> {
+	const url = `${resolveApiBaseUrl()}${path}?${buildListQueryParams(limit, filters).toString()}`;
 
 	try {
 		// 投稿された Issue が次のアクセスで見えるよう、キャッシュしない
-		const res = await fetchImpl(url, { cache: "no-store" });
+		const res = await fetchImpl(url, {
+			cache: "no-store",
+			headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+		});
 
 		if (!res.ok) {
-			return { ok: false, error: `API が ${res.status} を返しました` };
+			return {
+				ok: false,
+				error: `API が ${res.status} を返しました`,
+				// 401 だけは「サインインし直せば直る」ので呼び出し側に区別させる
+				unauthorized: res.status === 401,
+			};
 		}
 
 		// 想定外の形（プロキシの HTML エラーページ等）でも throw させない
@@ -331,13 +353,90 @@ export async function fetchIssues({
 			issues: parsed.issues,
 			total: parsed.total,
 			limit,
-			offset: filters.offset,
+			offset: filters?.offset ?? 0,
 		};
 	} catch (err) {
 		// API が落ちている / 名前解決できない / JSON として壊れている。
 		// 生の例外メッセージ（`fetch failed` など）は画面に出さず、
 		// 切り分けに要る情報はサーバーのログに残す
-		console.error("GET /issues に失敗", err);
+		console.error(`GET ${path} に失敗`, err);
 		return { ok: false, error: "API に接続できませんでした" };
 	}
+}
+
+/**
+ * API から Issue 一覧を取得する。
+ *
+ * Server Component から呼ぶことを前提にしている（サーバー間通信なので
+ * ブラウザの CORS を経由しない）。
+ */
+export async function fetchIssues({
+	limit = 20,
+	filters = DEFAULT_ISSUE_FILTERS,
+	fetchImpl = globalThis.fetch,
+}: FetchIssuesOptions = {}): Promise<FetchIssuesResult> {
+	const result = await fetchIssueList("/issues", { limit, filters, fetchImpl });
+	// 公開エンドポイントなので `unauthorized` は意味を持たない。
+	// 呼び出し側の型に余計な分岐を持ち込まないよう落とす。
+	const { unauthorized: _unauthorized, ...rest } = result;
+	return rest;
+}
+
+/**
+ * 自分が起票した Issue の取得結果。
+ *
+ * 失敗のうち「サインインが必要」だけは、利用者が自分で解消できる。
+ * 「時間をおいて再度お試しください」と同じ扱いにすると直しようがないため、
+ * `unauthorized` で区別して呼び出し側が案内を変えられるようにする。
+ */
+export type FetchMyIssuesResult =
+	| { ok: true; issues: PublicIssue[]; total: number }
+	| { ok: false; error: string; unauthorized: boolean };
+
+type FetchMyIssuesOptions = {
+	/**
+	 * Clerk のセッショントークン。
+	 * 未サインインなら null（`auth().getToken()` がそのまま null を返す）。
+	 */
+	token: string | null;
+	/** 取得件数。API 側の上限は 100。 */
+	limit?: number;
+	/** テストから差し替えるための `fetch`。通常は省略する。 */
+	fetchImpl?: typeof globalThis.fetch;
+};
+
+/**
+ * API から「自分が起票した Issue」の一覧を取得する（`GET /issues/mine`）。
+ *
+ * 絞り込みの条件はトークンに紐づく userId ひとつで、こちらから誰の分かを
+ * 指定する余地は無い（API 側も同じ）。
+ */
+export async function fetchMyIssues({
+	token,
+	limit = 20,
+	fetchImpl = globalThis.fetch,
+}: FetchMyIssuesOptions): Promise<FetchMyIssuesResult> {
+	// トークンが無いなら API を呼んでも 401 が返るだけ。
+	// 往復せずにその場で未認証として返す。
+	if (!token) {
+		return {
+			ok: false,
+			error: "サインインが必要です",
+			unauthorized: true,
+		};
+	}
+
+	const result = await fetchIssueList("/issues/mine", {
+		limit,
+		token,
+		fetchImpl,
+	});
+	if (result.ok) {
+		return result;
+	}
+	return {
+		ok: false,
+		error: result.error,
+		unauthorized: result.unauthorized ?? false,
+	};
 }

@@ -14,6 +14,7 @@ vi.mock("@clerk/backend", async () => {
 
 import { createApp } from "../src/index";
 import {
+	PUBLIC_ISSUE_COLUMNS as PUBLIC_ISSUE_COLUMNS_FOR_TEST,
 	PUBLIC_SELECT as PUBLIC_SELECT_FOR_TEST,
 	toPublicIssue as toPublicIssueForTest,
 } from "../src/routes/issues";
@@ -1570,6 +1571,300 @@ describe("Issues CRUD", () => {
 			expect(res.status).toBe(404);
 			const body = await readBody(res);
 			expect(body.error).toBe("Issue not found");
+		});
+	});
+
+	// --- GET /issues/mine ---
+	//
+	// 自分が起票した Issue だけを返す（Issue #68）。公開一覧と違って認証必須で、
+	// 絞り込みの条件は Clerk の userId ひとつ。クエリで他人を指定する余地は無い。
+	describe("GET /issues/mine", () => {
+		const OWNER = "test-user-123";
+		const OTHER = "other-user-456";
+
+		it("returns 401 when unauthenticated", async () => {
+			await createIssue();
+
+			setMockUserId(null);
+			const res = await app.request("/issues/mine", {}, env);
+			expect(res.status).toBe(401);
+			const body = await readBody(res);
+			expect(body.error).toBe("Unauthorized");
+		});
+
+		// 401 を返しながら結果も組み立てている実装だと、レスポンスの検査だけでは
+		// 気付けない。未認証では DB に一切触れないことを prepare の回数で見る。
+		it("does not query the database when unauthenticated", async () => {
+			await createIssue();
+
+			setMockUserId(null);
+			const prepareSpy = vi.spyOn(env.DB, "prepare");
+			try {
+				const res = await app.request("/issues/mine", {}, env);
+				expect(res.status).toBe(401);
+				expect(prepareSpy).not.toHaveBeenCalled();
+			} finally {
+				prepareSpy.mockRestore();
+			}
+		});
+
+		// `/issues/mine` が `/issues/:id` にマッチしてしまうと、
+		// 「mine という id の Issue は無い」で 404 になる。登録順の退行を拾う。
+		it("is not swallowed by the /issues/:id route", async () => {
+			const res = await app.request("/issues/mine", {}, env);
+			expect(res.status).toBe(200);
+			const body = await readBody(res);
+			expect(Array.isArray(body.data)).toBe(true);
+		});
+
+		it("returns only the issues created by the caller", async () => {
+			await insertIssueAt(
+				"mine-1",
+				"My issue",
+				"2026-01-01 00:00:01.000",
+				OWNER,
+			);
+			await insertIssueAt(
+				"theirs-1",
+				"Someone else's issue",
+				"2026-01-01 00:00:02.000",
+				OTHER,
+			);
+
+			const res = await app.request("/issues/mine", {}, env);
+			expect(res.status).toBe(200);
+			const body = await readBody(res);
+			expect(titlesOf(body)).toEqual(["My issue"]);
+		});
+
+		// 他人の Issue が本文のどこにも混ざらないこと。`data` だけを見ていると
+		// total が全件のままという退行を見逃す。
+		it("counts only the caller's issues in total", async () => {
+			await insertIssueAt(
+				"mine-1",
+				"My issue",
+				"2026-01-01 00:00:01.000",
+				OWNER,
+			);
+			await insertIssueAt(
+				"theirs-1",
+				"Theirs",
+				"2026-01-01 00:00:02.000",
+				OTHER,
+			);
+			await insertIssueAt(
+				"theirs-2",
+				"Theirs 2",
+				"2026-01-01 00:00:03.000",
+				OTHER,
+			);
+
+			const res = await app.request("/issues/mine", {}, env);
+			const body = await readBody(res);
+			expect(body.total).toBe(1);
+		});
+
+		// 起票直後に自分の一覧へ導線を繋ぐのが Issue #68 の目的なので、
+		// POST で作った Issue がそのまま出てくることを経路として確認する。
+		it("includes an issue just created through POST /issues", async () => {
+			const createRes = await createIssue();
+			const created = await readBody(createRes);
+
+			const res = await app.request("/issues/mine", {}, env);
+			const body = await readBody(res);
+			expect(body.data.map((row: IssueBody) => row.id)).toEqual([created.id]);
+		});
+
+		// 起票していないユーザーには空を返す。他人の分が漏れていれば落ちる。
+		it("returns an empty list for a user with no issues", async () => {
+			await insertIssueAt(
+				"theirs-1",
+				"Theirs",
+				"2026-01-01 00:00:01.000",
+				OTHER,
+			);
+
+			const res = await app.request("/issues/mine", {}, env);
+			const body = await readBody(res);
+			expect(body.data).toEqual([]);
+			expect(body.total).toBe(0);
+		});
+
+		// 所有者が NULL の行（user_id カラム追加前の既存行）を
+		// 誰かの一覧に混ぜない。`user_id = ?` が消えると NULL 行まで出る。
+		it("does not include ownerless legacy rows", async () => {
+			await env.DB.prepare(
+				`INSERT INTO issues (id, title, description, scope, latitude, longitude, user_id)
+         VALUES ('legacy-1', 'Legacy', 'No owner', 'community', 0, 0, NULL)`,
+			).run();
+
+			const res = await app.request("/issues/mine", {}, env);
+			const body = await readBody(res);
+			expect(body.data).toEqual([]);
+			expect(body.total).toBe(0);
+		});
+
+		it("returns issues newest first", async () => {
+			await insertIssueAt("mine-1", "Oldest", "2026-01-01 00:00:01.000", OWNER);
+			await insertIssueAt("mine-2", "Middle", "2026-01-01 00:00:02.000", OWNER);
+			await insertIssueAt("mine-3", "Newest", "2026-01-01 00:00:03.000", OWNER);
+
+			const res = await app.request("/issues/mine", {}, env);
+			const body = await readBody(res);
+			expect(titlesOf(body)).toEqual(["Newest", "Middle", "Oldest"]);
+		});
+
+		it("filters by status", async () => {
+			await insertIssueAt(
+				"mine-1",
+				"Open one",
+				"2026-01-01 00:00:01.000",
+				OWNER,
+			);
+			await insertIssueAt(
+				"mine-2",
+				"Closed one",
+				"2026-01-01 00:00:02.000",
+				OWNER,
+			);
+			await env.DB.prepare(
+				"UPDATE issues SET status = 'closed' WHERE id = 'mine-2'",
+			).run();
+
+			const res = await app.request("/issues/mine?status=closed", {}, env);
+			const body = await readBody(res);
+			expect(titlesOf(body)).toEqual(["Closed one"]);
+			expect(body.total).toBe(1);
+		});
+
+		it("filters by scope", async () => {
+			await insertIssueAt(
+				"mine-1",
+				"Community",
+				"2026-01-01 00:00:01.000",
+				OWNER,
+			);
+			await insertIssueAt(
+				"mine-2",
+				"National",
+				"2026-01-01 00:00:02.000",
+				OWNER,
+			);
+			await env.DB.prepare(
+				"UPDATE issues SET scope = 'national' WHERE id = 'mine-2'",
+			).run();
+
+			const res = await app.request("/issues/mine?scope=national", {}, env);
+			const body = await readBody(res);
+			expect(titlesOf(body)).toEqual(["National"]);
+		});
+
+		// 公開一覧と同じクエリ検証を通っていること。
+		// 別実装を書き起こすと、こちらだけ上限が抜ける。
+		it("rejects limit above the maximum", async () => {
+			const res = await app.request("/issues/mine?limit=101", {}, env);
+			expect(res.status).toBe(400);
+			const body = await readBody(res);
+			expect(body.error.fieldErrors.limit).toBeDefined();
+		});
+
+		it("rejects duplicated query parameters", async () => {
+			const res = await app.request("/issues/mine?limit=5&limit=1", {}, env);
+			expect(res.status).toBe(400);
+		});
+
+		it("supports limit and offset", async () => {
+			for (let i = 1; i <= 3; i++) {
+				await insertIssueAt(
+					`mine-${i}`,
+					`Issue ${i}`,
+					`2026-01-01 00:00:0${i}.000`,
+					OWNER,
+				);
+			}
+
+			const res = await app.request("/issues/mine?limit=1&offset=1", {}, env);
+			const body = await readBody(res);
+			expect(titlesOf(body)).toEqual(["Issue 2"]);
+			expect(body.total).toBe(3);
+		});
+
+		// カーソルページングも公開一覧と同じ仕様。
+		// 他人の Issue はページを跨いでも混ざらない。
+		it("paginates with a cursor without leaking other users' issues", async () => {
+			for (let i = 1; i <= 3; i++) {
+				await insertIssueAt(
+					`mine-${i}`,
+					`Mine ${i}`,
+					`2026-01-01 00:00:0${i}.000`,
+					OWNER,
+				);
+				await insertIssueAt(
+					`theirs-${i}`,
+					`Theirs ${i}`,
+					`2026-01-01 00:00:0${i}.500`,
+					OTHER,
+				);
+			}
+
+			const page1 = await readBody(
+				await app.request("/issues/mine?limit=2", {}, env),
+			);
+			expect(titlesOf(page1)).toEqual(["Mine 3", "Mine 2"]);
+			expect(typeof page1.next_cursor).toBe("string");
+
+			const page2 = await readBody(
+				await app.request(
+					`/issues/mine?limit=2&cursor=${encodeURIComponent(page1.next_cursor)}`,
+					{},
+					env,
+				),
+			);
+			expect(titlesOf(page2)).toEqual(["Mine 1"]);
+			expect(page2.next_cursor).toBeNull();
+		});
+
+		// 自分の Issue でも内部フィールドは返さない。
+		// 「自分のものだから user_id を出してよい」と広げると、
+		// 公開一覧と形が変わってクライアント側の型が分岐する。
+		it("returns exactly the public keys", async () => {
+			await createIssue({ ...validIssue, category: "infrastructure" });
+
+			const res = await app.request("/issues/mine", {}, env);
+			const body = await readBody(res);
+			expect(body.data).toHaveLength(1);
+			expect(Object.keys(body.data[0]).sort()).toEqual(
+				[...PUBLIC_ISSUE_COLUMNS_FOR_TEST].sort(),
+			);
+		});
+
+		// 所有者で絞る並びにもインデックスが効いていること。
+		//
+		// `idx_issues_user_id`（user_id 単独、0002）だけだと絞り込みは効くが
+		// 並べ替えが残り、20 件出すのに自分の Issue を全部読んでソートする。
+		// D1 は読み取り行数で課金されるため、投稿数が増えるほどコストが線形に増える。
+		// 公開一覧に対する同名のテストと対になっており、
+		// migrations/0004 のインデックスが落ちるとプランに TEMP B-TREE が戻る。
+		it("uses an index instead of sorting the caller's whole history", async () => {
+			const plan = await env.DB.prepare(
+				`EXPLAIN QUERY PLAN SELECT id FROM issues WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+			)
+				.bind(OWNER, 4)
+				.all<{ detail: string }>();
+
+			const detail = plan.results.map((row) => row.detail).join("\n");
+			expect(detail).toContain("idx_issues_user_id_created_at");
+			expect(detail).not.toContain("TEMP B-TREE");
+		});
+
+		// セッショントークン以外（OAuth トークン / API キー）では通さない。
+		// 書き込み系と同じ理由で、スコープを見ない以上ここも session_token に絞る。
+		it("rejects a non-session token", async () => {
+			await createIssue();
+
+			setMockUserId(OWNER, "oauth_token");
+			const res = await app.request("/issues/mine", {}, env);
+			expect(res.status).toBe(401);
 		});
 	});
 
