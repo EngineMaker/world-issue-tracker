@@ -239,6 +239,44 @@ describe("Issues CRUD", () => {
 			expect(stored.updated_at).toMatch(TIMESTAMP_FORMAT);
 		});
 
+		// Issue #46。`'now'` の解像度（ミリ秒）より速く連続作成すると
+		// `created_at` が同値になり、一覧の並びが `id`（ランダム値）で
+		// 決まって「新しい順」にならなかった。
+		//
+		// 2 件だけだと同一ミリ秒に収まらず偶然通ることがあるため、
+		// まとめて作って全件の値が異なることを見る。
+		it("assigns a distinct created_at to every issue, even in the same millisecond", async () => {
+			const created: string[] = [];
+			for (let i = 0; i < 10; i++) {
+				const res = await createIssue({ ...validIssue, title: `Issue ${i}` });
+				created.push((await readBody(res)).created_at);
+			}
+
+			expect(new Set(created).size).toBe(created.length);
+			// 作成した順に単調増加していること（同値が無いだけでは、
+			// 後から作った行が古い側に来る可能性を排除できない）。
+			// 昇順に整列したものと元の順序が一致するかで見る
+			expect(created).toEqual([...created].sort());
+		});
+
+		// 並び順そのものを API のレスポンスで見る。上のテストは値の性質を
+		// 見ているだけなので、`ORDER BY` が壊れても気付けない。
+		//
+		// 件数を多めに取っているのは、同一ミリ秒の衝突が起きなければ
+		// 壊れた実装でも偶然通ってしまうため。10 件連続で作れば、
+		// ミリ秒解像度に対して確実にどこかが衝突する。
+		it("returns issues in creation order, newest first", async () => {
+			const titles = Array.from({ length: 10 }, (_, i) => `Issue ${i}`);
+			for (const title of titles) {
+				await createIssue({ ...validIssue, title });
+			}
+
+			const res = await app.request("/issues", {}, env);
+			const body = await readBody(res);
+
+			expect(titlesOf(body)).toEqual([...titles].reverse());
+		});
+
 		it("creates an issue with optional category", async () => {
 			const res = await createIssue({
 				...validIssue,
@@ -2035,13 +2073,14 @@ describe("Issues CRUD", () => {
 		});
 
 		it("advances updated_at on every consecutive update", async () => {
-			// 秒精度だと同一秒内の連続更新で値が動かず、
+			// 同一ミリ秒内の連続更新で値が動かないと、
 			// 「最終更新順に並べる」「キャッシュ無効化」が壊れる。
 			// 待ち時間を入れずに連続 PATCH して、毎回進むことを確認する。
 			//
-			// 1 リクエストが認証・所有者確認・UPDATE を経るため 1ms 以上かかり、
-			// ミリ秒精度なら値は必ず進む。ここが稀に落ちるようなら、
-			// 経路が速くなって同一ミリ秒に収まった可能性を疑うこと。
+			// 値が進むことは時計の解像度ではなく UPDATE 文が保証している
+			// （`NEXT_UPDATED_AT_SQL`: 現在時刻と「前の値 +1ms」の遅い方を採る）。
+			// 以前はミリ秒精度の `'now'` をそのまま入れており、
+			// 経路が速いと同一ミリ秒に収まって稀に落ちていた（Issue #46）。
 			const createRes = await createIssue();
 			const created = await readBody(createRes);
 
