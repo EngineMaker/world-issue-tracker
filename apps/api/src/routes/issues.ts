@@ -12,8 +12,21 @@ import type { Bindings } from "../index";
 import { requireAuth } from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
 import { comments } from "./comments";
+import { helpOffers } from "./help-offers";
 
-export const issues = new Hono<{ Bindings: Bindings }>();
+/**
+ * このルーターが動く環境。
+ *
+ * `Variables.issueId` は `/issues/:id/help-offers` へ委譲する際に、mount 元で
+ * 取り出した Issue ID を子ルーターへ渡すための変数（`route()` はパスパラメータを
+ * 引き継がない）。
+ */
+type IssuesEnv = {
+	Bindings: Bindings;
+	Variables: { issueId: string };
+};
+
+export const issues = new Hono<IssuesEnv>();
 
 /**
  * レスポンスに載せてよいカラム。
@@ -79,6 +92,68 @@ export function toPublicIssue(row: Record<string, unknown>): PublicIssue {
  */
 const NOW_SQL = "strftime('%Y-%m-%d %H:%M:%f', 'now')";
 
+/**
+ * 更新時に `updated_at` へ入れる式。必ず前の値より後になる。
+ *
+ * `NOW_SQL` をそのまま入れると、前回の書き込みと同じミリ秒に収まったときに
+ * 値が動かない。`'now'` の解像度はミリ秒だが、D1 への連続した書き込みは
+ * それより速く終わりうる（実測で連続10クエリのうち2つが同じ値になった）。
+ * 値が動かないと「更新されたか」を値から判別できず、`updated_at` を
+ * 基準にした並び順やページングも同値の行を区別できない。
+ *
+ * そこで「現在時刻」と「前の値の 1 ミリ秒後」の遅い方を採る。
+ * 時間が経っていれば現在時刻がそのまま入り、同一ミリ秒に収まったときだけ
+ * 前の値 +1ms になる。どちらの場合も前の値より厳密に後になる。
+ *
+ * `max()` で文字列比較しないのは、秒精度（DEFAULT で入った既存行）と
+ * ミリ秒精度が混在すると `'...:00' > '...:00.000'` と誤判定するため。
+ * 一度 unixepoch に直してから比べ、同じ書式に整え直す。
+ *
+ * 1 行の UPDATE の中で完結するので、読んでから書くまでの間に
+ * 別の更新が挟まる余地は無い（アプリ側で読み直して計算すると、
+ * 同じ Issue への同時更新で値が巻き戻りうる）。
+ */
+const NEXT_UPDATED_AT_SQL = `
+	strftime(
+		'%Y-%m-%d %H:%M:%f',
+		max(
+			unixepoch('now', 'subsec'),
+			unixepoch(updated_at, 'subsec') + 0.001
+		),
+		'unixepoch'
+	)
+`;
+
+/**
+ * 作成時に `created_at` へ入れる式。既存の最新行より必ず後になる。
+ *
+ * 理由は `NEXT_UPDATED_AT_SQL` と同じで、連続した作成が同一ミリ秒に
+ * 収まると `created_at` が同値になる。一覧は
+ * `ORDER BY created_at DESC, id DESC` で並べているため、同値になると
+ * `id`（`randomblob` のランダム値）で決着が付いてしまい、
+ * 利用者から見て「新しい順」にならない。
+ *
+ * そこで既存の最大値の 1 ミリ秒後と現在時刻の遅い方を採る。
+ * テーブルが空なら `max()` が NULL を返すので `coalesce` で現在時刻に倒す。
+ *
+ * サブクエリが全行を走査しないよう、`created_at` の索引
+ * （`idx_issues_created_at`）が効く形にしている。
+ */
+const NEXT_CREATED_AT_SQL = `
+	strftime(
+		'%Y-%m-%d %H:%M:%f',
+		max(
+			unixepoch('now', 'subsec'),
+			coalesce(
+				(SELECT unixepoch(created_at, 'subsec') + 0.001
+				 FROM issues ORDER BY created_at DESC LIMIT 1),
+				0
+			)
+		),
+		'unixepoch'
+	)
+`;
+
 issues.onError((err, c) => {
 	if (err instanceof SyntaxError) {
 		return c.json({ error: "Invalid JSON" }, 400);
@@ -99,9 +174,13 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 	const auth = getAuth(c);
 	const userId = auth?.userId;
 
+	// タイムスタンプは CTE で 1 度だけ求めて両方の列に使う。
+	// 式を2回書くと評価も2回になり、その間にミリ秒が進むと
+	// `created_at` と `updated_at` が作成時点でずれる。
 	const result = await c.env.DB.prepare(
-		`INSERT INTO issues (title, description, scope, latitude, longitude, category, user_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ${NOW_SQL}, ${NOW_SQL})
+		`WITH ts(v) AS (SELECT ${NEXT_CREATED_AT_SQL})
+     INSERT INTO issues (title, description, scope, latitude, longitude, category, user_id, created_at, updated_at)
+     SELECT ?, ?, ?, ?, ?, ?, ?, v, v FROM ts
      RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(
@@ -177,10 +256,7 @@ export function parseQueryParams(
  * 絞り込みの条件は呼び出し側が決める。クエリ文字列から所有者を受け取る形には
  * していないので、他人の user_id を指定して覗くという経路が存在しない。
  */
-async function listIssues(
-	c: Context<{ Bindings: Bindings }>,
-	ownerUserId?: string,
-) {
+async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 	const query = parseQueryParams(new URL(c.req.url).searchParams);
 	if (!query.ok) {
 		return c.json(
@@ -350,6 +426,33 @@ issues.get("/mine", clerkAuth(), requireAuth, (c) => {
 	return listIssues(c, userId);
 });
 
+/**
+ * 「手伝います」の表明（`/issues/:id/help-offers`）を子ルーターに委譲する。
+ *
+ * `route()` は mount 先のパスパラメータを子へ引き継がない（子から見た
+ * `c.req.param("id")` は undefined になる）ため、mount の手前で `:id` を
+ * コンテキストに入れる。子ルーター側は `c.get("issueId")` で受ける。
+ *
+ * 子ルーターが持つのは `"/"` だけなので、ミドルウェアも
+ * `/:id/help-offers` の一致だけで足りる（`/*` を足しても通る経路は増えない）。
+ * 末尾スラッシュ付きの `/issues/xxx/help-offers/` は子側に対応するルートが
+ * 無いため 404 になる。これは Issue 本体（`/issues/:id/`）も同じ扱いで、
+ * 経路ごとに揺れないよう合わせている。
+ *
+ * `/:id` の各ハンドラより前に置いているのは「より具体的なパスを先に書く」形に
+ * 揃えるため。Hono は登録順ではなくパターンの具体性で照合するので、
+ * 順序を入れ替えても `DELETE /issues/:id` がここを横取りすることはない。
+ */
+issues.use("/:id/help-offers", async (c, next) => {
+	// このミドルウェアは `:id` を含むパターンでしか登録していないため、
+	// ここに来た時点で `id` は必ず取れる。`use()` は登録パターンから
+	// パラメータの型を推論しないので `string | undefined` になるだけ。
+	// 万一取れなければ空文字が入り、子ルーター側の存在確認で 404 になる。
+	c.set("issueId", c.req.param("id") ?? "");
+	await next();
+});
+issues.route("/:id/help-offers", helpOffers);
+
 // GET /issues/:id — Get by ID (public)
 issues.get("/:id", async (c) => {
 	const id = c.req.param("id");
@@ -374,7 +477,7 @@ issues.get("/:id", async (c) => {
  * 404 で存在を隠すのではなく 403 を素直に返す方針にしている。
  */
 async function checkOwnership(
-	c: Context<{ Bindings: Bindings }>,
+	c: Context<IssuesEnv>,
 	id: string,
 ): Promise<Response | null> {
 	const row = await c.env.DB.prepare("SELECT user_id FROM issues WHERE id = ?")
@@ -418,7 +521,7 @@ issues.patch("/:id", clerkAuth(), requireAuth, async (c) => {
 		setClauses.push(`${key} = ?`);
 		binds.push(value ?? null);
 	}
-	setClauses.push(`updated_at = ${NOW_SQL}`);
+	setClauses.push(`updated_at = ${NEXT_UPDATED_AT_SQL}`);
 
 	const auth = getAuth(c);
 

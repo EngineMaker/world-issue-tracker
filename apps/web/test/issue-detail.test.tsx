@@ -163,9 +163,12 @@ describe("詳細ページ", () => {
 	/**
 	 * `globalThis.fetch` を差し替えてページを描画する。
 	 *
-	 * ページは Issue 本体とコメント（#60）の 2 本を投げるので、URL で振り分ける。
-	 * `comments` を省いたときは空の一覧を返す。Issue 本体の描画だけを見たい
-	 * テストに、コメント側の指定を毎回書かせないため。
+	 * ページは Issue 本体・コメント（#60）・表明（#61）の 3 本を投げるので、
+	 * URL で振り分ける。`comments` / `helpOffers` を省いたときは空を返す。
+	 * Issue 本体の描画だけを見たいテストに、他の指定を毎回書かせないため。
+	 *
+	 * 振り分けを既定へ落とさず URL ごとに返し分けているのは、同じ `Response` を
+	 * 2 回返すと 2 度目が `Body already used` で落ちるため。
 	 *
 	 * 呼ばれた URL も返し、「そもそも API を呼んでいない」実装を拾えるようにする。
 	 */
@@ -173,6 +176,7 @@ describe("詳細ページ", () => {
 		id: string,
 		response: Response,
 		comments?: Response,
+		helpOffers?: Response,
 	) {
 		const originalFetch = globalThis.fetch;
 		const calls: string[] = [];
@@ -181,6 +185,17 @@ describe("詳細ページ", () => {
 			calls.push(url);
 			if (url.endsWith("/comments")) {
 				return comments ?? Response.json({ data: [], total: 0 });
+			}
+			if (url.endsWith("/help-offers")) {
+				return (
+					helpOffers ??
+					Response.json({
+						data: [],
+						total: 0,
+						viewer_offered: false,
+						viewer_user_id: null,
+					})
+				);
 			}
 			return response;
 		}) as unknown as typeof globalThis.fetch;
@@ -203,9 +218,12 @@ describe("詳細ページ", () => {
 
 		// URL の id を使って API を呼んでいること
 		// （呼ばずに固定の内容を出す実装だとここで落ちる）。
-		// Issue 本体とコメント（#60）で 2 本投げるので、本体側を名指しで見る
-		expect(calls).toHaveLength(2);
-		const issueCalls = calls.filter((url) => !url.endsWith("/comments"));
+		// Issue 本体・コメント（#60）・表明（#61）で 3 本投げるので、
+		// 本体側を名指しで見る
+		expect(calls).toHaveLength(3);
+		const issueCalls = calls.filter(
+			(url) => !url.endsWith("/comments") && !url.endsWith("/help-offers"),
+		);
 		expect(issueCalls).toHaveLength(1);
 		expect(issueCalls[0]).toContain(`/issues/${sampleIssue.id}`);
 		expect(html).toContain("駅前の街灯が切れている");
@@ -294,6 +312,37 @@ describe("詳細ページ", () => {
 
 		expect(html).toContain("Issue を表示できませんでした");
 		expect(html).not.toContain("存在しません");
+	});
+
+	/**
+	 * 「手伝います」（Issue #61）の結線。
+	 *
+	 * `HelpOfferButton` は Client Component で Clerk の `useAuth` を呼ぶため、
+	 * ここでは描画結果ではなく「ページが表明を取りに行き、その結果を
+	 * 渡していること」を見る。ボタン自体の表示は
+	 * `help-offer-button.test.tsx` が担当する。
+	 *
+	 * これが無いと、ページから `<HelpOfferButton />` を外しても
+	 * どのテストも落ちない（実際に外して確認した）。
+	 */
+	it("表明を取りに行き、件数を画面に渡す", async () => {
+		const { html, calls } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+			undefined,
+			Response.json({
+				data: [],
+				total: 3,
+				viewer_offered: false,
+				viewer_user_id: null,
+			}),
+		);
+
+		// 表明を取りに行っていること
+		expect(calls.some((url) => url.endsWith("/help-offers"))).toBe(true);
+		// 取ってきた件数が画面に反映されていること
+		// （取得しても渡していない実装だとここで落ちる）
+		expect(html).toContain("3 人が「手伝います」と表明しています。");
 	});
 
 	it("読み終えたときに行き止まりにしない（一覧への導線がある）", async () => {

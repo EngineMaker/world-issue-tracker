@@ -5,8 +5,10 @@ import {
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { fetchHelpOffers } from "../../../lib/help-offers";
 import { fetchComments, fetchIssue } from "../../../lib/issues";
 import { CommentSection } from "../../components/CommentSection";
+import { HelpOfferButton } from "../../components/HelpOfferButton";
 import { formatCreatedAt } from "../../components/IssueList";
 
 const SCOPE_LABELS = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
@@ -17,10 +19,15 @@ const STATUS_LABELS = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
  *
  * 1 件の Issue に固有の URL を与える画面。ここが無いと Issue を
  * 第三者に見せる手段が無く、コメントや「手伝います」を置く場所も無い。
- * その場所として、コメント欄（#60）をこのページに置いている。
+ * その場所として、コメント欄（#60）と「手伝います」（#61）を置いている。
  *
  * 一覧と同じく Server Component として取得する（理由は app/page.tsx）。
- * Issue 本体とコメントの 2 つのリクエストは互いに独立なので並行に投げる。
+ * Issue 本体・コメント・表明の 3 つは互いに独立なので並行に投げる。
+ *
+ * 表明にトークンを渡していないので `viewer_offered` は常に false になる
+ * （Clerk のセッションは Cookie で、別オリジンの API には届かない）。
+ * 「自分が表明済みか」はブラウザ側で `HelpOfferButton` が取り直す。
+ * 件数と表明者だけは JS の実行前から読めるようにするため、ここで取る。
  */
 export default async function IssueDetailPage({
 	params,
@@ -29,9 +36,10 @@ export default async function IssueDetailPage({
 	params: Promise<{ id: string }>;
 }) {
 	const { id } = await params;
-	const [result, commentsResult] = await Promise.all([
+	const [result, commentsResult, offers] = await Promise.all([
 		fetchIssue(id),
 		fetchComments(id),
+		fetchHelpOffers(id),
 	]);
 
 	// 存在しない ID は 404。取得に失敗しただけのときは 404 にしない
@@ -131,6 +139,15 @@ export default async function IssueDetailPage({
 					</dd>
 				</dl>
 			</section>
+
+			{/*
+			  「手伝います」はコメントより前に置く。読み終えた直後が一番
+			  動き出しやすく、議論を読み進めた先に置くと埋もれる
+			*/}
+			<HelpOfferButton
+				issueId={issue.id}
+				initialSummary={offers.ok ? offers.summary : null}
+			/>
 
 			<CommentSection issueId={issue.id} initialResult={commentsResult} />
 

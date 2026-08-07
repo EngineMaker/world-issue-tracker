@@ -1,0 +1,414 @@
+import { env } from "cloudflare:test";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+// `issues.test.ts` と同じ方針で、`@hono/clerk-auth` の内部が使う
+// `@clerk/backend` だけを差し替える。詳細は helpers/clerk-mock.ts。
+vi.mock("@clerk/backend", async () => {
+	const { clerkBackendMockFactory } = await import("./helpers/clerk-mock");
+	return clerkBackendMockFactory();
+});
+
+import { createApp } from "../src/index";
+import { setMockUserId } from "./helpers/clerk-mock";
+import { applyMigrations } from "./helpers/migrate";
+
+const app = createApp();
+
+/** 書き込み系は Origin 検証を通す必要がある（`csrf.test.ts` 参照）。 */
+const ALLOWED_ORIGIN = "http://localhost:3000";
+
+const OWNER = "user_owner";
+const HELPER = "user_helper";
+const OTHER_HELPER = "user_other_helper";
+
+// biome-ignore lint/suspicious/noExplicitAny: テストからレスポンスを緩く読むための意図的な型
+type Body = Record<string, any>;
+
+async function readBody(res: Response): Promise<Body> {
+	return (await res.json()) as Body;
+}
+
+/**
+ * 表明の対象になる Issue を DB へ直接投入する。
+ *
+ * API 経由で作ると起票者の切り替え（`setMockUserId`）が要り、
+ * 「誰が表明したか」を見たいテストの本筋から離れるため直接入れる。
+ */
+async function insertIssue(id: string, userId = OWNER): Promise<void> {
+	await env.DB.prepare(
+		`INSERT INTO issues (id, title, description, scope, latitude, longitude, user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+	)
+		.bind(
+			id,
+			"街灯が切れている",
+			"夜道が暗い",
+			"community",
+			35.68,
+			139.76,
+			userId,
+		)
+		.run();
+}
+
+function offerUrl(issueId: string): string {
+	return `/issues/${issueId}/help-offers`;
+}
+
+/** 「手伝います」と表明する。 */
+async function postOffer(issueId: string, origin = ALLOWED_ORIGIN) {
+	return app.request(
+		offerUrl(issueId),
+		{ method: "POST", headers: { Origin: origin } },
+		env,
+	);
+}
+
+/** 表明を取り消す。 */
+async function deleteOffer(issueId: string, origin = ALLOWED_ORIGIN) {
+	return app.request(
+		offerUrl(issueId),
+		{ method: "DELETE", headers: { Origin: origin } },
+		env,
+	);
+}
+
+async function listOffers(issueId: string) {
+	return app.request(offerUrl(issueId), {}, env);
+}
+
+/** DB に実際に入っている表明の件数。レスポンスを信じずに永続化を確かめる。 */
+async function countStoredOffers(issueId: string): Promise<number> {
+	const row = await env.DB.prepare(
+		"SELECT COUNT(*) as total FROM help_offers WHERE issue_id = ?",
+	)
+		.bind(issueId)
+		.first<{ total: number }>();
+	return row?.total ?? 0;
+}
+
+const ISSUE_ID = "1111111111111111aaaaaaaaaaaaaaaa";
+
+describe("Help offers", () => {
+	beforeAll(async () => {
+		await applyMigrations();
+	});
+
+	beforeEach(async () => {
+		// 子テーブルから先に消す（外部キーが有効な環境で順序に引っかからないため）
+		await env.DB.exec("DELETE FROM help_offers");
+		await env.DB.exec("DELETE FROM issues");
+		await insertIssue(ISSUE_ID);
+		setMockUserId(HELPER);
+	});
+
+	describe("POST /issues/:id/help-offers", () => {
+		it("認証済みなら表明でき、DB に永続化される", async () => {
+			const res = await postOffer(ISSUE_ID);
+
+			expect(res.status).toBe(201);
+			const body = await readBody(res);
+			expect(body.user_id).toBe(HELPER);
+			expect(typeof body.id).toBe("string");
+			expect(typeof body.created_at).toBe("string");
+
+			// レスポンスを組み立てるだけの実装でも通らないよう、DB を直接見る
+			expect(await countStoredOffers(ISSUE_ID)).toBe(1);
+		});
+
+		it("未認証なら 401 を返し、表明も作らない", async () => {
+			setMockUserId(null);
+			const res = await postOffer(ISSUE_ID);
+
+			expect(res.status).toBe(401);
+			// ステータスだけでなく副作用も見る。401 を返しつつ INSERT してしまう
+			// 実装をここで落とす
+			expect(await countStoredOffers(ISSUE_ID)).toBe(0);
+		});
+
+		it("セッション以外のトークン（OAuth トークン）では表明できない", async () => {
+			// `requireAuth` はセッショントークンだけを通す（`middleware/auth.ts`）。
+			// 表明も書き込みなので同じ扱いであることを確かめる
+			setMockUserId(HELPER, "oauth_token");
+			const res = await postOffer(ISSUE_ID);
+
+			expect(res.status).toBe(401);
+			expect(await countStoredOffers(ISSUE_ID)).toBe(0);
+		});
+
+		it("許可されていない Origin からは表明できない", async () => {
+			const res = await postOffer(ISSUE_ID, "https://evil.example.com");
+
+			expect(res.status).toBe(403);
+			expect(await countStoredOffers(ISSUE_ID)).toBe(0);
+		});
+
+		it("同じユーザーが二重に表明しても件数は増えない", async () => {
+			const first = await postOffer(ISSUE_ID);
+			const second = await postOffer(ISSUE_ID);
+
+			expect(first.status).toBe(201);
+			expect(second.status).toBe(201);
+			expect(await countStoredOffers(ISSUE_ID)).toBe(1);
+
+			// 2 回目も同じ行を指していること（別の行が作られていない）
+			const firstBody = await readBody(first);
+			const secondBody = await readBody(second);
+			expect(secondBody.id).toBe(firstBody.id);
+			// 「最初に表明した時刻」が連打で上書きされない
+			expect(secondBody.created_at).toBe(firstBody.created_at);
+		});
+
+		it("別のユーザーはそれぞれ表明できる", async () => {
+			await postOffer(ISSUE_ID);
+			setMockUserId(OTHER_HELPER);
+			await postOffer(ISSUE_ID);
+
+			expect(await countStoredOffers(ISSUE_ID)).toBe(2);
+		});
+
+		it("存在しない Issue への表明は 404 で、行も作らない", async () => {
+			const missingId = "9999999999999999zzzzzzzzzzzzzzzz";
+			const res = await postOffer(missingId);
+
+			expect(res.status).toBe(404);
+			const body = await readBody(res);
+			expect(body.error).toBe("Issue not found");
+			// 外部キーが効いていない環境でも、どこからも読めない行を作らないこと
+			expect(await countStoredOffers(missingId)).toBe(0);
+		});
+
+		it("起票者自身も表明できる", async () => {
+			// 自分の Issue に手を挙げること自体は禁じていない（共同で動く場合がある）。
+			// 意図せず 403 を返すようになったら気付けるようにしておく
+			setMockUserId(OWNER);
+			const res = await postOffer(ISSUE_ID);
+
+			expect(res.status).toBe(201);
+		});
+	});
+
+	describe("GET /issues/:id/help-offers", () => {
+		it("未ログインでも件数と表明者を読める", async () => {
+			await postOffer(ISSUE_ID);
+			setMockUserId(OTHER_HELPER);
+			await postOffer(ISSUE_ID);
+
+			setMockUserId(null);
+			const res = await listOffers(ISSUE_ID);
+
+			expect(res.status).toBe(200);
+			const body = await readBody(res);
+			expect(body.total).toBe(2);
+			expect(body.data.map((offer: Body) => offer.user_id)).toEqual([
+				HELPER,
+				OTHER_HELPER,
+			]);
+		});
+
+		it("表明が無ければ空の一覧を返す", async () => {
+			const res = await listOffers(ISSUE_ID);
+
+			expect(res.status).toBe(200);
+			const body = await readBody(res);
+			expect(body.total).toBe(0);
+			expect(body.data).toEqual([]);
+		});
+
+		it("ログイン中は自分が表明済みかどうかを返す", async () => {
+			const before = await readBody(await listOffers(ISSUE_ID));
+			expect(before.viewer_offered).toBe(false);
+
+			await postOffer(ISSUE_ID);
+
+			const after = await readBody(await listOffers(ISSUE_ID));
+			expect(after.viewer_offered).toBe(true);
+		});
+
+		it("他人の表明を自分の表明として数えない", async () => {
+			// HELPER が表明した状態で、別のユーザーとして読む
+			await postOffer(ISSUE_ID);
+			setMockUserId(OTHER_HELPER);
+
+			const body = await readBody(await listOffers(ISSUE_ID));
+			expect(body.total).toBe(1);
+			expect(body.viewer_offered).toBe(false);
+		});
+
+		it("未ログインなら viewer_offered は false", async () => {
+			await postOffer(ISSUE_ID);
+			setMockUserId(null);
+
+			const body = await readBody(await listOffers(ISSUE_ID));
+			expect(body.total).toBe(1);
+			expect(body.viewer_offered).toBe(false);
+		});
+
+		it("別の Issue の表明を混ぜない", async () => {
+			const otherIssueId = "2222222222222222bbbbbbbbbbbbbbbb";
+			await insertIssue(otherIssueId);
+
+			await postOffer(ISSUE_ID);
+
+			const body = await readBody(await listOffers(otherIssueId));
+			expect(body.total).toBe(0);
+		});
+
+		it("存在しない Issue の一覧は 404", async () => {
+			const res = await listOffers("9999999999999999zzzzzzzzzzzzzzzz");
+
+			expect(res.status).toBe(404);
+			const body = await readBody(res);
+			expect(body.error).toBe("Issue not found");
+		});
+	});
+
+	describe("DELETE /issues/:id/help-offers", () => {
+		it("自分の表明を取り消せる", async () => {
+			await postOffer(ISSUE_ID);
+			expect(await countStoredOffers(ISSUE_ID)).toBe(1);
+
+			const res = await deleteOffer(ISSUE_ID);
+
+			expect(res.status).toBe(204);
+			expect(await countStoredOffers(ISSUE_ID)).toBe(0);
+		});
+
+		it("未認証なら 401 で、表明は残る", async () => {
+			await postOffer(ISSUE_ID);
+
+			setMockUserId(null);
+			const res = await deleteOffer(ISSUE_ID);
+
+			expect(res.status).toBe(401);
+			// 401 を返しつつ削除してしまう実装をここで落とす
+			expect(await countStoredOffers(ISSUE_ID)).toBe(1);
+		});
+
+		it("セッション以外のトークンでは取り消せない", async () => {
+			await postOffer(ISSUE_ID);
+
+			setMockUserId(HELPER, "oauth_token");
+			const res = await deleteOffer(ISSUE_ID);
+
+			expect(res.status).toBe(401);
+			expect(await countStoredOffers(ISSUE_ID)).toBe(1);
+		});
+
+		it("許可されていない Origin からは取り消せない", async () => {
+			await postOffer(ISSUE_ID);
+
+			const res = await deleteOffer(ISSUE_ID, "https://evil.example.com");
+
+			expect(res.status).toBe(403);
+			expect(await countStoredOffers(ISSUE_ID)).toBe(1);
+		});
+
+		it("他人の表明は取り消せない", async () => {
+			// HELPER が表明した状態で、OTHER_HELPER が取り消しを試みる。
+			// 204 は返る（自分の表明が無い状態は成立している）が、
+			// 他人の行が消えていないことが本題
+			await postOffer(ISSUE_ID);
+
+			setMockUserId(OTHER_HELPER);
+			const res = await deleteOffer(ISSUE_ID);
+
+			expect(res.status).toBe(204);
+			expect(await countStoredOffers(ISSUE_ID)).toBe(1);
+
+			// 消えていないのが HELPER の表明であること
+			const body = await readBody(await listOffers(ISSUE_ID));
+			expect(body.data.map((offer: Body) => offer.user_id)).toEqual([HELPER]);
+		});
+
+		it("表明していなくても 204（冪等）", async () => {
+			const res = await deleteOffer(ISSUE_ID);
+
+			expect(res.status).toBe(204);
+		});
+
+		it("取り消した後にもう一度表明できる", async () => {
+			await postOffer(ISSUE_ID);
+			await deleteOffer(ISSUE_ID);
+			const res = await postOffer(ISSUE_ID);
+
+			expect(res.status).toBe(201);
+			expect(await countStoredOffers(ISSUE_ID)).toBe(1);
+		});
+
+		it("存在しない Issue への取り消しは 404", async () => {
+			const res = await deleteOffer("9999999999999999zzzzzzzzzzzzzzzz");
+
+			expect(res.status).toBe(404);
+		});
+	});
+
+	describe("Issue 本体との関係", () => {
+		it("表明を作っても Issue の公開レスポンスに内部フィールドが漏れない", async () => {
+			await postOffer(ISSUE_ID);
+
+			const res = await app.request(`/issues/${ISSUE_ID}`, {}, env);
+			const body = await readBody(res);
+
+			// `user_id` は `PUBLIC_ISSUE_COLUMNS` から意図的に外されている。
+			// 表明機能を足したことで Issue 側の方針が崩れていないこと
+			expect(body).not.toHaveProperty("user_id");
+		});
+
+		it("Issue を削除すると、その表明も残らない", async () => {
+			await postOffer(ISSUE_ID);
+
+			setMockUserId(OWNER);
+			const res = await app.request(
+				`/issues/${ISSUE_ID}`,
+				{ method: "DELETE", headers: { Origin: ALLOWED_ORIGIN } },
+				env,
+			);
+			expect(res.status).toBe(200);
+
+			// 親が消えた後に孤児の表明が残ると、Issue の ID が再利用されない
+			// 前提に寄りかかることになる。件数の集計にも二度と現れない行が積む
+			expect(await countStoredOffers(ISSUE_ID)).toBe(0);
+		});
+	});
+
+	// `/issues/:id/help-offers` は親ルーターが `:id` をコンテキストへ移してから
+	// 子ルーターへ委譲する形で組んでいる（`routes/issues.ts`）。
+	// この繋ぎ込みは各ハンドラの中には現れないため、経路そのものを固定しておく。
+	describe("ルーティング", () => {
+		it("Issue の削除と表明の取り消しを取り違えない", async () => {
+			// `DELETE /issues/:id` と `DELETE /issues/:id/help-offers` は
+			// 前者のパターンが後者にも一致しうる形をしている。取り違えると
+			// 「手伝いを取り消したつもりが Issue ごと消える」ことになる
+			await postOffer(ISSUE_ID);
+
+			const res = await deleteOffer(ISSUE_ID);
+			expect(res.status).toBe(204);
+
+			// Issue 本体は残っていること
+			const issueRes = await app.request(`/issues/${ISSUE_ID}`, {}, env);
+			expect(issueRes.status).toBe(200);
+		});
+
+		it("Issue ID が子ルーターへ渡っている", async () => {
+			// 親から子へ `issueId` を移し損ねると、子側の存在確認が
+			// 空文字で走って常に 404 になる。200 が返ること自体が
+			// 受け渡しが繋がっている証拠になる
+			const res = await listOffers(ISSUE_ID);
+
+			expect(res.status).toBe(200);
+		});
+
+		it("help-offers の下の未定義パスは 404", async () => {
+			// 子ルーターは `"/"` しか持たない。将来 `/:offerId` のような
+			// ルートを足すまでは、ここに何を投げても 404 で返る
+			const res = await app.request(
+				`/issues/${ISSUE_ID}/help-offers/something`,
+				{},
+				env,
+			);
+
+			expect(res.status).toBe(404);
+		});
+	});
+});

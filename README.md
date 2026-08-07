@@ -104,11 +104,20 @@ Workers 上で `process.env` を評価するため、`vars` が無いと既定�
 片方だけ更新すると値がズレるので、両者の一致は
 `apps/api/test/node/web-runtime-env.test.ts` で検査しています。
 
+D1 のマイグレーションは、API のデプロイに先立って自動で適用されます
+(`.github/workflows/deploy.yml` の `Apply D1 migrations`)。
+新しいテーブルを前提にしたコードが先に本番へ出ないよう、順序を入れ替えないでください。
+
 ### 手動デプロイ
 
 ```bash
 # API
-cd apps/api && bun wrangler deploy
+# マイグレーションを先に適用する。`--remote` を忘れるとローカルの
+# .wrangler に当たるだけで、本番の D1 は変わらないまま成功扱いになる
+cd apps/api
+bun wrangler d1 migrations apply world-issue-tracker --remote
+bun wrangler deploy
+cd ../..
 
 # Web
 # NEXT_PUBLIC_API_URL を明示すること。指定しないと .env.local の値
