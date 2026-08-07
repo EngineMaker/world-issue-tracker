@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
 	fetchIssues,
+	fetchMyIssues,
 	parseListIssuesResponse,
 	parsePublicIssue,
 	resolveApiBaseUrl,
@@ -199,6 +200,137 @@ describe("fetchIssues", () => {
 		await fetchIssues({ fetchImpl });
 
 		expect(init?.cache).toBe("no-store");
+	});
+});
+
+describe("fetchMyIssues", () => {
+	/** リクエストの URL と init の両方を記録する `fetch` の代役。 */
+	function recordingFetch(response: Response | (() => Promise<Response>)) {
+		const calls: { url: string; init?: RequestInit }[] = [];
+		const fn = async (input: string | URL | Request, init?: RequestInit) => {
+			calls.push({
+				url: typeof input === "string" ? input : input.toString(),
+				init,
+			});
+			return typeof response === "function" ? response() : response;
+		};
+		return { fetch: fn as unknown as typeof globalThis.fetch, calls };
+	}
+
+	it("公開一覧ではなく GET /issues/mine を呼ぶ", async () => {
+		process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
+		const { fetch, calls } = recordingFetch(
+			Response.json({ data: [sampleIssue], total: 1, limit: 20, offset: 0 }),
+		);
+
+		const result = await fetchMyIssues({ token: "tok_1", fetchImpl: fetch });
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.url).toStartWith("https://api.example.com/issues/mine");
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.issues[0]?.title).toBe("駅前の街灯が切れている");
+	});
+
+	// Web と API は別オリジンなので Clerk の Cookie は届かない。
+	// Bearer を付け忘れると本番で必ず 401 になるが、URL だけを見ていると気付けない。
+	it("Authorization: Bearer にトークンを載せる", async () => {
+		const { fetch, calls } = recordingFetch(
+			Response.json({ data: [], total: 0, limit: 20, offset: 0 }),
+		);
+
+		await fetchMyIssues({ token: "tok_abc", fetchImpl: fetch });
+
+		const headers = new Headers(calls[0]?.init?.headers);
+		expect(headers.get("Authorization")).toBe("Bearer tok_abc");
+	});
+
+	// トークンが無いまま叩くと API から 401 が返るだけで、画面には
+	// 「取得できませんでした」としか出ない。サインインを促せるよう区別する。
+	it("トークンが無ければ API を呼ばずに未認証として返す", async () => {
+		const { fetch, calls } = recordingFetch(
+			Response.json({ data: [], total: 0, limit: 20, offset: 0 }),
+		);
+
+		const result = await fetchMyIssues({ token: null, fetchImpl: fetch });
+
+		expect(calls).toHaveLength(0);
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
+		expect(result.unauthorized).toBe(true);
+	});
+
+	it("API が 401 を返したら未認証として返す", async () => {
+		const { fetch } = recordingFetch(
+			Response.json({ error: "Unauthorized" }, { status: 401 }),
+		);
+
+		const result = await fetchMyIssues({ token: "expired", fetchImpl: fetch });
+
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
+		expect(result.unauthorized).toBe(true);
+	});
+
+	// 401 以外の失敗まで「サインインしてください」にすると、
+	// サインインし直しても直らない案内を出し続けることになる。
+	it("500 は未認証ではなく取得失敗として返す", async () => {
+		const { fetch } = recordingFetch(new Response("boom", { status: 500 }));
+
+		const result = await fetchMyIssues({ token: "tok_1", fetchImpl: fetch });
+
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
+		expect(result.unauthorized).toBe(false);
+	});
+
+	it("ネットワークエラーでも throw せず失敗を返す", async () => {
+		const { fetch } = recordingFetch(async () => {
+			throw new TypeError("fetch failed");
+		});
+		const originalError = console.error;
+		console.error = () => {};
+
+		try {
+			const result = await fetchMyIssues({ token: "tok_1", fetchImpl: fetch });
+
+			expect(result.ok).toBe(false);
+			if (result.ok) return;
+			expect(result.unauthorized).toBe(false);
+		} finally {
+			console.error = originalError;
+		}
+	});
+
+	it("想定外の形の JSON でも throw せず失敗を返す", async () => {
+		const { fetch } = recordingFetch(Response.json({ unexpected: true }));
+
+		const result = await fetchMyIssues({ token: "tok_1", fetchImpl: fetch });
+
+		expect(result.ok).toBe(false);
+	});
+
+	it("キャッシュせずに毎回取りに行く", async () => {
+		const { fetch, calls } = recordingFetch(
+			Response.json({ data: [], total: 0, limit: 20, offset: 0 }),
+		);
+
+		await fetchMyIssues({ token: "tok_1", fetchImpl: fetch });
+
+		expect(calls[0]?.init?.cache).toBe("no-store");
+	});
+
+	it("0 件でも成功として扱う（起票していないだけなので）", async () => {
+		const { fetch } = recordingFetch(
+			Response.json({ data: [], total: 0, limit: 20, offset: 0 }),
+		);
+
+		const result = await fetchMyIssues({ token: "tok_1", fetchImpl: fetch });
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.issues).toEqual([]);
+		expect(result.total).toBe(0);
 	});
 });
 
