@@ -8,6 +8,7 @@ import {
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import { useState } from "react";
+import { IssueCreated } from "@/app/components/IssueCreated";
 import {
 	CreateIssueError,
 	createIssue,
@@ -104,9 +105,11 @@ export default function NewIssuePage() {
 		setIsSubmitting(true);
 		try {
 			const created = await createIssue(result.data, await getToken());
-			// 自動では遷移させず、詳細画面 (`/issues/[id]`) へのリンクを出すに留める。
+			// 自動では遷移させず、この画面で完了を伝えてリンクを出すに留める。
 			// 続けてもう 1 件書く人がこの画面に残れることと、
 			// 「送ったのに画面が変わらない」と思わせないことの両立を取った。
+			// 行き先は詳細画面 (`/issues/[id]`、#58) と自分の Issue 一覧
+			// (`/my-issues`、#68) の 2 つで、`IssueCreated` が出し分ける。
 			setCreatedId(created.id);
 			setValues(INITIAL_VALUES);
 		} catch (error) {
@@ -312,12 +315,7 @@ export default function NewIssuePage() {
 					</output>
 				)}
 
-				{createdId && (
-					<output style={{ display: "block", color: "#15803d" }}>
-						起票しました。
-						<Link href={`/issues/${createdId}`}>投稿した Issue を見る</Link>
-					</output>
-				)}
+				{createdId && <IssueCreated id={createdId} />}
 
 				<button
 					type="submit"
@@ -331,6 +329,8 @@ export default function NewIssuePage() {
 			{/* 書くのをやめたときに行き止まりにしない */}
 			<p>
 				<Link href="/issues">Issue 一覧を見る</Link>
+				{" / "}
+				<Link href="/my-issues">自分が起票した Issue</Link>
 				{" / "}
 				<Link href="/">トップへ戻る</Link>
 			</p>

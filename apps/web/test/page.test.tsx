@@ -5,9 +5,11 @@ import {
 	ISSUE_STATUS_LABELS,
 } from "@world-issue-tracker/shared";
 import { renderToStaticMarkup } from "react-dom/server";
+import { IssueCreated } from "../src/app/components/IssueCreated";
 import { formatCreatedAt, IssueList } from "../src/app/components/IssueList";
+import { MyIssueList } from "../src/app/components/MyIssueList";
 import Home from "../src/app/page";
-import type { FetchIssuesResult } from "../src/lib/issues";
+import type { FetchIssuesResult, FetchMyIssuesResult } from "../src/lib/issues";
 
 const sampleIssue = {
 	id: "ebbcf9d7680ad57cedeeb513a90d461f",
@@ -133,6 +135,116 @@ describe("formatCreatedAt", () => {
 
 	it("想定外の書式なら Invalid Date ではなく元の値を返す", () => {
 		expect(formatCreatedAt("not a date")).toBe("not a date");
+	});
+});
+
+/**
+ * 自分の Issue 一覧（Issue #68）。
+ *
+ * 「1 件も無い」「サインインが必要」「取得に失敗」を取り違えると、
+ * 起票済みの人に「まだ投稿がありません」と見せることになる。
+ * この 3 つの描き分けが主題。
+ */
+describe("MyIssueList", () => {
+	const renderMine = (result: FetchMyIssuesResult) =>
+		renderToStaticMarkup(MyIssueList({ result }));
+
+	it("自分が起票した Issue を表示する", () => {
+		const html = renderMine({ ok: true, issues: [sampleIssue], total: 1 });
+
+		expect(html).toContain("駅前の街灯が切れている");
+	});
+
+	it("1 件も無いときは、まだ起票していないことを伝える", () => {
+		const html = renderMine({ ok: true, issues: [], total: 0 });
+
+		expect(html).toContain("まだ Issue を起票していません");
+		// 行き止まりにしない（起票画面への導線がある）
+		expect(html).toContain("/issues/new");
+	});
+
+	it("未サインインならサインインを促し、取得失敗とは別の文言を出す", () => {
+		const html = renderMine({
+			ok: false,
+			error: "サインインが必要です",
+			unauthorized: true,
+		});
+
+		expect(html).toContain("サインイン");
+		// 「時間をおいて再度お試しください」はサインインでは直らない案内なので出さない
+		expect(html).not.toContain("時間をおいて");
+	});
+
+	it("未サインインを「まだ起票していません」と混同しない", () => {
+		const html = renderMine({
+			ok: false,
+			error: "サインインが必要です",
+			unauthorized: true,
+		});
+
+		expect(html).not.toContain("まだ Issue を起票していません");
+	});
+
+	it("取得に失敗したときはエラーを伝え、サインインの案内にはしない", () => {
+		const html = renderMine({
+			ok: false,
+			error: "API が 500 を返しました",
+			unauthorized: false,
+		});
+
+		expect(html).toContain("Issue を取得できませんでした");
+		expect(html).not.toContain("まだ Issue を起票していません");
+	});
+
+	it("Issue の本文を HTML としてではなくテキストとして出す", () => {
+		const html = renderMine({
+			ok: true,
+			issues: [
+				{
+					...sampleIssue,
+					title: "<script>alert(1)</script>",
+					description: "<img src=x onerror=alert(1)>",
+				},
+			],
+			total: 1,
+		});
+
+		expect(html).not.toContain("<script>");
+		expect(html).not.toContain("<img ");
+		expect(html).toContain("&lt;script&gt;");
+	});
+});
+
+/**
+ * 起票完了時の導線（Issue #68 の本題）。
+ *
+ * 「起票しました（ID: xxx）」と ID を出すだけだと、起票者は自分の投稿を
+ * 後から辿れない。完了の表示から自分の一覧へ繋がっていることを見る。
+ */
+describe("IssueCreated", () => {
+	it("起票した ID を出す", () => {
+		const html = renderToStaticMarkup(IssueCreated({ id: "abc123" }));
+
+		expect(html).toContain("abc123");
+	});
+
+	it("自分が起票した Issue の一覧への導線を出す", () => {
+		const html = renderToStaticMarkup(IssueCreated({ id: "abc123" }));
+
+		expect(html).toContain('href="/my-issues"');
+		// リンクの文言が空だと、あることに気付けない
+		const visibleText = html.replace(/<[^>]*>/g, "");
+		expect(visibleText).toContain("自分が起票した Issue");
+	});
+
+	// 詳細画面 (#58) ができたので、今書いた 1 件へ直接向かう導線も出す。
+	// 一覧へ送るだけだと、直前に自分が書いたものを探させることになる。
+	it("投稿した Issue の詳細への導線を出す", () => {
+		const html = renderToStaticMarkup(IssueCreated({ id: "abc123" }));
+
+		expect(html).toContain('href="/issues/abc123"');
+		const visibleText = html.replace(/<[^>]*>/g, "");
+		expect(visibleText).toContain("投稿した Issue を見る");
 	});
 });
 

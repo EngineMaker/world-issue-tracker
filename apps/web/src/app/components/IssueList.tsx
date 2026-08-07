@@ -31,7 +31,13 @@ export function formatCreatedAt(createdAt: string): string {
 	return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
-function IssueCard({ issue }: { issue: PublicIssue }) {
+/**
+ * Issue 1 件のカード。
+ *
+ * 公開一覧と自分の一覧（`MyIssueList`）で同じ見た目を使う。
+ * 一覧ごとに書き分けると、表示項目を足したときに片方だけ取り残される。
+ */
+export function IssueCard({ issue }: { issue: PublicIssue }) {
 	return (
 		<li
 			style={{
