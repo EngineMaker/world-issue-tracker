@@ -10,6 +10,7 @@ import { type Context, Hono } from "hono";
 import type { Bindings } from "../index";
 import { requireAuth } from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
+import { comments } from "./comments";
 
 export const issues = new Hono<{ Bindings: Bindings }>();
 
@@ -389,6 +390,14 @@ issues.patch("/:id", clerkAuth(), requireAuth, async (c) => {
 	}
 	return c.json(toPublicIssue(result));
 });
+
+// /issues/:id/comments — Issue に紐づくコメント（src/routes/comments.ts）
+//
+// `:id`（親の Issue ID）はサブルーター側で `c.req.param("id")` として読める。
+// より限定的なパスなので `/:id` のハンドラより先に置く必要は無い
+// （Hono は登録順ではなくパターンの一致で振り分ける）が、
+// 対応関係が読めるようにルート定義の並びは URL の階層に合わせている。
+issues.route("/:id/comments", comments);
 
 // DELETE /issues/:id — Delete (auth required, owner only)
 issues.delete("/:id", clerkAuth(), requireAuth, async (c) => {

@@ -3,6 +3,7 @@ import {
 	ISSUE_SCOPE_LABELS,
 	ISSUE_STATUS_LABELS,
 } from "@world-issue-tracker/shared";
+import Link from "next/link";
 import type { FetchIssuesResult, PublicIssue } from "../../lib/issues";
 
 /**
@@ -10,8 +11,9 @@ import type { FetchIssuesResult, PublicIssue } from "../../lib/issues";
  *
  * `municipality` / `open` のような enum の生の値はユーザー向けの語彙ではない。
  * 対応表はここに写さず `packages/shared` から引く（`page.tsx` と同じ経路）。
- * 写すと二重管理になって片方だけ古くなるうえ、
- * 同じ概念が同一画面の中で違う表記になる（Issue #59）。
+ * 写すと二重管理になって片方だけ古くなるうえ、同じ概念が同一画面の中で
+ * 違う表記になる（Issue #59）。一覧が生の enum 値、詳細ページが日本語ラベルだと、
+ * リンクで繋がった 2 画面で同じ Issue が別物に見える。
  *
  * export しているのはテストのため。ラベルを写した実装でも描画結果は同じになるため、
  * 描画からは二重管理を見分けられない。shared の辞書と同一かをテストが直接見る。
@@ -55,7 +57,17 @@ export function IssueCard({ issue }: { issue: PublicIssue }) {
 				listStyle: "none",
 			}}
 		>
-			<h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem" }}>{issue.title}</h3>
+			{/*
+			  タイトルを詳細ページ (`/issues/[id]`) への入口にする。
+			  コメント欄はその画面にあるため、ここに導線が無いと
+			  一覧から議論に辿り着けない。
+
+			  カード全体ではなくタイトルをリンクにする。カード全体を <a> で
+			  包むと、読み上げ時に説明文まで一続きのリンク名として読まれる
+			*/}
+			<h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem" }}>
+				<Link href={`/issues/${issue.id}`}>{issue.title}</Link>
+			</h3>
 			<p style={{ margin: "0 0 0.5rem", color: "#444" }}>{issue.description}</p>
 			<p style={{ margin: 0, fontSize: "0.85rem", color: "#666" }}>
 				<span>{scopeLabels[issue.scope].label}</span>

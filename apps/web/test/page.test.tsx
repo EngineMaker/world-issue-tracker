@@ -45,9 +45,13 @@ describe("IssueList", () => {
 		});
 
 		expect(html).toContain("駅前の街灯が切れている");
-		// スコープ・ステータスは日本語ラベルで出す（Issue #59）
-		expect(html).toContain("コミュニティ");
-		expect(html).toContain("受付");
+		// スコープとステータスは日本語ラベルで出す（詳細ページと同じ文言、Issue #59）。
+		// 期待値は shared の定数から引く。ここに直書きすると、
+		// ラベルを変えたときにテストだけが古い文言を守り続ける
+		expect(html).toContain(ISSUE_SCOPE_LABELS[DEFAULT_LOCALE].community.label);
+		expect(html).toContain(ISSUE_STATUS_LABELS[DEFAULT_LOCALE].open);
+		// enum の生値がそのまま出ていないこと
+		expect(html).not.toContain(">community<");
 		// `dateTime` 属性ではなく、画面に見えるテキストとして日時が出ていること。
 		// 属性値だけを見ると、表示から日時が消えても気付けない
 		const visibleText = html.replace(/<[^>]*>/g, "");
@@ -287,6 +291,16 @@ describe("IssueCreated", () => {
 		// リンクの文言が空だと、あることに気付けない
 		const visibleText = html.replace(/<[^>]*>/g, "");
 		expect(visibleText).toContain("自分が起票した Issue");
+	});
+
+	// 詳細画面 (#58) ができたので、今書いた 1 件へ直接向かう導線も出す。
+	// 一覧へ送るだけだと、直前に自分が書いたものを探させることになる。
+	it("投稿した Issue の詳細への導線を出す", () => {
+		const html = renderToStaticMarkup(IssueCreated({ id: "abc123" }));
+
+		expect(html).toContain('href="/issues/abc123"');
+		const visibleText = html.replace(/<[^>]*>/g, "");
+		expect(visibleText).toContain("投稿した Issue を見る");
 	});
 });
 
