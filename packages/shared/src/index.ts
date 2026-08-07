@@ -42,6 +42,29 @@ export const UpdateIssueSchema = z
 	});
 export type UpdateIssue = z.infer<typeof UpdateIssueSchema>;
 
+/**
+ * コメント本文の最大長。
+ *
+ * Issue の `description`（5000）より短くしているのは、コメントが
+ * 「議論を重ねる場」であって長文を一度に書き切る場所ではないため。
+ * 数値を定数として出しているのは、画面側で文字数カウンタや
+ * `maxLength` に同じ値を使うときに書き写さないで済むようにするため。
+ */
+export const COMMENT_BODY_MAX_LENGTH = 2000;
+
+/**
+ * コメントの投稿内容。
+ *
+ * 本文は前後の空白を落としてから検証する。`min(1)` だけだと空白しか
+ * 入っていないコメントが通り、一覧に読めない行が増えるため。
+ * `.trim()` を `.max()` より先に置いているのは、末尾の改行だけで
+ * 上限を超えた入力を弾かないようにするため（見た目の文字数と一致させる）。
+ */
+export const CreateCommentSchema = z.object({
+	body: z.string().trim().min(1).max(COMMENT_BODY_MAX_LENGTH),
+});
+export type CreateComment = z.infer<typeof CreateCommentSchema>;
+
 /** 表示ラベルを提供するロケール。MVP のスコープに合わせて日本語・英語の2つ */
 export const Locale = z.enum(["ja", "en"]);
 export type Locale = z.infer<typeof Locale>;
