@@ -105,9 +105,11 @@ export default function NewIssuePage() {
 		setIsSubmitting(true);
 		try {
 			const created = await createIssue(result.data, await getToken());
-			// 詳細画面 (`/issues/[id]`) はまだ無いので、遷移せずにこの画面で
-			// 完了を伝える。追跡の手段としては、ID を控えさせるのではなく
-			// 自分の Issue 一覧 (`/my-issues`) への導線を出す（Issue #68）。
+			// 自動では遷移させず、この画面で完了を伝えてリンクを出すに留める。
+			// 続けてもう 1 件書く人がこの画面に残れることと、
+			// 「送ったのに画面が変わらない」と思わせないことの両立を取った。
+			// 行き先は詳細画面 (`/issues/[id]`、#58) と自分の Issue 一覧
+			// (`/my-issues`、#68) の 2 つで、`IssueCreated` が出し分ける。
 			setCreatedId(created.id);
 			setValues(INITIAL_VALUES);
 		} catch (error) {

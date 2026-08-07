@@ -146,11 +146,50 @@ export type FetchIssuesResult =
 	| { ok: true; issues: PublicIssue[]; total: number }
 	| { ok: false; error: string };
 
+/**
+ * この module が使う範囲だけを表した `fetch` の型。
+ *
+ * `typeof globalThis.fetch` にしてはいけない。テストは `apps/api` の
+ * vitest から動く（web にテストランナーが無いため）が、api の
+ * `tsconfig.json` は `types: ["@cloudflare/workers-types"]` を指定していて、
+ * そこでは `globalThis.fetch` と `RequestInit` が Workers 版に差し替わる。
+ * Workers の `RequestInit` に `cache` は無いため、web 単体では通る
+ * `{ cache: "no-store" }` が api 側の `tsc --noEmit` でだけ型エラーになる。
+ *
+ * 実行環境（ブラウザ / Node / Workers）ではなく、この module が
+ * 呼び出す形そのものを型にすることで、どちらの型検査でも同じ意味になる。
+ */
+type FetchLike = (
+	url: string,
+	init: { cache: "no-store"; headers?: Record<string, string> },
+) => Promise<{
+	ok: boolean;
+	status: number;
+	json: () => Promise<unknown>;
+}>;
+
+/**
+ * 実行環境の `fetch`。差し替えない場合の既定値。
+ *
+ * `const defaultFetch = globalThis.fetch` と書いて module のロード時に
+ * 束縛してはいけない。`apps/web/test/page.test.tsx` は Server Component を
+ * 描画する前に `globalThis.fetch` を差し替えるが、束縛済みだとその差し替えが
+ * 届かず、テストが実物の API へ通信しに行ってしまう。
+ * 呼ぶ瞬間に読むことで、差し替えが効く。
+ *
+ * キャストしているのは、上の `FetchLike` の理由と同じく
+ * `globalThis.fetch` の型が型検査する側の設定に左右されるため。
+ * 実行時に動くのはブラウザまたは Node（Next.js の Server Component）の
+ * `fetch` で、どちらも `cache` を受け付けるため挙動は変わらない。
+ */
+const defaultFetch: FetchLike = (url, init) =>
+	(globalThis.fetch as unknown as FetchLike)(url, init);
+
 type FetchIssuesOptions = {
 	/** 取得件数。API 側の上限は 100。 */
 	limit?: number;
 	/** テストから差し替えるための `fetch`。通常は省略する。 */
-	fetchImpl?: typeof globalThis.fetch;
+	fetchImpl?: FetchLike;
 };
 
 /**
@@ -166,7 +205,7 @@ async function fetchIssueList(
 		limit,
 		token,
 		fetchImpl,
-	}: { limit: number; token?: string; fetchImpl: typeof globalThis.fetch },
+	}: { limit: number; token?: string; fetchImpl: FetchLike },
 ): Promise<FetchIssuesResult & { unauthorized?: boolean }> {
 	const url = `${resolveApiBaseUrl()}${path}?limit=${limit}`;
 
@@ -210,7 +249,7 @@ async function fetchIssueList(
  */
 export async function fetchIssues({
 	limit = 20,
-	fetchImpl = globalThis.fetch,
+	fetchImpl = defaultFetch,
 }: FetchIssuesOptions = {}): Promise<FetchIssuesResult> {
 	const result = await fetchIssueList("/issues", { limit, fetchImpl });
 	// 公開エンドポイントなので `unauthorized` は意味を持たない。
@@ -239,7 +278,7 @@ type FetchMyIssuesOptions = {
 	/** 取得件数。API 側の上限は 100。 */
 	limit?: number;
 	/** テストから差し替えるための `fetch`。通常は省略する。 */
-	fetchImpl?: typeof globalThis.fetch;
+	fetchImpl?: FetchLike;
 };
 
 /**
@@ -251,7 +290,7 @@ type FetchMyIssuesOptions = {
 export async function fetchMyIssues({
 	token,
 	limit = 20,
-	fetchImpl = globalThis.fetch,
+	fetchImpl = defaultFetch,
 }: FetchMyIssuesOptions): Promise<FetchMyIssuesResult> {
 	// トークンが無いなら API を呼んでも 401 が返るだけ。
 	// 往復せずにその場で未認証として返す。
@@ -276,4 +315,73 @@ export async function fetchMyIssues({
 		error: result.error,
 		unauthorized: result.unauthorized ?? false,
 	};
+}
+
+/**
+ * Issue 1 件の取得結果。
+ *
+ * 一覧（`FetchIssuesResult`）と違い、失敗を `notFound` で二分している。
+ * 「その ID の Issue は存在しない」と「取得できなかった」は利用者が取るべき
+ * 行動が違う（URL を疑う / 時間をおく）ため、呼び出し側で描き分けられるようにする。
+ * 一時的な障害を 404 として扱うと、実在する Issue に対して
+ * 「存在しません」と嘘の断定を出してしまう。
+ */
+export type FetchIssueResult =
+	| { ok: true; issue: PublicIssue }
+	| { ok: false; notFound: true }
+	| { ok: false; notFound: false; error: string };
+
+type FetchIssueOptions = {
+	/** テストから差し替えるための `fetch`。通常は省略する。 */
+	fetchImpl?: FetchLike;
+};
+
+/**
+ * API から Issue を 1 件取得する。
+ *
+ * `fetchIssues` と同じく Server Component から呼ぶ前提で、失敗しても
+ * throw せず値で返す。
+ */
+export async function fetchIssue(
+	id: string,
+	{ fetchImpl = defaultFetch }: FetchIssueOptions = {},
+): Promise<FetchIssueResult> {
+	// ID はパスセグメントに入るため、必ずエンコードする。
+	// `..` やスラッシュを含む値をそのまま連結すると、別のエンドポイントを
+	// 叩かせられる（`/issues/../health` が `/health` に潰れる）
+	const url = `${resolveApiBaseUrl()}/issues/${encodeURIComponent(id)}`;
+
+	try {
+		// 起票直後や更新直後に開いても最新が見えるよう、キャッシュしない
+		const res = await fetchImpl(url, { cache: "no-store" });
+
+		if (res.status === 404) {
+			return { ok: false, notFound: true };
+		}
+		if (!res.ok) {
+			return {
+				ok: false,
+				notFound: false,
+				error: `API が ${res.status} を返しました`,
+			};
+		}
+
+		const issue = parsePublicIssue(await res.json());
+		if (!issue) {
+			return {
+				ok: false,
+				notFound: false,
+				error: "API のレスポンス形式が想定と異なります",
+			};
+		}
+
+		return { ok: true, issue };
+	} catch (err) {
+		console.error(`GET /issues/${id} に失敗`, err);
+		return {
+			ok: false,
+			notFound: false,
+			error: "API に接続できませんでした",
+		};
+	}
 }
