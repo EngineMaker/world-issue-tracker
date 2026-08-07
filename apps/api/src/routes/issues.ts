@@ -11,8 +11,21 @@ import type { Bindings } from "../index";
 import { requireAuth } from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
 import { comments } from "./comments";
+import { helpOffers } from "./help-offers";
 
-export const issues = new Hono<{ Bindings: Bindings }>();
+/**
+ * このルーターが動く環境。
+ *
+ * `Variables.issueId` は `/issues/:id/help-offers` へ委譲する際に、mount 元で
+ * 取り出した Issue ID を子ルーターへ渡すための変数（`route()` はパスパラメータを
+ * 引き継がない）。
+ */
+type IssuesEnv = {
+	Bindings: Bindings;
+	Variables: { issueId: string };
+};
+
+export const issues = new Hono<IssuesEnv>();
 
 /**
  * レスポンスに載せてよいカラム。
@@ -242,10 +255,7 @@ export function parseQueryParams(
  * 絞り込みの条件は呼び出し側が決める。クエリ文字列から所有者を受け取る形には
  * していないので、他人の user_id を指定して覗くという経路が存在しない。
  */
-async function listIssues(
-	c: Context<{ Bindings: Bindings }>,
-	ownerUserId?: string,
-) {
+async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 	const query = parseQueryParams(new URL(c.req.url).searchParams);
 	if (!query.ok) {
 		return c.json(
@@ -372,6 +382,33 @@ issues.get("/mine", clerkAuth(), requireAuth, (c) => {
 	return listIssues(c, userId);
 });
 
+/**
+ * 「手伝います」の表明（`/issues/:id/help-offers`）を子ルーターに委譲する。
+ *
+ * `route()` は mount 先のパスパラメータを子へ引き継がない（子から見た
+ * `c.req.param("id")` は undefined になる）ため、mount の手前で `:id` を
+ * コンテキストに入れる。子ルーター側は `c.get("issueId")` で受ける。
+ *
+ * 子ルーターが持つのは `"/"` だけなので、ミドルウェアも
+ * `/:id/help-offers` の一致だけで足りる（`/*` を足しても通る経路は増えない）。
+ * 末尾スラッシュ付きの `/issues/xxx/help-offers/` は子側に対応するルートが
+ * 無いため 404 になる。これは Issue 本体（`/issues/:id/`）も同じ扱いで、
+ * 経路ごとに揺れないよう合わせている。
+ *
+ * `/:id` の各ハンドラより前に置いているのは「より具体的なパスを先に書く」形に
+ * 揃えるため。Hono は登録順ではなくパターンの具体性で照合するので、
+ * 順序を入れ替えても `DELETE /issues/:id` がここを横取りすることはない。
+ */
+issues.use("/:id/help-offers", async (c, next) => {
+	// このミドルウェアは `:id` を含むパターンでしか登録していないため、
+	// ここに来た時点で `id` は必ず取れる。`use()` は登録パターンから
+	// パラメータの型を推論しないので `string | undefined` になるだけ。
+	// 万一取れなければ空文字が入り、子ルーター側の存在確認で 404 になる。
+	c.set("issueId", c.req.param("id") ?? "");
+	await next();
+});
+issues.route("/:id/help-offers", helpOffers);
+
 // GET /issues/:id — Get by ID (public)
 issues.get("/:id", async (c) => {
 	const id = c.req.param("id");
@@ -396,7 +433,7 @@ issues.get("/:id", async (c) => {
  * 404 で存在を隠すのではなく 403 を素直に返す方針にしている。
  */
 async function checkOwnership(
-	c: Context<{ Bindings: Bindings }>,
+	c: Context<IssuesEnv>,
 	id: string,
 ): Promise<Response | null> {
 	const row = await c.env.DB.prepare("SELECT user_id FROM issues WHERE id = ?")
