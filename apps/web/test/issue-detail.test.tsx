@@ -277,6 +277,22 @@ describe("詳細ページ", () => {
 		expect(text).not.toContain("2026-08-01 21:00");
 	});
 
+	// Issue #62: 6 状態を説明しておきながら画面から変える手段が無く、
+	// すべての Issue が永久に `open` に留まっていた。
+	// 個々の部品（`StatusControl` / `updateIssueStatus`）が正しくても、
+	// ページがそれを置いていなければ症状は消えないので、ここで結線を見る。
+	it("ステータス欄を描画する（#62 の操作 UI の置き場）", async () => {
+		const { html } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+		);
+
+		// 見出しが出ていること。`StatusControl` は起票者かどうかが定まるまで
+		// 操作 UI を出さないので、サーバー側の描画で見えるのはここまで
+		expect(html).toContain('id="issue-status-heading"');
+		expect(html.replace(/<[^>]*>/g, "")).toContain("ステータス");
+	});
+
 	it("投稿内容を HTML としてではなくテキストとして出す", async () => {
 		const { html } = await renderDetail(
 			sampleIssue.id,

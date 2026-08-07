@@ -10,6 +10,7 @@ import { fetchComments, fetchIssue } from "../../../lib/issues";
 import { CommentSection } from "../../components/CommentSection";
 import { HelpOfferButton } from "../../components/HelpOfferButton";
 import { formatCreatedAt } from "../../components/IssueList";
+import { IssueStatusSection } from "../../components/StatusControl";
 
 const SCOPE_LABELS = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
 const STATUS_LABELS = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
@@ -109,6 +110,11 @@ export default async function IssueDetailPage({
 						{scope.label} — {scope.description}
 					</dd>
 
+					{/*
+					  ここは JS の実行前から読める静的な表示として残す。
+					  変更の操作 UI は後段の `IssueStatusSection`（Client Component）で、
+					  起票者かどうかを確かめてから出す
+					*/}
 					<dt>ステータス</dt>
 					<dd>{STATUS_LABELS[issue.status]}</dd>
 
@@ -139,6 +145,15 @@ export default async function IssueDetailPage({
 					</dd>
 				</dl>
 			</section>
+
+			{/*
+			  ステータスの変更（#62）。起票者だけが操作できるが、その判定には
+			  Clerk のトークンが要るため、Client Component 側で確かめる
+			  （このページは API へトークンを渡していない）。
+			  「手伝います」より前に置いているのは、状態を進めるのが起票者本人の
+			  操作で、Issue 本文を読み終えた直後に続く流れになるため
+			*/}
+			<IssueStatusSection issueId={issue.id} status={issue.status} />
 
 			{/*
 			  「手伝います」はコメントより前に置く。読み終えた直後が一番

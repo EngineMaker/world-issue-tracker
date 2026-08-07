@@ -9,7 +9,7 @@ import {
 } from "@world-issue-tracker/shared";
 import { type Context, Hono } from "hono";
 import type { Bindings } from "../index";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, viewerUserId } from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
 import { comments } from "./comments";
 import { helpOffers } from "./help-offers";
@@ -452,6 +452,48 @@ issues.use("/:id/help-offers", async (c, next) => {
 	await next();
 });
 issues.route("/:id/help-offers", helpOffers);
+
+/**
+ * GET /issues/:id/viewer — 閲覧者とこの Issue の関係 (public)
+ *
+ * 今のところ返すのは「あなたがこの Issue の起票者か」だけ（Issue #62）。
+ * ステータス変更の操作 UI を起票者にだけ出すために、画面が必要とする。
+ *
+ * `GET /issues/:id` に足さず別の経路にしているのは、あちらが
+ * 「Issue の行そのもの」を返す契約で、公開キーの集合をテストで固定して
+ * いるため（`Public response fields`）。行に属さない値を混ぜると、
+ * 「返るキー = テーブルの公開カラム」という対応が崩れる。
+ * help-offers が `viewer_offered` を同居させられるのは、あちらのレスポンスが
+ * 最初から `{ data, total, ... }` というラップ済みの形をしているから。
+ *
+ * 返すのは真偽値だけで、起票者の user_id は載せない。誰が書いたかを
+ * 伏せる方針（#67）は、この経路からも抜けないようにする。
+ *
+ * `requireAuth` は差していない。詳細ページは誰でも読める画面で、
+ * 未ログインの閲覧者にとっての答えは false で確定しているため、
+ * ここで 401 を返す意味が無い（`clerkAuth()` だけ差して、ログイン中なら
+ * 判定に使う）。
+ *
+ * この値は表示の出し分けにしか使えない。UI を隠すことは保護ではなく、
+ * 実際の権限は PATCH / DELETE 側の `WHERE ... AND user_id = ?` が強制する。
+ */
+issues.get("/:id/viewer", clerkAuth(), async (c) => {
+	const id = c.req.param("id");
+	const row = await c.env.DB.prepare("SELECT user_id FROM issues WHERE id = ?")
+		.bind(id)
+		.first<{ user_id: string | null }>();
+
+	if (!row) {
+		return c.json({ error: "Issue not found" }, 404);
+	}
+
+	const viewer = viewerUserId(c);
+	// `user_id` が NULL の行（認証導入前に入った legacy 行）は誰のものでもない。
+	// null 同士の一致で true に倒すと、未ログインの閲覧者が起票者として扱われる
+	return c.json({
+		viewer_is_owner: viewer !== null && row.user_id === viewer,
+	});
+});
 
 // GET /issues/:id — Get by ID (public)
 issues.get("/:id", async (c) => {
