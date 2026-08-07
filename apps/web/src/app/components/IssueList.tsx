@@ -114,10 +114,22 @@ export function IssueList({ result }: { result: FetchIssuesResult }) {
 		);
 	}
 
+	// 複数ページに分かれているときは「N 件中 M 件」だけではどこを見ているのか
+	// 分からないため、範囲（何件目から何件目か）を出す。
+	//
+	// 判定は `offset > 0` ではなく `total > limit` にしている。前者だと
+	// 1 ページ目だけ様式が変わり、ページを送った瞬間に表記が切り替わって見える。
+	// ページが 1 つしか無いときは範囲を出しても情報が増えないので、件数だけにする。
+	const isPaged = result.total > result.limit;
+	const from = result.offset + 1;
+	const to = result.offset + result.issues.length;
+
 	return (
 		<>
 			<p style={{ color: "#666", fontSize: "0.85rem" }}>
-				{result.total} 件中 {result.issues.length} 件を表示
+				{isPaged
+					? `${result.total} 件中 ${from} 〜 ${to} 件目を表示`
+					: `${result.total} 件中 ${result.issues.length} 件を表示`}
 			</p>
 			<ul style={{ padding: 0, margin: 0 }}>
 				{result.issues.map((issue) => (

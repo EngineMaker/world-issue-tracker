@@ -173,6 +173,62 @@ export const LIST_ISSUES_DEFAULT_LIMIT = 20;
 export const LIST_ISSUES_DEFAULT_OFFSET = 0;
 
 /**
+ * 一覧の並び順。
+ *
+ * `newest` / `oldest` はどちらも `created_at` を主キーに、`id` を
+ * タイブレークに使う。カーソルページングの前提（全順序が定まること）を
+ * 保つため、方向を反転するときは両方のキーを同時に反転させる。
+ */
+export const IssueSort = z.enum(["newest", "oldest"]);
+export type IssueSort = z.infer<typeof IssueSort>;
+
+export const LIST_ISSUES_DEFAULT_SORT: IssueSort = "newest";
+
+/** 並び順の表示ラベル。画面の選択肢に出す文言をここに一本化する */
+export const ISSUE_SORT_LABELS: Record<Locale, Record<IssueSort, string>> = {
+	ja: {
+		newest: "新しい順",
+		oldest: "古い順",
+	},
+	en: {
+		newest: "Newest first",
+		oldest: "Oldest first",
+	},
+};
+
+/** 並び順の表示ラベルを引く。ロケール省略時は既定ロケール */
+export const getIssueSortLabel = (
+	sort: IssueSort,
+	locale: Locale = DEFAULT_LOCALE,
+) => ISSUE_SORT_LABELS[locale][sort];
+
+/**
+ * キーワード検索語の上限。
+ *
+ * 認証不要の公開エンドポイントなので、任意長の文字列を LIKE パターンに
+ * 変換させない。カテゴリ（100 文字）とタイトル（200 文字）の両方を
+ * 覆える長さがあれば実用上は足りる。
+ */
+export const ISSUE_SEARCH_MAX_LENGTH = 200;
+
+/**
+ * LIKE パターンのメタ文字をエスケープする。
+ *
+ * `%` `_` はそれぞれ「任意の文字列」「任意の 1 文字」として解釈されるため、
+ * 利用者が入力した `100%` がそのままだと `100` で始まる何にでも当たる。
+ * バインド値として渡していても SQL インジェクションにはならないが、
+ * 検索結果としては入力と違うものが返る。
+ *
+ * エスケープ文字自身（`\`）を先に処理しないと、後段で付けた `\` を
+ * さらにエスケープしてしまうため、順序を変えてはいけない。
+ * 呼び出し側は SQL に `ESCAPE '\'` を明示すること（SQLite の LIKE は
+ * 既定でエスケープ文字を持たない）。
+ */
+export function escapeLikePattern(value: string): string {
+	return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+/**
  * 一覧のカーソル。「最後に見た行の created_at と id」を `|` で連結した文字列。
  *
  * created_at は SQLite が返す `YYYY-MM-DD HH:MM:SS[.SSS]` 書式なので、
@@ -243,6 +299,19 @@ export const ListIssuesQuerySchema = z
 	.object({
 		scope: IssueScope.optional(),
 		status: IssueStatus.optional(),
+		// カテゴリは自由入力（`<datalist>` の候補は入力の補助でしかない）なので
+		// enum では縛れない。保存時と同じ長さの上限だけを課して完全一致で引く。
+		category: z.string().min(1).max(100).optional(),
+		// キーワードは前後の空白を落としてから見る。フォームから空文字や
+		// 空白だけが送られてくるのは「未指定」であって「空文字に一致する
+		// Issue を探せ」ではないため、`undefined` に倒す。
+		q: z
+			.string()
+			.max(ISSUE_SEARCH_MAX_LENGTH)
+			.transform((value) => value.trim())
+			.transform((value) => (value.length ? value : undefined))
+			.optional(),
+		sort: IssueSort.optional(),
 		limit: DecimalIntQueryParam.pipe(
 			z.number().int().min(1).max(100),
 		).optional(),
@@ -258,6 +327,7 @@ export const ListIssuesQuerySchema = z
 		...query,
 		limit: query.limit ?? LIST_ISSUES_DEFAULT_LIMIT,
 		offset: query.offset ?? LIST_ISSUES_DEFAULT_OFFSET,
+		sort: query.sort ?? LIST_ISSUES_DEFAULT_SORT,
 	}))
 	// cursor と offset は位置の決め方が違うので併用できない。
 	// 片方を黙って無視すると「offset が効いたつもりの空ページ」が返り、

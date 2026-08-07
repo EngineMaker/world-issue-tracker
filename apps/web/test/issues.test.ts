@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
+	buildIssuesHref,
+	DEFAULT_ISSUE_FILTERS,
 	fetchIssues,
 	fetchMyIssues,
+	hasActiveFilters,
+	parseIssueFilters,
 	parseListIssuesResponse,
 	parsePublicIssue,
 	resolveApiBaseUrl,
@@ -90,6 +94,84 @@ describe("fetchIssues", () => {
 		await fetchIssues({ limit: 5, fetchImpl: fetch });
 
 		expect(calls[0]).toContain("limit=5");
+	});
+
+	it("絞り込み条件をクエリに載せる", async () => {
+		const { fetch, calls } = stubFetch(
+			Response.json({ data: [], total: 0, limit: 20, offset: 0 }),
+		);
+
+		await fetchIssues({
+			filters: {
+				scope: "municipality",
+				status: "in_progress",
+				category: "道路・交通",
+				q: "街灯",
+				sort: "oldest",
+				offset: 40,
+			},
+			fetchImpl: fetch,
+		});
+
+		const url = new URL(calls[0] ?? "");
+		expect(url.searchParams.get("scope")).toBe("municipality");
+		expect(url.searchParams.get("status")).toBe("in_progress");
+		expect(url.searchParams.get("category")).toBe("道路・交通");
+		expect(url.searchParams.get("q")).toBe("街灯");
+		expect(url.searchParams.get("sort")).toBe("oldest");
+		expect(url.searchParams.get("offset")).toBe("40");
+	});
+
+	it("条件が無ければ余計なクエリを付けない（既定の一覧と同じ URL になる）", async () => {
+		const { fetch, calls } = stubFetch(
+			Response.json({ data: [], total: 0, limit: 20, offset: 0 }),
+		);
+
+		await fetchIssues({ fetchImpl: fetch });
+
+		const url = new URL(calls[0] ?? "");
+		expect(url.searchParams.get("scope")).toBeNull();
+		expect(url.searchParams.get("status")).toBeNull();
+		expect(url.searchParams.get("category")).toBeNull();
+		expect(url.searchParams.get("q")).toBeNull();
+		expect(url.searchParams.get("sort")).toBeNull();
+		expect(url.searchParams.get("offset")).toBeNull();
+	});
+
+	// 手で連結していると、カテゴリやキーワードに含まれる `&` が
+	// 別のパラメータとして解釈され、意図と違う絞り込みになる
+	it("キーワードに含まれる記号をエスケープして送る", async () => {
+		const { fetch, calls } = stubFetch(
+			Response.json({ data: [], total: 0, limit: 20, offset: 0 }),
+		);
+
+		await fetchIssues({
+			filters: { ...DEFAULT_ISSUE_FILTERS, q: "a&scope=global#x" },
+			fetchImpl: fetch,
+		});
+
+		const url = new URL(calls[0] ?? "");
+		expect(url.searchParams.get("q")).toBe("a&scope=global#x");
+		// 記号がクエリを割ってしまっていないこと
+		expect(url.searchParams.get("scope")).toBeNull();
+	});
+
+	it("要求した limit / offset を結果に添えて返す（ページング UI が使う）", async () => {
+		const { fetch } = stubFetch(
+			Response.json({ data: [], total: 100, limit: 20, offset: 0 }),
+		);
+
+		const result = await fetchIssues({
+			limit: 10,
+			filters: { ...DEFAULT_ISSUE_FILTERS, offset: 30 },
+			fetchImpl: fetch,
+		});
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.limit).toBe(10);
+		expect(result.offset).toBe(30);
+		expect(result.total).toBe(100);
 	});
 
 	it("0 件でも成功として扱う（エラーにしない）", async () => {
@@ -200,6 +282,177 @@ describe("fetchIssues", () => {
 		await fetchIssues({ fetchImpl });
 
 		expect(init?.cache).toBe("no-store");
+	});
+});
+
+describe("parseIssueFilters", () => {
+	it("URL のクエリを絞り込み条件として読む", () => {
+		const filters = parseIssueFilters({
+			scope: "municipality",
+			status: "resolved",
+			category: "道路・交通",
+			q: "街灯",
+			sort: "oldest",
+			offset: "40",
+		});
+
+		expect(filters).toEqual({
+			scope: "municipality",
+			status: "resolved",
+			category: "道路・交通",
+			q: "街灯",
+			sort: "oldest",
+			offset: 40,
+		});
+	});
+
+	it("何も指定が無ければ既定値になる", () => {
+		expect(parseIssueFilters({})).toEqual(DEFAULT_ISSUE_FILTERS);
+	});
+
+	// URL は利用者が手で編集できる。想定外の値でエラー画面を出さず、
+	// 「その条件は無かったもの」として一覧を成立させる
+	it("定義外の scope / status / sort は捨てる", () => {
+		const filters = parseIssueFilters({
+			scope: "galactic",
+			status: "wontfix",
+			sort: "random",
+		});
+
+		expect(filters.scope).toBeUndefined();
+		expect(filters.status).toBeUndefined();
+		expect(filters.sort).toBe("newest");
+	});
+
+	it("Object.prototype 由来の名前を値域として認めない", () => {
+		const filters = parseIssueFilters({
+			scope: "toString",
+			status: "constructor",
+			sort: "valueOf",
+		});
+
+		expect(filters.scope).toBeUndefined();
+		expect(filters.status).toBeUndefined();
+		expect(filters.sort).toBe("newest");
+	});
+
+	it("整数でない offset は先頭ページに倒す", () => {
+		expect(parseIssueFilters({ offset: "abc" }).offset).toBe(0);
+		expect(parseIssueFilters({ offset: "-5" }).offset).toBe(0);
+		expect(parseIssueFilters({ offset: "1.5" }).offset).toBe(0);
+		// 16 進表記も通さない（API 側の DecimalIntQueryParam と同じ契約）
+		expect(parseIssueFilters({ offset: "0x10" }).offset).toBe(0);
+	});
+
+	it("空文字や空白だけの入力は未指定として扱う", () => {
+		const filters = parseIssueFilters({ q: "   ", category: "", scope: "" });
+
+		expect(filters.q).toBeUndefined();
+		expect(filters.category).toBeUndefined();
+		expect(filters.scope).toBeUndefined();
+	});
+
+	it("キーワードの前後の空白は落とす", () => {
+		expect(parseIssueFilters({ q: "  街灯  " }).q).toBe("街灯");
+	});
+
+	// API 側の上限を超える値を送っても 400 になるだけなので、
+	// ここで落として「その条件は無し」として描画を続ける
+	it("上限を超える長さの入力は捨てる", () => {
+		expect(parseIssueFilters({ q: "a".repeat(201) }).q).toBeUndefined();
+		expect(parseIssueFilters({ q: "a".repeat(200) }).q).toHaveLength(200);
+		expect(
+			parseIssueFilters({ category: "a".repeat(101) }).category,
+		).toBeUndefined();
+		expect(
+			parseIssueFilters({ category: "a".repeat(100) }).category,
+		).toHaveLength(100);
+	});
+
+	it("同名キーが複数あるときは最初の値を使う（描画を落とさない）", () => {
+		const filters = parseIssueFilters({ scope: ["national", "global"] });
+
+		expect(filters.scope).toBe("national");
+	});
+});
+
+describe("buildIssuesHref", () => {
+	it("条件が既定値だけならクエリを付けない", () => {
+		expect(buildIssuesHref(DEFAULT_ISSUE_FILTERS)).toBe("/issues");
+	});
+
+	it("指定された条件をクエリに載せる", () => {
+		const href = buildIssuesHref({
+			scope: "national",
+			status: "open",
+			category: "道路・交通",
+			q: "街灯",
+			sort: "oldest",
+			offset: 20,
+		});
+
+		const url = new URL(href, "https://example.com");
+		expect(url.pathname).toBe("/issues");
+		expect(url.searchParams.get("scope")).toBe("national");
+		expect(url.searchParams.get("status")).toBe("open");
+		expect(url.searchParams.get("category")).toBe("道路・交通");
+		expect(url.searchParams.get("q")).toBe("街灯");
+		expect(url.searchParams.get("sort")).toBe("oldest");
+		expect(url.searchParams.get("offset")).toBe("20");
+	});
+
+	// ページ送りのリンクを踏んだあとも条件が保たれること。
+	// ここが壊れると「2 ページ目に行った瞬間に絞り込みが外れる」
+	it("offset だけを差し替えても他の条件が落ちない", () => {
+		const filters = parseIssueFilters({ scope: "global", q: "街灯" });
+		const href = buildIssuesHref({ ...filters, offset: 20 });
+
+		const url = new URL(href, "https://example.com");
+		expect(url.searchParams.get("scope")).toBe("global");
+		expect(url.searchParams.get("q")).toBe("街灯");
+		expect(url.searchParams.get("offset")).toBe("20");
+	});
+
+	it("parseIssueFilters と往復して同じ条件に戻る", () => {
+		const filters = {
+			scope: "community",
+			status: "review",
+			category: "衛生・ごみ",
+			q: "ゴミ",
+			sort: "oldest",
+			offset: 60,
+		} as const;
+
+		const href = buildIssuesHref(filters);
+		const query = Object.fromEntries(
+			new URL(href, "https://example.com").searchParams,
+		);
+
+		expect(parseIssueFilters(query)).toEqual(filters);
+	});
+});
+
+describe("hasActiveFilters", () => {
+	it("何も絞っていなければ false", () => {
+		expect(hasActiveFilters(DEFAULT_ISSUE_FILTERS)).toBe(false);
+	});
+
+	it("ページを送っただけでは条件が付いているとは見なさない", () => {
+		expect(hasActiveFilters({ ...DEFAULT_ISSUE_FILTERS, offset: 20 })).toBe(
+			false,
+		);
+	});
+
+	it("条件が 1 つでも付いていれば true", () => {
+		expect(hasActiveFilters({ ...DEFAULT_ISSUE_FILTERS, q: "街灯" })).toBe(
+			true,
+		);
+		expect(
+			hasActiveFilters({ ...DEFAULT_ISSUE_FILTERS, scope: "global" }),
+		).toBe(true);
+		expect(hasActiveFilters({ ...DEFAULT_ISSUE_FILTERS, sort: "oldest" })).toBe(
+			true,
+		);
 	});
 });
 
@@ -317,6 +570,7 @@ describe("fetchMyIssues", () => {
 
 		await fetchMyIssues({ token: "tok_1", fetchImpl: fetch });
 
+		expect(calls).toHaveLength(1);
 		expect(calls[0]?.init?.cache).toBe("no-store");
 	});
 

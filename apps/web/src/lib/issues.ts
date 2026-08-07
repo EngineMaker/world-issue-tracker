@@ -1,8 +1,15 @@
 import type {
 	IssueScope as IssueScopeType,
+	IssueSort as IssueSortType,
 	IssueStatus as IssueStatusType,
 } from "@world-issue-tracker/shared";
-import { IssueScope, IssueStatus } from "@world-issue-tracker/shared";
+import {
+	ISSUE_SEARCH_MAX_LENGTH,
+	IssueScope,
+	IssueSort,
+	IssueStatus,
+	LIST_ISSUES_DEFAULT_SORT,
+} from "@world-issue-tracker/shared";
 import {
 	type FetchCommentsResult,
 	parseListCommentsResponse,
@@ -147,8 +154,130 @@ export function resolveApiBaseUrl(): string {
  * 「0 件」と「取得できなかった」を別の表示にし分けられるようにするため。
  */
 export type FetchIssuesResult =
-	| { ok: true; issues: PublicIssue[]; total: number }
+	| {
+			ok: true;
+			issues: PublicIssue[];
+			/** 絞り込み条件を適用したうえでの総件数（表示中の件数ではない） */
+			total: number;
+			/** この取得で要求した 1 ページあたりの件数。ページング UI が使う */
+			limit: number;
+			/** この取得で要求した開始位置。ページング UI が使う */
+			offset: number;
+	  }
 	| { ok: false; error: string };
+
+/**
+ * 一覧の絞り込み・並べ替え条件。
+ *
+ * URL の `searchParams` と 1 対 1 で対応させ、ページはこの値だけを見て
+ * 描画する。Server Component のまま「今の条件」が URL に載るので、
+ * 共有・ブックマーク・戻るボタンがそのまま効く（`app/page.tsx` のコメント参照）。
+ */
+export type IssueFilters = {
+	scope?: IssueScopeType;
+	status?: IssueStatusType;
+	category?: string;
+	/** キーワード。タイトル・説明の部分一致で API 側が引く */
+	q?: string;
+	sort: IssueSortType;
+	/** 何件目から表示するか。ページング UI が limit 単位で動かす */
+	offset: number;
+};
+
+/** フィルタ未指定時の既定値。ページングは先頭、並び順は新しい順 */
+export const DEFAULT_ISSUE_FILTERS: IssueFilters = {
+	sort: LIST_ISSUES_DEFAULT_SORT,
+	offset: 0,
+};
+
+/** Next.js の `searchParams` が渡してくる値の形（同名キーが複数あると配列になる） */
+export type RawSearchParams = Record<string, string | string[] | undefined>;
+
+/**
+ * `searchParams` の 1 つを単一の文字列として読む。
+ *
+ * 同名キーが複数あると配列になるが、そのときは最初の値だけを使う。
+ * URL は利用者が手で編集できる以上、想定外の形でページを落とすより、
+ * 決め打ちで 1 つ選んで描画を続ける方が親切なため（API 側は重複を
+ * 400 で弾くが、こちらは 1 つに正規化してから送る）。
+ */
+function readParam(params: RawSearchParams, key: string): string | undefined {
+	const value = params[key];
+	const single = Array.isArray(value) ? value[0] : value;
+	if (typeof single !== "string") return undefined;
+	const trimmed = single.trim();
+	return trimmed.length ? trimmed : undefined;
+}
+
+/**
+ * URL のクエリを `IssueFilters` に正規化する。
+ *
+ * 未知の値（`scope=galactic`、`offset=-1` など）は捨てて既定値に倒す。
+ * 利用者が URL を直接いじったときや、古いブックマークを開いたときに
+ * エラー画面を出さず、「絞り込み無しの一覧」として成立させるため。
+ */
+export function parseIssueFilters(params: RawSearchParams): IssueFilters {
+	const scope = IssueScope.safeParse(readParam(params, "scope"));
+	const status = IssueStatus.safeParse(readParam(params, "status"));
+	const sort = IssueSort.safeParse(readParam(params, "sort"));
+
+	const rawOffset = readParam(params, "offset");
+	// 10 進の整数表記だけを受ける（API 側の `DecimalIntQueryParam` と同じ契約）。
+	// 弾いた値は 0 に倒すので、`offset=abc` は先頭ページになる。
+	const offset =
+		rawOffset && /^\d+$/.test(rawOffset) ? Number(rawOffset) : undefined;
+
+	const category = readParam(params, "category");
+	const q = readParam(params, "q");
+
+	return {
+		scope: scope.success ? scope.data : undefined,
+		status: status.success ? status.data : undefined,
+		// API 側の上限（100 文字）を超える値は送っても 400 になるだけなので、
+		// ここで落として「絞り込み無し」として扱う
+		category: category && category.length <= 100 ? category : undefined,
+		q: q && q.length <= ISSUE_SEARCH_MAX_LENGTH ? q : undefined,
+		sort: sort.success ? sort.data : DEFAULT_ISSUE_FILTERS.sort,
+		offset: offset ?? DEFAULT_ISSUE_FILTERS.offset,
+	};
+}
+
+/**
+ * フィルタを URL のクエリ文字列に戻す。
+ *
+ * 既定値（並び順が新しい順、先頭ページ）はクエリに載せない。
+ * 何も絞っていないときの URL が `/issues` のままになり、
+ * 「条件が付いているかどうか」が URL を見て分かる。
+ */
+export function buildIssueQueryString(filters: IssueFilters): string {
+	const params = new URLSearchParams();
+	if (filters.scope) params.set("scope", filters.scope);
+	if (filters.status) params.set("status", filters.status);
+	if (filters.category) params.set("category", filters.category);
+	if (filters.q) params.set("q", filters.q);
+	if (filters.sort !== DEFAULT_ISSUE_FILTERS.sort) {
+		params.set("sort", filters.sort);
+	}
+	if (filters.offset > 0) params.set("offset", String(filters.offset));
+	return params.toString();
+}
+
+/** 一覧ページの URL。条件が無ければクエリの付かない `/issues` になる */
+export function buildIssuesHref(filters: IssueFilters): string {
+	const query = buildIssueQueryString(filters);
+	return query ? `/issues?${query}` : "/issues";
+}
+
+/** 絞り込み条件が 1 つでも付いているか。「条件をすべて解除」を出すかの判断に使う */
+export function hasActiveFilters(filters: IssueFilters): boolean {
+	return Boolean(
+		filters.scope ||
+			filters.status ||
+			filters.category ||
+			filters.q ||
+			filters.sort !== DEFAULT_ISSUE_FILTERS.sort,
+	);
+}
 
 /**
  * この module が使う範囲だけを表した `fetch` の型。
@@ -192,6 +321,8 @@ const defaultFetch: FetchLike = (url, init) =>
 type FetchIssuesOptions = {
 	/** 取得件数。API 側の上限は 100。 */
 	limit?: number;
+	/** 絞り込み・並べ替え条件。省略時は既定値（絞り込み無し・新しい順・先頭ページ） */
+	filters?: IssueFilters;
 	/** テストから差し替えるための `fetch`。通常は省略する。 */
 	fetchImpl?: FetchLike;
 };
@@ -246,15 +377,40 @@ export async function fetchComments(
  * `token` があれば `Authorization: Bearer` を付ける。Web と API は別オリジンで
  * Clerk の Cookie が届かないため、認証が要る経路はこのヘッダが唯一の手段になる。
  */
+function buildListQueryParams(
+	limit: number,
+	filters?: IssueFilters,
+): URLSearchParams {
+	// 値のエスケープは `URLSearchParams` に任せる。手で連結すると
+	// カテゴリやキーワードに含まれる `&` `=` `#` がクエリを壊す
+	const params = new URLSearchParams({ limit: String(limit) });
+	if (!filters) return params;
+	if (filters.scope) params.set("scope", filters.scope);
+	if (filters.status) params.set("status", filters.status);
+	if (filters.category) params.set("category", filters.category);
+	if (filters.q) params.set("q", filters.q);
+	if (filters.sort !== DEFAULT_ISSUE_FILTERS.sort) {
+		params.set("sort", filters.sort);
+	}
+	if (filters.offset > 0) params.set("offset", String(filters.offset));
+	return params;
+}
+
 async function fetchIssueList(
 	path: string,
 	{
 		limit,
 		token,
+		filters,
 		fetchImpl,
-	}: { limit: number; token?: string; fetchImpl: FetchLike },
+	}: {
+		limit: number;
+		token?: string;
+		filters?: IssueFilters;
+		fetchImpl: FetchLike;
+	},
 ): Promise<FetchIssuesResult & { unauthorized?: boolean }> {
-	const url = `${resolveApiBaseUrl()}${path}?limit=${limit}`;
+	const url = `${resolveApiBaseUrl()}${path}?${buildListQueryParams(limit, filters).toString()}`;
 
 	try {
 		// 投稿された Issue が次のアクセスで見えるよう、キャッシュしない
@@ -278,7 +434,16 @@ async function fetchIssueList(
 			return { ok: false, error: "API のレスポンス形式が想定と異なります" };
 		}
 
-		return { ok: true, issues: parsed.issues, total: parsed.total };
+		// limit / offset はレスポンスの値ではなく要求した値を返す。
+		// ページング UI は「次のページの offset」を自分で組み立てるため、
+		// API が何を返したかより、いまどこを見ているかが要る
+		return {
+			ok: true,
+			issues: parsed.issues,
+			total: parsed.total,
+			limit,
+			offset: filters?.offset ?? 0,
+		};
 	} catch (err) {
 		// API が落ちている / 名前解決できない / JSON として壊れている。
 		// 生の例外メッセージ（`fetch failed` など）は画面に出さず、
@@ -296,9 +461,10 @@ async function fetchIssueList(
  */
 export async function fetchIssues({
 	limit = 20,
+	filters = DEFAULT_ISSUE_FILTERS,
 	fetchImpl = defaultFetch,
 }: FetchIssuesOptions = {}): Promise<FetchIssuesResult> {
-	const result = await fetchIssueList("/issues", { limit, fetchImpl });
+	const result = await fetchIssueList("/issues", { limit, filters, fetchImpl });
 	// 公開エンドポイントなので `unauthorized` は意味を持たない。
 	// 呼び出し側の型に余計な分岐を持ち込まないよう落とす。
 	const { unauthorized: _unauthorized, ...rest } = result;

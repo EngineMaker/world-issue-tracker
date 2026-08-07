@@ -2,6 +2,7 @@ import { getAuth } from "@hono/clerk-auth";
 import {
 	buildIssueCursor,
 	CreateIssueSchema,
+	escapeLikePattern,
 	ListIssuesQuerySchema,
 	parseIssueCursor,
 	UpdateIssueSchema,
@@ -281,7 +282,8 @@ async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 		return c.json({ error: parsed.error.flatten() }, 400);
 	}
 
-	const { scope, status, limit, offset, cursor } = parsed.data;
+	const { scope, status, category, q, sort, limit, offset, cursor } =
+		parsed.data;
 
 	const conditions: string[] = [];
 	const binds: unknown[] = [];
@@ -300,6 +302,34 @@ async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 		conditions.push("status = ?");
 		binds.push(status);
 	}
+	if (category) {
+		conditions.push("category = ?");
+		binds.push(category);
+	}
+	// キーワードはタイトルと説明の部分一致。カテゴリは別のパラメータで
+	// 絞れるので、ここでは本文だけを対象にする。
+	//
+	// SQLite の LIKE は既定で ASCII のみ大小文字を区別しない。日本語には
+	// 大小の区別がなく、英字は区別せずに引ける方が探す側の期待に近いので、
+	// そのままの挙動を使う。エスケープ文字は SQLite が既定で持たないため
+	// `ESCAPE '\'` を明示する（付け忘れると `\%` の `\` が字面として残る）。
+	//
+	// コストについて: 前方一致でない LIKE はインデックスを使えず、
+	// とくに下の COUNT は LIMIT が効かないため毎回全行を読む。D1 は
+	// 読み取り行数で課金される（`0003_add_created_at_index.sql` 参照）ので、
+	// 行数が増えると 1 回の検索コストが線形に増える。
+	//
+	// MVP（1 都市での実証）の規模では許容できると判断してこの形にした。
+	// 全文検索が要る規模になったら FTS5 の仮想テーブルに移す。
+	// `category` は完全一致なのでインデックスで解けるが、こちらも
+	// まだ張っていない（絞り込みの利用実態を見てから判断する）。
+	if (q) {
+		const pattern = `%${escapeLikePattern(q)}%`;
+		conditions.push(
+			"(title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')",
+		);
+		binds.push(pattern, pattern);
+	}
 
 	// フィルタ条件だけを使う COUNT と、カーソル条件も含む SELECT で
 	// WHERE 句が変わるため、COUNT 用を先に固定しておく。
@@ -308,13 +338,21 @@ async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 		: "";
 	const countBinds = [...binds];
 
+	// 並び順の向き。`newest` なら (created_at DESC, id DESC)、
+	// `oldest` ならその完全な逆順。カーソル条件の不等号も同じ向きに
+	// 揃えないと、次ページが「今見たページの手前」を指してしまう。
+	const direction = sort === "oldest" ? "ASC" : "DESC";
+	const cursorComparison = direction === "ASC" ? ">" : "<";
+
 	// カーソルは「最後に見た行」そのものを指す。並び順が
-	// (created_at DESC, id DESC) なので、その行より厳密に後ろにある行だけを取る。
+	// (created_at, id) の全順序なので、その行より厳密に後ろにある行だけを取る。
 	// created_at が同値のときに id で決着が付くため、同一秒に固まった行でも
 	// 全順序が定まり、境界をまたぐ取りこぼしが起きない。
 	if (cursor) {
 		const { createdAt, id } = parseIssueCursor(cursor);
-		conditions.push("(created_at < ? OR (created_at = ? AND id < ?))");
+		conditions.push(
+			`(created_at ${cursorComparison} ? OR (created_at = ? AND id ${cursorComparison} ?))`,
+		);
 		binds.push(createdAt, createdAt, id);
 	}
 
@@ -326,7 +364,8 @@ async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 		.bind(...countBinds)
 		.first<{ total: number }>();
 
-	// 一覧は新しい順。`created_at` はミリ秒精度だが、同一ミリ秒に複数件作られると
+	// 一覧は既定で新しい順（`sort=oldest` でその逆順）。
+	// `created_at` はミリ秒精度だが、同一ミリ秒に複数件作られると
 	// それだけでは順序が決まらず、SQLite が返す順（実装依存）に委ねられてしまう。
 	// 順序が不定だとページング境界で行の欠落・重複が起きるため、
 	// 一意な `id` を第二キーに置いて全順序を確定させる。
@@ -340,8 +379,10 @@ async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 	//
 	// cursor と offset の併用はクエリ検証で弾いているため、cursor があるときの
 	// offset は必ず既定値の 0 で、そのまま OFFSET に渡してよい。
+	// `direction` は enum から導いた "ASC" / "DESC" のリテラルで、
+	// 外部入力がそのまま SQL に入ることはない（スキーマを通らない値は 400）。
 	const rows = await c.env.DB.prepare(
-		`SELECT ${PUBLIC_SELECT} FROM issues ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+		`SELECT ${PUBLIC_SELECT} FROM issues ${where} ORDER BY created_at ${direction}, id ${direction} LIMIT ? OFFSET ?`,
 	)
 		.bind(...binds, limit + 1, offset)
 		.all<CursorRow>();
@@ -352,9 +393,12 @@ async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 
 	return c.json({
 		data: page.map(toPublicIssue),
+		// フィルタ後の総件数。ページング UI はこれを見て最終ページを決める。
 		total: countRow?.total ?? 0,
 		limit,
 		offset,
+		// 既定値が効いたときに何で並んでいるかがレスポンスだけで分かるよう返す。
+		sort,
 		// 次ページが無いときは null。クライアントは null を見て打ち切れる。
 		next_cursor: hasMore && lastRow ? buildIssueCursor(lastRow) : null,
 	});
