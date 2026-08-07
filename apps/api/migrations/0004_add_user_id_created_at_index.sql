@@ -1,0 +1,11 @@
+-- 自分の Issue 一覧 `WHERE user_id = ? ORDER BY created_at DESC, id DESC` を支えるインデックス。
+--
+-- 0002 で入れた `idx_issues_user_id`（user_id 単独）だけだと、絞り込みは効くが
+-- 並べ替えが残る。SQLite は user_id で該当行を引いたあと TEMP B-TREE で
+-- 全件ソートするため、20 件表示するのに自分の Issue を全部読むことになる。
+-- D1 は読み取り行数で課金されるので、投稿数の多い人ほど 1 ページのコストが線形に増える。
+--
+-- 0003 が公開一覧に対してやったのと同じ対策を、所有者で絞る経路にも入れる。
+-- created_at に続けて id を含めているのも 0003 と同じ理由で、created_at が
+-- 同値の行のタイブレークまでインデックスで解決してソートを完全に省くため。
+CREATE INDEX idx_issues_user_id_created_at ON issues(user_id, created_at DESC, id DESC);

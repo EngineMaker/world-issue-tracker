@@ -127,6 +127,56 @@ cd ../..
 cd apps/web && NEXT_PUBLIC_API_URL=https://world-issue-tracker-api.mktoho.workers.dev bun run deploy
 ```
 
+### デプロイ後の確認
+
+**本番環境には確認用の Issue を起票しないでください。**
+投稿された Issue はトップページの「最近の Issue」にそのまま並びます。件数が少ないうちは
+テストデータがトップの大半を占め、初回訪問者には「運用されていないサービス」に見えます。
+実際に「テスト Issue — デプロイ確認用」が本番トップに残り続けていました（#69）。
+
+デプロイが成功したかどうかは、書き込みをせずに次の 2 つで確認できます。
+
+```bash
+# API が起動していて D1 にも繋がっているか（health は D1 に SELECT を投げている）
+# 異常時は 500 + {"status":"unhealthy"} なので、-f で終了コードに出す
+curl -fs https://world-issue-tracker-api.mktoho.workers.dev/health
+# => {"status":"healthy"}
+
+# 一覧が取得できるか（GET /issues は公開エンドポイント。認証不要）
+curl -fs "https://world-issue-tracker-api.mktoho.workers.dev/issues?limit=1"
+
+# Web から API へ実際に到達できているか（Server Component の fetch 経路の確認）
+curl -fs https://world-issue-tracker-web.mktoho.workers.dev/ | grep -q "最近の Issue" && echo OK
+```
+
+起票・更新まで含めて確かめたい場合は、本番ではなくローカル（`bun dev`）か、
+`--local` の D1 に対して行ってください。
+
+### 本番に入れてしまったデータを消す
+
+やむを得ず本番へ書き込んでしまった場合は、その場で消してください。
+`DELETE /issues/:id` は所有者本人しか実行できず、確認用のアカウントが違ったり
+`user_id` が入っていない行だと 403 になるため、確実なのは D1 を直接操作する経路です。
+
+```bash
+cd apps/api
+
+# 1. 消す対象を先に特定する（id を確認せずに DELETE を打たない）
+bun wrangler d1 execute world-issue-tracker --remote \
+  --command "SELECT id, title, user_id, created_at FROM issues ORDER BY created_at DESC LIMIT 10"
+
+# 2. id を指定して 1 件だけ消す
+bun wrangler d1 execute world-issue-tracker --remote \
+  --command "DELETE FROM issues WHERE id = '<上で確認した id>'"
+
+# 3. 消えたことを確認する（公開 API 側にも反映されているか）
+curl -fs "https://world-issue-tracker-api.mktoho.workers.dev/issues?limit=50"
+```
+
+`--remote` を付けないとローカルの D1 が対象になり、本番のデータは残ったままになります。
+逆に `WHERE` を省いたり条件を緩めたりすると実データを巻き込むため、
+**必ず `id` で 1 件を指定**してください。
+
 ## ライセンス
 
 [MIT](LICENSE)

@@ -153,3 +153,133 @@ describe("デプロイワークフローの環境変数", () => {
 		}
 	});
 });
+
+/**
+ * デプロイ後の動作確認を本番で起票して行うと、その Issue が「最近の Issue」に
+ * 並んだまま残る（#69 で実際に起きた）。トップページの実例がテストデータでは
+ * サービスの説明が裏切られるが、これはコードのどこも壊れていないため
+ * ユニットテストでは検出できない。防げるのは手順を決めておくことだけなので、
+ * README にその手順が書かれていること自体を検査する。
+ *
+ * 検査するのは「読み取りだけで済ませる確認手段が示されていること」と
+ * 「やむを得ず本番に書いた場合の消し方が示されていること」の 2 点。
+ * 文面の言い回しには踏み込まず、手順として成立するのに欠かせない
+ * 具体的なコマンド・エンドポイントの記述の有無だけを見る。
+ */
+describe("README のデプロイ後確認手順", () => {
+	const readme = readRepoFile("README.md");
+
+	/**
+	 * 見出しの本文を、次の同レベル以上の見出しの手前まで取り出す。
+	 *
+	 * 節の範囲を絞らないと、README の他の箇所（ローカル開発の節に出てくる
+	 * `--local` の d1 execute など）を拾ってしまい、手順が書かれていなくても
+	 * 検査が通る。一方で見出しレベルを固定すると、節を `###` から `##` へ
+	 * 上げ下げしただけで内容が変わっていないのに落ちる。見出しの深さは
+	 * 実際に見つかったものを使い、それより浅いか同じ深さの見出しで区切る。
+	 */
+	const sectionBody = (heading: string): string => {
+		const start = readme.match(new RegExp(`\\n(#{2,6}) ${heading}[^\\n]*\\n`));
+		const hashes = start?.[1];
+		if (!start?.index || !hashes) return "";
+
+		const rest = readme.slice(start.index + start[0].length);
+		const next = rest.search(new RegExp(`\\n#{2,${hashes.length}} `));
+		return next === -1 ? rest : rest.slice(0, next);
+	};
+
+	/** 書き込まずに済ませる確認手段を示す節。 */
+	const verification = sectionBody("デプロイ後の確認");
+
+	/** 本番に入れてしまったデータの後始末を示す節。 */
+	const cleanup = sectionBody("本番に入れてしまったデータを消す");
+
+	it("デプロイ後の確認手順の節がある", () => {
+		expect(verification.trim()).not.toBe("");
+	});
+
+	it("書き込みを伴わない確認手段として /health と GET /issues を挙げている", () => {
+		// この 2 つは公開エンドポイントで、D1 への疎通まで確認できる。
+		// 起票せずに済ませられることが分かる形で書かれている必要がある
+		expect(verification, "/health への言及がない").toContain("/health");
+		expect(verification, "GET /issues への言及がない").toMatch(
+			/GET\s+\/issues|\/issues\?/,
+		);
+	});
+
+	it("本番へ起票して確認しないよう促している", () => {
+		// 言い回しは問わない。「起票」と否定表現が同じ文に出てくることだけを見る。
+		// 語尾を列挙すると、意味の変わらない書き換えで落ちてテストが邪魔になる
+		expect(verification).toMatch(
+			/起票[^\n]*(しない|せず|は避け|やめ|不要|禁止|ないで)/,
+		);
+	});
+
+	it("後始末の節がある", () => {
+		expect(cleanup.trim()).not.toBe("");
+	});
+
+	/**
+	 * `wrangler d1 execute` の 1 コマンド分。行継続（`\` 改行）で複数行に
+	 * またがるため、次のコマンドか空行までを 1 つとして拾う。
+	 */
+	const d1Commands = (markdown: string): string[] =>
+		[
+			...markdown.matchAll(/wrangler\s+d1\s+execute[\s\S]*?(?=\n\n|\n#|$)/g),
+		].map((match) => match[0]);
+
+	it("本番の D1 を直接操作する手順になっている", () => {
+		// 起票したデータは user_id が本人のものになるため DELETE /issues/:id でも
+		// 消せるが、確認用アカウントを使い分けていると所有者が一致せず 403 になる。
+		// 経路として確実なのは wrangler の d1 execute なので、そちらを必須にする
+		expect(cleanup, "wrangler d1 execute の手順がない").toMatch(
+			/wrangler\s+d1\s+execute/,
+		);
+	});
+
+	it("後始末の d1 execute がすべて --remote を指定している", () => {
+		// `--remote` が無いとローカルの D1 が対象になり、手順どおりに実行しても
+		// 本番のデータは残る。「消したつもりで残る」のは #69 そのものなので、
+		// 節のどこかに --remote があることではなく、コマンドごとに検査する
+		const commands = d1Commands(cleanup);
+
+		expect(commands.length).toBeGreaterThan(0);
+		for (const command of commands) {
+			expect(
+				command,
+				`--remote の無い d1 execute がある:\n${command}`,
+			).toContain("--remote");
+		}
+	});
+
+	it("消す前に対象を特定する SELECT を示している", () => {
+		// id を確認せずに DELETE を打たせないための手順。
+		// ここが抜けると「条件を当てずっぽうで書いて実データを消す」経路が開く
+		expect(cleanup, "対象を特定する SELECT の例がない").toMatch(
+			/SELECT[^\n]*FROM\s+issues/i,
+		);
+	});
+
+	it("削除の SQL が id 指定で 1 件だけを対象にしている", () => {
+		// WHERE の無い DELETE や、条件が緩い DELETE を手順として載せると
+		// 実データを巻き込んで消しかねない。id 指定であることを必須にする。
+		// 節を限定せず README 全体を見る。危険な例がどこに書かれていても困る
+		const deleteStatements = [
+			...readme.matchAll(/DELETE\s+FROM\s+issues([^\n;]*)/gi),
+		].map((match) => match[1]);
+
+		expect(deleteStatements.length).toBeGreaterThan(0);
+		for (const rest of deleteStatements) {
+			expect(
+				rest,
+				`WHERE の無い DELETE がある: DELETE FROM issues${rest}`,
+			).toMatch(/\bWHERE\b[^\n]*\bid\s*=/i);
+		}
+	});
+
+	it("消したあとに消えたことを確認する手順がある", () => {
+		// 消して終わりにすると、消えたつもりで残る。実際 #69 は
+		// 「確認用に入れたものが残っている」という形で表面化した
+		expect(cleanup, "削除後の確認手順がない").toMatch(/curl|SELECT/i);
+	});
+});

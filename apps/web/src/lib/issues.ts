@@ -3,6 +3,10 @@ import type {
 	IssueStatus as IssueStatusType,
 } from "@world-issue-tracker/shared";
 import { IssueScope, IssueStatus } from "@world-issue-tracker/shared";
+import {
+	type FetchCommentsResult,
+	parseListCommentsResponse,
+} from "./comments";
 
 /**
  * 公開 GET が返す Issue 1 件の形。
@@ -146,31 +150,126 @@ export type FetchIssuesResult =
 	| { ok: true; issues: PublicIssue[]; total: number }
 	| { ok: false; error: string };
 
+/**
+ * この module が使う範囲だけを表した `fetch` の型。
+ *
+ * `typeof globalThis.fetch` にしてはいけない。テストは `apps/api` の
+ * vitest から動く（web にテストランナーが無いため）が、api の
+ * `tsconfig.json` は `types: ["@cloudflare/workers-types"]` を指定していて、
+ * そこでは `globalThis.fetch` と `RequestInit` が Workers 版に差し替わる。
+ * Workers の `RequestInit` に `cache` は無いため、web 単体では通る
+ * `{ cache: "no-store" }` が api 側の `tsc --noEmit` でだけ型エラーになる。
+ *
+ * 実行環境（ブラウザ / Node / Workers）ではなく、この module が
+ * 呼び出す形そのものを型にすることで、どちらの型検査でも同じ意味になる。
+ */
+type FetchLike = (
+	url: string,
+	init: { cache: "no-store"; headers?: Record<string, string> },
+) => Promise<{
+	ok: boolean;
+	status: number;
+	json: () => Promise<unknown>;
+}>;
+
+/**
+ * 実行環境の `fetch`。差し替えない場合の既定値。
+ *
+ * `const defaultFetch = globalThis.fetch` と書いて module のロード時に
+ * 束縛してはいけない。`apps/web/test/page.test.tsx` は Server Component を
+ * 描画する前に `globalThis.fetch` を差し替えるが、束縛済みだとその差し替えが
+ * 届かず、テストが実物の API へ通信しに行ってしまう。
+ * 呼ぶ瞬間に読むことで、差し替えが効く。
+ *
+ * キャストしているのは、上の `FetchLike` の理由と同じく
+ * `globalThis.fetch` の型が型検査する側の設定に左右されるため。
+ * 実行時に動くのはブラウザまたは Node（Next.js の Server Component）の
+ * `fetch` で、どちらも `cache` を受け付けるため挙動は変わらない。
+ */
+const defaultFetch: FetchLike = (url, init) =>
+	(globalThis.fetch as unknown as FetchLike)(url, init);
+
 type FetchIssuesOptions = {
 	/** 取得件数。API 側の上限は 100。 */
 	limit?: number;
 	/** テストから差し替えるための `fetch`。通常は省略する。 */
-	fetchImpl?: typeof globalThis.fetch;
+	fetchImpl?: FetchLike;
 };
 
 /**
- * API から Issue 一覧を取得する。
+ * API から Issue のコメント一覧を取得する。
  *
- * Server Component から呼ぶことを前提にしている（サーバー間通信なので
- * ブラウザの CORS を経由しない）。
+ * Server Component から呼ぶ前提（`fetchIssue` と同じ）。取得関数をこのファイルに
+ * まとめているのは、`cache: "no-store"` を含む記述が Workers の型と噛み合わず、
+ * api 側の `tsc` に巻き込むと型エラーになるため（`lib/api.ts` の同種のコメント参照）。
+ * 形の検証や投稿など、api 側からテストしたい純粋なロジックは `lib/comments.ts` にある。
+ *
+ * 親 Issue が存在しないとき（404）は「取得に失敗した」ではなく空の一覧を返す。
+ * 詳細ページは Issue 本体とコメントを並行に取りに行くため、その隙に Issue が
+ * 削除されると、コメント側だけが 404 を返すことがある。これを失敗として扱うと
+ * 「時間をおいて再度お試しください」という、時間をおいても直らない案内が出る。
+ * 404 は「読むべきコメントが無い」であって障害ではないので、空として扱う。
  */
-export async function fetchIssues({
-	limit = 20,
-	fetchImpl = globalThis.fetch,
-}: FetchIssuesOptions = {}): Promise<FetchIssuesResult> {
-	const url = `${resolveApiBaseUrl()}/issues?limit=${limit}`;
+export async function fetchComments(
+	issueId: string,
+	{ fetchImpl = defaultFetch }: FetchIssueOptions = {},
+): Promise<FetchCommentsResult> {
+	const url = `${resolveApiBaseUrl()}/issues/${encodeURIComponent(issueId)}/comments`;
+
+	try {
+		// 投稿したコメントが次のアクセスで見えるよう、キャッシュしない
+		const res = await fetchImpl(url, { cache: "no-store" });
+
+		if (res.status === 404) {
+			return { ok: true, comments: [], total: 0 };
+		}
+		if (!res.ok) {
+			return { ok: false, error: `API が ${res.status} を返しました` };
+		}
+
+		const parsed = parseListCommentsResponse(await res.json());
+		if (!parsed) {
+			return { ok: false, error: "API のレスポンス形式が想定と異なります" };
+		}
+
+		return { ok: true, comments: parsed.comments, total: parsed.total };
+	} catch (err) {
+		console.error("GET /issues/:id/comments に失敗", err);
+		return { ok: false, error: "API に接続できませんでした" };
+	}
+}
+
+/**
+ * 一覧エンドポイントを叩いて結果を組み立てる。
+ * 公開一覧（`/issues`）と自分の一覧（`/issues/mine`）で共有する。
+ *
+ * `token` があれば `Authorization: Bearer` を付ける。Web と API は別オリジンで
+ * Clerk の Cookie が届かないため、認証が要る経路はこのヘッダが唯一の手段になる。
+ */
+async function fetchIssueList(
+	path: string,
+	{
+		limit,
+		token,
+		fetchImpl,
+	}: { limit: number; token?: string; fetchImpl: FetchLike },
+): Promise<FetchIssuesResult & { unauthorized?: boolean }> {
+	const url = `${resolveApiBaseUrl()}${path}?limit=${limit}`;
 
 	try {
 		// 投稿された Issue が次のアクセスで見えるよう、キャッシュしない
-		const res = await fetchImpl(url, { cache: "no-store" });
+		const res = await fetchImpl(url, {
+			cache: "no-store",
+			headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+		});
 
 		if (!res.ok) {
-			return { ok: false, error: `API が ${res.status} を返しました` };
+			return {
+				ok: false,
+				error: `API が ${res.status} を返しました`,
+				// 401 だけは「サインインし直せば直る」ので呼び出し側に区別させる
+				unauthorized: res.status === 401,
+			};
 		}
 
 		// 想定外の形（プロキシの HTML エラーページ等）でも throw させない
@@ -184,17 +283,95 @@ export async function fetchIssues({
 		// API が落ちている / 名前解決できない / JSON として壊れている。
 		// 生の例外メッセージ（`fetch failed` など）は画面に出さず、
 		// 切り分けに要る情報はサーバーのログに残す
-		console.error("GET /issues に失敗", err);
+		console.error(`GET ${path} に失敗`, err);
 		return { ok: false, error: "API に接続できませんでした" };
 	}
 }
 
 /**
+ * API から Issue 一覧を取得する。
+ *
+ * Server Component から呼ぶことを前提にしている（サーバー間通信なので
+ * ブラウザの CORS を経由しない）。
+ */
+export async function fetchIssues({
+	limit = 20,
+	fetchImpl = defaultFetch,
+}: FetchIssuesOptions = {}): Promise<FetchIssuesResult> {
+	const result = await fetchIssueList("/issues", { limit, fetchImpl });
+	// 公開エンドポイントなので `unauthorized` は意味を持たない。
+	// 呼び出し側の型に余計な分岐を持ち込まないよう落とす。
+	const { unauthorized: _unauthorized, ...rest } = result;
+	return rest;
+}
+
+/**
+ * 自分が起票した Issue の取得結果。
+ *
+ * 失敗のうち「サインインが必要」だけは、利用者が自分で解消できる。
+ * 「時間をおいて再度お試しください」と同じ扱いにすると直しようがないため、
+ * `unauthorized` で区別して呼び出し側が案内を変えられるようにする。
+ */
+export type FetchMyIssuesResult =
+	| { ok: true; issues: PublicIssue[]; total: number }
+	| { ok: false; error: string; unauthorized: boolean };
+
+type FetchMyIssuesOptions = {
+	/**
+	 * Clerk のセッショントークン。
+	 * 未サインインなら null（`auth().getToken()` がそのまま null を返す）。
+	 */
+	token: string | null;
+	/** 取得件数。API 側の上限は 100。 */
+	limit?: number;
+	/** テストから差し替えるための `fetch`。通常は省略する。 */
+	fetchImpl?: FetchLike;
+};
+
+/**
+ * API から「自分が起票した Issue」の一覧を取得する（`GET /issues/mine`）。
+ *
+ * 絞り込みの条件はトークンに紐づく userId ひとつで、こちらから誰の分かを
+ * 指定する余地は無い（API 側も同じ）。
+ */
+export async function fetchMyIssues({
+	token,
+	limit = 20,
+	fetchImpl = defaultFetch,
+}: FetchMyIssuesOptions): Promise<FetchMyIssuesResult> {
+	// トークンが無いなら API を呼んでも 401 が返るだけ。
+	// 往復せずにその場で未認証として返す。
+	if (!token) {
+		return {
+			ok: false,
+			error: "サインインが必要です",
+			unauthorized: true,
+		};
+	}
+
+	const result = await fetchIssueList("/issues/mine", {
+		limit,
+		token,
+		fetchImpl,
+	});
+	if (result.ok) {
+		return result;
+	}
+	return {
+		ok: false,
+		error: result.error,
+		unauthorized: result.unauthorized ?? false,
+	};
+}
+
+/**
  * Issue 1 件の取得結果。
  *
- * 「存在しない」(`notFound`) を失敗と別に持つ。ページ側で 404 を返すか
- * エラー表示にするかを分けるためで、両方を同じ失敗にすると、API が
- * 落ちているだけの Issue まで「存在しません」と断言してしまう。
+ * 一覧（`FetchIssuesResult`）と違い、失敗を `notFound` で二分している。
+ * 「その ID の Issue は存在しない」と「取得できなかった」は利用者が取るべき
+ * 行動が違う（URL を疑う / 時間をおく）ため、呼び出し側で描き分けられるようにする。
+ * 一時的な障害を 404 として扱うと、実在する Issue に対して
+ * 「存在しません」と嘘の断定を出してしまう。
  */
 export type FetchIssueResult =
 	| { ok: true; issue: PublicIssue }
@@ -203,20 +380,26 @@ export type FetchIssueResult =
 
 type FetchIssueOptions = {
 	/** テストから差し替えるための `fetch`。通常は省略する。 */
-	fetchImpl?: typeof globalThis.fetch;
+	fetchImpl?: FetchLike;
 };
 
-/** API から Issue を 1 件取得する。 */
+/**
+ * API から Issue を 1 件取得する。
+ *
+ * `fetchIssues` と同じく Server Component から呼ぶ前提で、失敗しても
+ * throw せず値で返す。
+ */
 export async function fetchIssue(
 	id: string,
-	{ fetchImpl = globalThis.fetch }: FetchIssueOptions = {},
+	{ fetchImpl = defaultFetch }: FetchIssueOptions = {},
 ): Promise<FetchIssueResult> {
-	// id は URL のパスセグメントに入る。任意の文字列が来うるので、
-	// `/` や `?` がパスを書き換えないようエスケープする
+	// ID はパスセグメントに入るため、必ずエンコードする。
+	// `..` やスラッシュを含む値をそのまま連結すると、別のエンドポイントを
+	// 叩かせられる（`/issues/../health` が `/health` に潰れる）
 	const url = `${resolveApiBaseUrl()}/issues/${encodeURIComponent(id)}`;
 
 	try {
-		// 更新が次のアクセスで見えるよう、キャッシュしない（一覧と同じ方針）
+		// 起票直後や更新直後に開いても最新が見えるよう、キャッシュしない
 		const res = await fetchImpl(url, { cache: "no-store" });
 
 		if (res.status === 404) {
@@ -241,7 +424,7 @@ export async function fetchIssue(
 
 		return { ok: true, issue };
 	} catch (err) {
-		console.error("GET /issues/:id に失敗", err);
+		console.error(`GET /issues/${id} に失敗`, err);
 		return {
 			ok: false,
 			notFound: false,

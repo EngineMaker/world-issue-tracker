@@ -10,6 +10,7 @@ import { type Context, Hono } from "hono";
 import type { Bindings } from "../index";
 import { requireAuth } from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
+import { comments } from "./comments";
 import { helpOffers } from "./help-offers";
 
 /**
@@ -178,8 +179,17 @@ export function parseQueryParams(
 	return { ok: true, value };
 }
 
-// GET /issues — List (public)
-issues.get("/", async (c) => {
+/**
+ * Issue 一覧を返す。公開一覧（`GET /issues`）と自分の一覧（`GET /issues/mine`）で共有する。
+ *
+ * `ownerUserId` を渡すと、その所有者の Issue だけに絞る。渡さなければ全件。
+ * クエリの検証・並び順・カーソル・件数の数え方をこの一本に寄せているのは、
+ * 別々に書くと片方だけ limit の上限やページング境界の扱いが抜けるため。
+ *
+ * 絞り込みの条件は呼び出し側が決める。クエリ文字列から所有者を受け取る形には
+ * していないので、他人の user_id を指定して覗くという経路が存在しない。
+ */
+async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 	const query = parseQueryParams(new URL(c.req.url).searchParams);
 	if (!query.ok) {
 		return c.json(
@@ -210,6 +220,12 @@ issues.get("/", async (c) => {
 	const conditions: string[] = [];
 	const binds: unknown[] = [];
 
+	// 所有者の条件は他の絞り込みより先に積む。SQL 上の順序に意味は無いが、
+	// 「まず自分のものに限定し、その中で絞り込む」という読み順に合わせている。
+	if (ownerUserId !== undefined) {
+		conditions.push("user_id = ?");
+		binds.push(ownerUserId);
+	}
 	if (scope) {
 		conditions.push("scope = ?");
 		binds.push(scope);
@@ -276,6 +292,28 @@ issues.get("/", async (c) => {
 		// 次ページが無いときは null。クライアントは null を見て打ち切れる。
 		next_cursor: hasMore && lastRow ? buildIssueCursor(lastRow) : null,
 	});
+}
+
+// GET /issues — List (public)
+issues.get("/", (c) => listIssues(c));
+
+// GET /issues/mine — 自分が起票した Issue の一覧 (auth required)
+//
+// `/issues/:id` より前に登録する。Hono は登録順にマッチするため、後に置くと
+// 「mine という id の Issue」として扱われ、常に 404 になる。
+//
+// 自分の Issue だけを返す以上、認証は必須。未認証を「全件」や「空」にフォールバック
+// させると、ログインが切れていることに気付かないまま他人の一覧を見るか、
+// 自分の投稿が消えたように見えるかのどちらかになる。
+issues.get("/mine", clerkAuth(), requireAuth, (c) => {
+	// `requireAuth` を通っているので userId は必ずある。
+	// 型の上では null を含むため、空文字にフォールバックせず明示的に落とす
+	// （フォールバックすると user_id が NULL の行と衝突しかねない）。
+	const userId = getAuth(c)?.userId;
+	if (!userId) {
+		return c.json({ error: "Unauthorized" }, 401);
+	}
+	return listIssues(c, userId);
 });
 
 /**
@@ -389,6 +427,14 @@ issues.patch("/:id", clerkAuth(), requireAuth, async (c) => {
 	}
 	return c.json(toPublicIssue(result));
 });
+
+// /issues/:id/comments — Issue に紐づくコメント（src/routes/comments.ts）
+//
+// `:id`（親の Issue ID）はサブルーター側で `c.req.param("id")` として読める。
+// より限定的なパスなので `/:id` のハンドラより先に置く必要は無い
+// （Hono は登録順ではなくパターンの一致で振り分ける）が、
+// 対応関係が読めるようにルート定義の並びは URL の階層に合わせている。
+issues.route("/:id/comments", comments);
 
 // DELETE /issues/:id — Delete (auth required, owner only)
 issues.delete("/:id", clerkAuth(), requireAuth, async (c) => {

@@ -1,5 +1,16 @@
+import {
+	DEFAULT_LOCALE,
+	ISSUE_SCOPE_LABELS,
+	ISSUE_STATUS_LABELS,
+} from "@world-issue-tracker/shared";
 import Link from "next/link";
 import type { FetchIssuesResult, PublicIssue } from "../../lib/issues";
+
+// 表示ラベルは packages/shared に一本化している。
+// 一覧が生の enum 値（`community` / `open`）、詳細ページが日本語ラベルだと、
+// リンクで繋がった 2 画面で同じ Issue が別物に見える
+const SCOPE_LABELS = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
+const STATUS_LABELS = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
 
 /**
  * API が返す `created_at` を表示用の文字列にする。
@@ -20,7 +31,13 @@ export function formatCreatedAt(createdAt: string): string {
 	return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
-function IssueCard({ issue }: { issue: PublicIssue }) {
+/**
+ * Issue 1 件のカード。
+ *
+ * 公開一覧と自分の一覧（`MyIssueList`）で同じ見た目を使う。
+ * 一覧ごとに書き分けると、表示項目を足したときに片方だけ取り残される。
+ */
+export function IssueCard({ issue }: { issue: PublicIssue }) {
 	return (
 		<li
 			style={{
@@ -32,18 +49,21 @@ function IssueCard({ issue }: { issue: PublicIssue }) {
 			}}
 		>
 			{/*
-			  タイトルを詳細ページ (`/issues/[id]`) へのリンクにする。
-			  「手伝います」ボタンは詳細ページにあるため、ここに導線が無いと
-			  一覧から解決へ進む経路が存在しないことになる。
+			  タイトルを詳細ページ (`/issues/[id]`) への入口にする。
+			  コメント欄はその画面にあるため、ここに導線が無いと
+			  一覧から議論に辿り着けない。
+
+			  カード全体ではなくタイトルをリンクにする。カード全体を <a> で
+			  包むと、読み上げ時に説明文まで一続きのリンク名として読まれる
 			*/}
 			<h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem" }}>
 				<Link href={`/issues/${issue.id}`}>{issue.title}</Link>
 			</h3>
 			<p style={{ margin: "0 0 0.5rem", color: "#444" }}>{issue.description}</p>
 			<p style={{ margin: 0, fontSize: "0.85rem", color: "#666" }}>
-				<span>{issue.scope}</span>
+				<span>{SCOPE_LABELS[issue.scope].label}</span>
 				{" / "}
-				<span>{issue.status}</span>
+				<span>{STATUS_LABELS[issue.status]}</span>
 				{issue.category ? (
 					<>
 						{" / "}
