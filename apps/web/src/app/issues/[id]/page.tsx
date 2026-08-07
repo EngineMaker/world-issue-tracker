@@ -5,7 +5,8 @@ import {
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { fetchIssue } from "../../../lib/issues";
+import { fetchComments, fetchIssue } from "../../../lib/issues";
+import { CommentSection } from "../../components/CommentSection";
 import { formatCreatedAt } from "../../components/IssueList";
 
 const SCOPE_LABELS = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
@@ -16,8 +17,10 @@ const STATUS_LABELS = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
  *
  * 1 件の Issue に固有の URL を与える画面。ここが無いと Issue を
  * 第三者に見せる手段が無く、コメントや「手伝います」を置く場所も無い。
+ * その場所として、コメント欄（#60）をこのページに置いている。
  *
  * 一覧と同じく Server Component として取得する（理由は app/page.tsx）。
+ * Issue 本体とコメントの 2 つのリクエストは互いに独立なので並行に投げる。
  */
 export default async function IssueDetailPage({
 	params,
@@ -26,7 +29,10 @@ export default async function IssueDetailPage({
 	params: Promise<{ id: string }>;
 }) {
 	const { id } = await params;
-	const result = await fetchIssue(id);
+	const [result, commentsResult] = await Promise.all([
+		fetchIssue(id),
+		fetchComments(id),
+	]);
 
 	// 存在しない ID は 404。取得に失敗しただけのときは 404 にしない
 	// （実在する Issue に「存在しません」と表示してしまうため）
@@ -125,6 +131,8 @@ export default async function IssueDetailPage({
 					</dd>
 				</dl>
 			</section>
+
+			<CommentSection issueId={issue.id} initialResult={commentsResult} />
 
 			{/* 読み終えたときに行き止まりにしない */}
 			<p>

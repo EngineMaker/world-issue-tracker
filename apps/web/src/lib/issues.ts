@@ -3,6 +3,10 @@ import type {
 	IssueStatus as IssueStatusType,
 } from "@world-issue-tracker/shared";
 import { IssueScope, IssueStatus } from "@world-issue-tracker/shared";
+import {
+	type FetchCommentsResult,
+	parseListCommentsResponse,
+} from "./comments";
 
 /**
  * 公開 GET が返す Issue 1 件の形。
@@ -191,6 +195,49 @@ type FetchIssuesOptions = {
 	/** テストから差し替えるための `fetch`。通常は省略する。 */
 	fetchImpl?: FetchLike;
 };
+
+/**
+ * API から Issue のコメント一覧を取得する。
+ *
+ * Server Component から呼ぶ前提（`fetchIssue` と同じ）。取得関数をこのファイルに
+ * まとめているのは、`cache: "no-store"` を含む記述が Workers の型と噛み合わず、
+ * api 側の `tsc` に巻き込むと型エラーになるため（`lib/api.ts` の同種のコメント参照）。
+ * 形の検証や投稿など、api 側からテストしたい純粋なロジックは `lib/comments.ts` にある。
+ *
+ * 親 Issue が存在しないとき（404）は「取得に失敗した」ではなく空の一覧を返す。
+ * 詳細ページは Issue 本体とコメントを並行に取りに行くため、その隙に Issue が
+ * 削除されると、コメント側だけが 404 を返すことがある。これを失敗として扱うと
+ * 「時間をおいて再度お試しください」という、時間をおいても直らない案内が出る。
+ * 404 は「読むべきコメントが無い」であって障害ではないので、空として扱う。
+ */
+export async function fetchComments(
+	issueId: string,
+	{ fetchImpl = defaultFetch }: FetchIssueOptions = {},
+): Promise<FetchCommentsResult> {
+	const url = `${resolveApiBaseUrl()}/issues/${encodeURIComponent(issueId)}/comments`;
+
+	try {
+		// 投稿したコメントが次のアクセスで見えるよう、キャッシュしない
+		const res = await fetchImpl(url, { cache: "no-store" });
+
+		if (res.status === 404) {
+			return { ok: true, comments: [], total: 0 };
+		}
+		if (!res.ok) {
+			return { ok: false, error: `API が ${res.status} を返しました` };
+		}
+
+		const parsed = parseListCommentsResponse(await res.json());
+		if (!parsed) {
+			return { ok: false, error: "API のレスポンス形式が想定と異なります" };
+		}
+
+		return { ok: true, comments: parsed.comments, total: parsed.total };
+	} catch (err) {
+		console.error("GET /issues/:id/comments に失敗", err);
+		return { ok: false, error: "API に接続できませんでした" };
+	}
+}
 
 /**
  * 一覧エンドポイントを叩いて結果を組み立てる。

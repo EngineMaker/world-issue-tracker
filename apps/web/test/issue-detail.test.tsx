@@ -41,6 +41,13 @@ const sampleIssue = {
 	updated_at: "2026-08-02 09:30:00.000",
 };
 
+const sampleComment = {
+	id: "0b1b2c3d4e5f60718293a4b5c6d7e8f9",
+	issue_id: sampleIssue.id,
+	body: "同じ場所で先週も転びそうになりました",
+	created_at: "2026-08-02 09:30:00.000",
+};
+
 /** 指定のレスポンスを返す `fetch` の代役。呼ばれた URL と init を記録する。 */
 function stubFetch(response: Response | (() => Promise<Response>)) {
 	const calls: { url: string; init: unknown }[] = [];
@@ -153,12 +160,28 @@ describe("fetchIssue", () => {
 });
 
 describe("詳細ページ", () => {
-	/** `globalThis.fetch` を差し替えてページを描画する。 */
-	async function renderDetail(id: string, response: Response) {
+	/**
+	 * `globalThis.fetch` を差し替えてページを描画する。
+	 *
+	 * ページは Issue 本体とコメント（#60）の 2 本を投げるので、URL で振り分ける。
+	 * `comments` を省いたときは空の一覧を返す。Issue 本体の描画だけを見たい
+	 * テストに、コメント側の指定を毎回書かせないため。
+	 *
+	 * 呼ばれた URL も返し、「そもそも API を呼んでいない」実装を拾えるようにする。
+	 */
+	async function renderDetail(
+		id: string,
+		response: Response,
+		comments?: Response,
+	) {
 		const originalFetch = globalThis.fetch;
 		const calls: string[] = [];
 		globalThis.fetch = (async (input: string | URL | Request) => {
-			calls.push(typeof input === "string" ? input : input.toString());
+			const url = typeof input === "string" ? input : input.toString();
+			calls.push(url);
+			if (url.endsWith("/comments")) {
+				return comments ?? Response.json({ data: [], total: 0 });
+			}
 			return response;
 		}) as unknown as typeof globalThis.fetch;
 
@@ -179,9 +202,12 @@ describe("詳細ページ", () => {
 		);
 
 		// URL の id を使って API を呼んでいること
-		// （呼ばずに固定の内容を出す実装だとここで落ちる）
-		expect(calls).toHaveLength(1);
-		expect(calls[0]).toContain(`/issues/${sampleIssue.id}`);
+		// （呼ばずに固定の内容を出す実装だとここで落ちる）。
+		// Issue 本体とコメント（#60）で 2 本投げるので、本体側を名指しで見る
+		expect(calls).toHaveLength(2);
+		const issueCalls = calls.filter((url) => !url.endsWith("/comments"));
+		expect(issueCalls).toHaveLength(1);
+		expect(issueCalls[0]).toContain(`/issues/${sampleIssue.id}`);
 		expect(html).toContain("駅前の街灯が切れている");
 		expect(html).toContain("夜道が暗くて危ない");
 	});
@@ -277,6 +303,75 @@ describe("詳細ページ", () => {
 		);
 
 		expect(html).toContain('href="/issues"');
+	});
+
+	/**
+	 * コメント欄（Issue #60）の結線。
+	 *
+	 * `fetchComments` / `CommentSection` が個別に正しくても、ページが
+	 * それらを繋いでいなければコメントは画面に出ない。
+	 * 結線の確認は、ページを実際に描画してみないとできない。
+	 */
+	it("Issue の内容とコメントをどちらも描画する", async () => {
+		const { html, calls } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+			Response.json({ data: [sampleComment], total: 1 }),
+		);
+
+		// コメントを取りに行っていること
+		expect(calls.some((url) => url.endsWith("/comments"))).toBe(true);
+
+		expect(html).toContain("駅前の街灯が切れている");
+		// コメント本文が実際に画面へ出ていること
+		expect(html).toContain("同じ場所で先週も転びそうになりました");
+	});
+
+	it("コメント投稿の入口を出す（未ログインでも欄自体は見える）", async () => {
+		const { html } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+		);
+
+		// 「みんなで直す」の装置が画面上に存在すること（Issue #60 の主眼）
+		expect(html).toContain("コメント");
+		expect(html).toContain("コメントする");
+	});
+
+	it("コメントが 0 件なら、その旨を伝えて投稿を促す", async () => {
+		const { html } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+		);
+
+		expect(html).toContain("まだコメントがありません");
+	});
+
+	it("コメントの取得に失敗したら、0 件と混同させない文言を出す", async () => {
+		const { html } = await withSilencedError(() =>
+			renderDetail(
+				sampleIssue.id,
+				Response.json(sampleIssue),
+				new Response("boom", { status: 500 }),
+			),
+		);
+
+		expect(html).toContain("コメントを取得できませんでした");
+		expect(html).not.toContain("まだコメントがありません");
+	});
+
+	it("コメント本文を HTML としてではなくテキストとして出す", async () => {
+		const { html } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+			Response.json({
+				data: [{ ...sampleComment, body: "<img src=x onerror=alert(1)>" }],
+				total: 1,
+			}),
+		);
+
+		expect(html).not.toContain("<img ");
+		expect(html).toContain("&lt;img");
 	});
 });
 
