@@ -6,6 +6,8 @@ import { issues } from "./routes/issues";
 
 export type Bindings = {
 	DB: D1Database;
+	/** Issue に添付する写真の置き場（#65）。設定は wrangler.jsonc の `r2_buckets` */
+	PHOTOS: R2Bucket;
 	CLERK_SECRET_KEY: string;
 	CLERK_PUBLISHABLE_KEY: string;
 };

@@ -10,13 +10,11 @@ vi.mock("@clerk/backend", async () => {
 
 import { createApp } from "../src/index";
 import { setMockUserId } from "./helpers/clerk-mock";
+import { applyMigrations } from "./helpers/migrate";
 
 const app = createApp();
 
 const ALLOWED_ORIGIN = "http://localhost:3000";
-
-const MIGRATION =
-	"CREATE TABLE IF NOT EXISTS issues (id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), title TEXT NOT NULL, description TEXT NOT NULL, scope TEXT NOT NULL CHECK (scope IN ('personal', 'community', 'municipality', 'national', 'global')), status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'triaged', 'in_progress', 'review', 'resolved', 'closed')), latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT, user_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));";
 
 /** マシントークンが「なりすます」対象のユーザー。 */
 const VICTIM_USER_ID = "user_victim123";
@@ -90,7 +88,12 @@ async function issueExists(id: string): Promise<boolean> {
  */
 describe("Machine tokens must not pass requireAuth", () => {
 	beforeAll(async () => {
-		await env.DB.exec(MIGRATION);
+		// スキーマは実マイグレーションから作る。以前はここに手書きの
+		// `CREATE TABLE` を置いていたが、`migrations/` と同期する仕組みが
+		// 無いため、カラムを足すとこのファイルだけが古いスキーマのまま
+		// 落ちる（#65 の `photo_key` で実際に落ちた）。理由の詳細は
+		// `helpers/migrate.ts`。
+		await applyMigrations();
 	});
 
 	beforeEach(async () => {
