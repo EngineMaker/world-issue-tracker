@@ -7,9 +7,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchHelpOffers } from "../../../lib/help-offers";
 import { fetchComments, fetchIssue } from "../../../lib/issues";
+import {
+	resolveTileAttribution,
+	resolveTileUrlTemplate,
+} from "../../../lib/map";
 import { CommentSection } from "../../components/CommentSection";
 import { HelpOfferButton } from "../../components/HelpOfferButton";
 import { formatCreatedAt } from "../../components/IssueList";
+import { IssueMap } from "../../components/IssueMap";
 import { IssueStatusSection } from "../../components/StatusControl";
 
 const SCOPE_LABELS = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
@@ -123,10 +128,19 @@ export default async function IssueDetailPage({
 
 					<dt>場所</dt>
 					{/*
-					  地図 UI は未導入（MVP の別項目）なので、座標をそのまま出す。
+					  地図を出しても座標の数値は消さない（#63）。タイル配信元が
+					  落ちていたり未設定だったりすると地図は出ないが、そのときに
+					  位置情報まで失われるのは避けたい。
 					  桁を丸めると別の地点を指すため、受け取った値を加工しない
 					*/}
 					<dd>
+						<IssueMap
+							latitude={issue.latitude}
+							longitude={issue.longitude}
+							title={issue.title}
+							tileUrlTemplate={resolveTileUrlTemplate()}
+							attribution={resolveTileAttribution()}
+						/>
 						緯度 {issue.latitude} / 経度 {issue.longitude}
 					</dd>
 

@@ -216,3 +216,69 @@ main p {
 	flex-wrap: wrap;
 	gap: 0 1rem;
 }
+
+/*
+ * Issue 詳細ページの地図（#63）。
+ *
+ * 3x3 のタイルを並べて中心の地点を表示領域の中央に置く。はみ出す分は
+ * `overflow: hidden` で切り落とすため、コンテナに位置指定が要る。
+ */
+.issue-map {
+	margin: 0 0 0.5rem;
+}
+
+.issue-map-view {
+	position: relative;
+	overflow: hidden;
+	border: 1px solid #e0e0e0;
+	border-radius: 4px;
+	/* タイルが読み込めないときに、枠だけが残って中身が抜けて見えないように */
+	background-color: #eee;
+	max-width: 100%;
+}
+
+.issue-map-tiles {
+	position: absolute;
+	top: 0;
+	left: 0;
+	/* タイルの継ぎ目に隙間が出ないよう、行内の余白を殺す */
+	line-height: 0;
+}
+
+.issue-map-row {
+	white-space: nowrap;
+}
+
+/*
+ * 地図の上端・下端より外にはタイルが存在しない。その分の場所だけを空けて
+ * おくための箱で、これが無いと端の地点で行がずれて中心がずれる。
+ * タイルの `<img>` と同じ inline レイアウトに乗せる必要がある
+ */
+.issue-map-blank {
+	display: inline-block;
+	vertical-align: top;
+}
+
+/*
+ * 地点を指すマーカー。表示領域の中央に固定する（タイル側をずらして
+ * 地点を中央に持ってきているため）
+ */
+.issue-map-marker {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	width: 14px;
+	height: 14px;
+	margin: -7px 0 0 -7px;
+	border: 2px solid #fff;
+	border-radius: 50%;
+	background-color: #b00;
+	box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+/* 帰属表示は隠さないことがタイル配信元の利用条件に含まれる */
+.issue-map-attribution {
+	font-size: 0.75rem;
+	color: #555;
+	margin-top: 0.25rem;
+}
