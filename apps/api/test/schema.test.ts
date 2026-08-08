@@ -1,4 +1,8 @@
 import { env } from "cloudflare:test";
+import {
+	ISSUE_SCOPE_VALUES,
+	ISSUE_STATUS_VALUES,
+} from "@world-issue-tracker/shared";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { PUBLIC_HELP_OFFER_COLUMNS } from "../src/routes/help-offers";
@@ -120,6 +124,172 @@ describe("Test database schema", () => {
 				.bind("t", "d", "bogus-scope", 0, 0)
 				.run(),
 		).rejects.toThrow(/CHECK constraint failed/);
+	});
+
+	/**
+	 * `issues` テーブルの `CHECK (<column> IN ('a', 'b', ...))` から値の集合を取り出す。
+	 *
+	 * 読む先は SQL ファイルではなく `sqlite_master.sql`（＝マイグレーションを
+	 * すべて適用した後に DB が実際に保持している定義）。ファイルを読むと、
+	 * 後続のマイグレーションがテーブルを作り直して制約を変えた場合に
+	 * 古い定義を見てしまう。
+	 *
+	 * 制約が見つからない場合は空配列ではなく null を返す。空集合（＝どの値も
+	 * 通らない CHECK）と「CHECK が消された」は意味が違い、後者を
+	 * 「たまたま一致しなかった」ではなく明示的な失敗にしたいため。
+	 *
+	 * SQL コメント（`-- ...`）の誤マッチは考えなくてよい。D1 のマイグレーション
+	 * ランナーはコメントを落としてから格納するため、`sqlite_master.sql` には
+	 * 残らない（このリポジトリのマイグレーションはコメントが多いので実測で確認した）。
+	 *
+	 * このパースが対応していない書き方は2種類ある。
+	 *
+	 * - `null` を返す（＝テストが落ちる、安全側）: テーブル修飾（`issues.scope`）、
+	 *   `NOT IN`、識別子のダブルクォート、`COLLATE` の挟み込み
+	 * - **誤った値を静かに返す**: 値そのものが `)` を含む場合と、末尾カンマ
+	 *   （`IN ('a', 'b',)`）。前者は値の途中で切れ、後者は空文字列が混ざる
+	 *
+	 * 後者に当たる書き方をするなら、このパースも直すこと。ただし
+	 * 「enum の全値が DB に通る」「enum 外の値は DB に弾かれる」の2テストは
+	 * パースを介さず DB の振る舞いを直接見ているため、そちらは効き続ける。
+	 */
+	async function checkConstraintValues(
+		column: string,
+	): Promise<string[] | null> {
+		const row = await env.DB.prepare(
+			"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'issues'",
+		).first<{ sql: string }>();
+		if (!row?.sql) return null;
+
+		// `CHECK (scope IN ('personal', 'community', ...))` の括弧内だけを取る。
+		// 値に `)` を含むものは現状無く、含めるなら CHECK ではなく別テーブルで
+		// 表現すべきなので、ここでは単純な非貪欲マッチで足りる。
+		const match = row.sql.match(
+			new RegExp(`CHECK\\s*\\(\\s*${column}\\s+IN\\s*\\(([^)]*)\\)`, "i"),
+		);
+		const inList = match?.[1];
+		if (inList === undefined) return null;
+
+		return inList
+			.split(",")
+			.map((value) => value.trim().replace(/^'(.*)'$/, "$1"));
+	}
+
+	// DB の CHECK 制約と shared の enum が同じ値を持つこと。
+	//
+	// この2つは #29 の時点から手動同期で、片方だけ変えても CI は緑のままだった。
+	// 実際に `ISSUE_SCOPE_VALUES` へ1値足してラベルも足すと、
+	// 514 件のテストが全て通ったうえで POST /issues が 500 を返す状態になる
+	// （Zod が通した値を DB が CHECK で弾く）。
+	//
+	// 集合ではなく「並びを揃えたうえでの一致」を見ているのは、
+	// 集合比較だと重複した値を取りこぼすため。SQL 側に同じ値が2度書かれていても
+	// Set にすると消えてしまい、書き間違いに気づけない。
+	//
+	// 期待値をここでベタ書きせず両者を突き合わせているのは、片方向の生成が
+	// できない（既存の生 SQL マイグレーションを温存する方針）ため。
+	// 生成の代わりに「ずれたら落ちる」で担保する。
+	it("keeps the scope CHECK constraint in sync with the shared enum", async () => {
+		const values = await checkConstraintValues("scope");
+
+		expect(values, "scope の CHECK 制約が見つからない").not.toBeNull();
+		expect([...(values ?? [])].sort()).toEqual([...ISSUE_SCOPE_VALUES].sort());
+		// 重複が Set 化で消えないことの確認も兼ねて、件数も直接見る。
+		expect(values).toHaveLength(ISSUE_SCOPE_VALUES.length);
+	});
+
+	it("keeps the status CHECK constraint in sync with the shared enum", async () => {
+		const values = await checkConstraintValues("status");
+
+		expect(values, "status の CHECK 制約が見つからない").not.toBeNull();
+		expect([...(values ?? [])].sort()).toEqual([...ISSUE_STATUS_VALUES].sort());
+		expect(values).toHaveLength(ISSUE_STATUS_VALUES.length);
+	});
+
+	// パースに頼らず、実際に INSERT して確かめる。
+	//
+	// 上の2つは `sqlite_master.sql` を正規表現で読んでいるため、
+	// パースが壊れて常に同じ値を返すようになると気づけない
+	// （両辺が一致し続けて緑のままになる）。ここは DB の振る舞いを直接見るので、
+	// パースの正しさに依存しない裏取りになる。
+	it("accepts every shared enum value at the database level", async () => {
+		for (const scope of ISSUE_SCOPE_VALUES) {
+			await expect(
+				env.DB.prepare(
+					"INSERT INTO issues (title, description, scope, latitude, longitude) VALUES (?, ?, ?, ?, ?)",
+				)
+					.bind(`sync-${scope}`, "d", scope, 0, 0)
+					.run(),
+				`scope="${scope}" が CHECK 制約で弾かれた`,
+			).resolves.toBeDefined();
+		}
+
+		for (const status of ISSUE_STATUS_VALUES) {
+			await expect(
+				env.DB.prepare(
+					"INSERT INTO issues (title, description, scope, status, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?)",
+				)
+					.bind(`sync-${status}`, "d", "personal", status, 0, 0)
+					.run(),
+				`status="${status}" が CHECK 制約で弾かれた`,
+			).resolves.toBeDefined();
+		}
+	});
+
+	// 上のテストの逆向き。「DB が enum より広くない」ことを見る。
+	//
+	// 「enum の全値が DB に通る」だけでは、DB 側にだけ値が足された場合
+	// （例: SQL の CHECK に 'planetary' を足して shared に足し忘れる）を
+	// 検出できない。その状態では Zod が弾くので 500 にはならないが、
+	// 別経路（管理用スクリプト、手作業の SQL、将来の別サービス）から
+	// 入った行を API が読めなくなる。表示側は enum を前提にラベルを引くため、
+	// `ISSUE_SCOPE_LABELS[locale][scope]` が undefined になって画面が壊れる。
+	//
+	// CHECK 制約が「受け付ける値の一覧」を DB に列挙させる手段は無いので、
+	// enum に含まれない値を実際に INSERT して弾かれることを確かめる。
+	// 全網羅はできないが、パースを介さない検査なので
+	// `checkConstraintValues` が壊れても効き続ける
+	// （パースを壊したうえで SQL 側だけ広げる変異体で、ここだけが落ちることを確認した）。
+	it("rejects values outside the shared enum at the database level", async () => {
+		// 実際に足されそうな値を選ぶ。無意味な文字列（"xxx"）だと
+		// 「CHECK が生きている」ことしか見ておらず、上の
+		// 「enforces the scope CHECK constraint」と同じ検査になってしまう。
+		const SCOPE_NON_MEMBERS = ["planetary", "regional", ""];
+		const STATUS_NON_MEMBERS = ["wontfix", "duplicate", ""];
+
+		for (const scope of SCOPE_NON_MEMBERS) {
+			// enum に足した結果ここが落ちる場合、消すべきはこの配列ではなく
+			// 「SQL の CHECK にも足す」方。両方に足せば上のテストが通る。
+			expect(
+				[...ISSUE_SCOPE_VALUES] as string[],
+				`"${scope}" は enum のメンバーなので非メンバーの例に使えない`,
+			).not.toContain(scope);
+
+			await expect(
+				env.DB.prepare(
+					"INSERT INTO issues (title, description, scope, latitude, longitude) VALUES (?, ?, ?, ?, ?)",
+				)
+					.bind("non-member", "d", scope, 0, 0)
+					.run(),
+				`scope="${scope}" が DB に通ってしまう（CHECK 制約が enum より広い）`,
+			).rejects.toThrow(/CHECK constraint failed/);
+		}
+
+		for (const status of STATUS_NON_MEMBERS) {
+			expect(
+				[...ISSUE_STATUS_VALUES] as string[],
+				`"${status}" は enum のメンバーなので非メンバーの例に使えない`,
+			).not.toContain(status);
+
+			await expect(
+				env.DB.prepare(
+					"INSERT INTO issues (title, description, scope, status, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?)",
+				)
+					.bind("non-member", "d", "personal", status, 0, 0)
+					.run(),
+				`status="${status}" が DB に通ってしまう（CHECK 制約が enum より広い）`,
+			).rejects.toThrow(/CHECK constraint failed/);
+		}
 	});
 
 	// `help_offers`（0004）にも `issues` と同じ検査を掛ける。

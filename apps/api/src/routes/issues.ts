@@ -9,7 +9,7 @@ import {
 } from "@world-issue-tracker/shared";
 import { type Context, Hono } from "hono";
 import type { Bindings } from "../index";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, viewerUserId } from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
 import { comments } from "./comments";
 import { helpOffers } from "./help-offers";
@@ -77,12 +77,12 @@ export function toPublicIssue(row: Record<string, unknown>): PublicIssue {
 }
 
 /**
- * `created_at` / `updated_at` に入れるタイムスタンプの SQL 式。
+ * `created_at` / `updated_at` の書式について。
  *
  * テーブルの DEFAULT は `datetime('now')`（秒精度）だが、それだと
  * 「作成と更新が同一秒内に起きると `updated_at` が動かない」ため、
  * 更新されたかどうかを値から判別できない。連続した更新でも順序が付くよう、
- * アプリ経由の書き込みではミリ秒精度で明示的に入れる。
+ * アプリ経由の書き込みでは下の 2 つの式でミリ秒精度を明示的に入れる。
  *
  * 書式は `YYYY-MM-DD HH:MM:SS.SSS` で、秒精度の `YYYY-MM-DD HH:MM:SS` と
  * 先頭が共通するため、DEFAULT で入った既存行との辞書順比較も概ね時系列順に並ぶ。
@@ -90,12 +90,12 @@ export function toPublicIssue(row: Record<string, unknown>): PublicIssue {
  * 同じ瞬間のミリ秒精度の行より古い側に来る。順序は全順序として確定するので
  * カーソルページングの前提は崩れないが、同一秒内の並びは厳密な時系列ではない。
  */
-const NOW_SQL = "strftime('%Y-%m-%d %H:%M:%f', 'now')";
 
 /**
  * 更新時に `updated_at` へ入れる式。必ず前の値より後になる。
  *
- * `NOW_SQL` をそのまま入れると、前回の書き込みと同じミリ秒に収まったときに
+ * 現在時刻（`strftime('%Y-%m-%d %H:%M:%f','now')`）をそのまま入れると、
+ * 前回の書き込みと同じミリ秒に収まったときに
  * 値が動かない。`'now'` の解像度はミリ秒だが、D1 への連続した書き込みは
  * それより速く終わりうる（実測で連続10クエリのうち2つが同じ値になった）。
  * 値が動かないと「更新されたか」を値から判別できず、`updated_at` を
@@ -452,6 +452,48 @@ issues.use("/:id/help-offers", async (c, next) => {
 	await next();
 });
 issues.route("/:id/help-offers", helpOffers);
+
+/**
+ * GET /issues/:id/viewer — 閲覧者とこの Issue の関係 (public)
+ *
+ * 今のところ返すのは「あなたがこの Issue の起票者か」だけ（Issue #62）。
+ * ステータス変更の操作 UI を起票者にだけ出すために、画面が必要とする。
+ *
+ * `GET /issues/:id` に足さず別の経路にしているのは、あちらが
+ * 「Issue の行そのもの」を返す契約で、公開キーの集合をテストで固定して
+ * いるため（`Public response fields`）。行に属さない値を混ぜると、
+ * 「返るキー = テーブルの公開カラム」という対応が崩れる。
+ * help-offers が `viewer_offered` を同居させられるのは、あちらのレスポンスが
+ * 最初から `{ data, total, ... }` というラップ済みの形をしているから。
+ *
+ * 返すのは真偽値だけで、起票者の user_id は載せない。誰が書いたかを
+ * 伏せる方針（#67）は、この経路からも抜けないようにする。
+ *
+ * `requireAuth` は差していない。詳細ページは誰でも読める画面で、
+ * 未ログインの閲覧者にとっての答えは false で確定しているため、
+ * ここで 401 を返す意味が無い（`clerkAuth()` だけ差して、ログイン中なら
+ * 判定に使う）。
+ *
+ * この値は表示の出し分けにしか使えない。UI を隠すことは保護ではなく、
+ * 実際の権限は PATCH / DELETE 側の `WHERE ... AND user_id = ?` が強制する。
+ */
+issues.get("/:id/viewer", clerkAuth(), async (c) => {
+	const id = c.req.param("id");
+	const row = await c.env.DB.prepare("SELECT user_id FROM issues WHERE id = ?")
+		.bind(id)
+		.first<{ user_id: string | null }>();
+
+	if (!row) {
+		return c.json({ error: "Issue not found" }, 404);
+	}
+
+	const viewer = viewerUserId(c);
+	// `user_id` が NULL の行（認証導入前に入った legacy 行）は誰のものでもない。
+	// null 同士の一致で true に倒すと、未ログインの閲覧者が起票者として扱われる
+	return c.json({
+		viewer_is_owner: viewer !== null && row.user_id === viewer,
+	});
+});
 
 // GET /issues/:id — Get by ID (public)
 issues.get("/:id", async (c) => {

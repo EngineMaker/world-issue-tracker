@@ -1,22 +1,53 @@
 import { z } from "zod";
 
-export const IssueScope = z.enum([
+/**
+ * `issues.scope` が取りうる値。
+ *
+ * ここが唯一の宣言で、Zod スキーマ（`IssueScope`）はこの配列から作る。
+ * DB 側には `migrations/0001_initial.sql` の `CHECK (scope IN (...))` として
+ * 同じ集合が書かれており、**SQL とこの配列は手で同期する**。
+ *
+ * 手動同期を許しているのは、既存の生 SQL マイグレーションを書き換えない方針
+ * （#29）のため。代わりに両者の一致は `apps/api/test/schema.test.ts` が
+ * マイグレーション SQL の CHECK 句をパースして検証する。片方だけ変えると
+ * そこが落ちるので、乖離したままマージされることはない。
+ *
+ * この配列を独立させている理由は、テストが「Zod が受け付ける値の集合」を
+ * 素の文字列として取り出せるようにするため。`z.enum` の `.options` からでも
+ * 取れるが、SQL と突き合わせる対象は Zod ではなく値の集合そのものなので、
+ * 意図をこの名前で明示している。
+ */
+export const ISSUE_SCOPE_VALUES = [
 	"personal",
 	"community",
 	"municipality",
 	"national",
 	"global",
-]);
+] as const;
+
+export const IssueScope = z.enum(ISSUE_SCOPE_VALUES);
 export type IssueScope = z.infer<typeof IssueScope>;
 
-export const IssueStatus = z.enum([
+/**
+ * `issues.status` が取りうる値。
+ *
+ * `ISSUE_SCOPE_VALUES` と同じく、ここが唯一の宣言。DB 側の
+ * `CHECK (status IN (...))` との一致は `schema.test.ts` が検証する。
+ *
+ * 並び順はライフサイクル（Open → Triaged → In Progress → Review →
+ * Resolved → Closed）に合わせてある。画面のフィルタはこの順で並ぶため、
+ * 値を足すときは意味的に正しい位置へ入れること。
+ */
+export const ISSUE_STATUS_VALUES = [
 	"open",
 	"triaged",
 	"in_progress",
 	"review",
 	"resolved",
 	"closed",
-]);
+] as const;
+
+export const IssueStatus = z.enum(ISSUE_STATUS_VALUES);
 export type IssueStatus = z.infer<typeof IssueStatus>;
 
 export const CreateIssueSchema = z.object({
