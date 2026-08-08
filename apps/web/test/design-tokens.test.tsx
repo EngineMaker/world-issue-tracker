@@ -168,6 +168,30 @@ describe("文字サイズは 5 段階に収まっている", () => {
 		// var(--text-*) 以外が混ざっていないこと
 		expect(sizes.filter((size) => !size.startsWith("var(--text-"))).toEqual([]);
 	});
+
+	/*
+	 * どの段階を使っているかまで見る。「var(--text-*) を使っているか」だけだと
+	 * 補助情報が --text-xs に、ラベルが --text-lg に化けても通ってしまう
+	 * （置き換えの際に段階を取り違える間違いを、これで拾う）。
+	 */
+	const sizeBindings: Record<string, string> = {
+		"issue-meta": "var(--text-sm)",
+		"list-summary": "var(--text-sm)",
+		"block-detail": "var(--text-sm)",
+		"section-lead": "var(--text-sm)",
+		"field-hint": "var(--text-sm)",
+		"comment-date": "var(--text-xs)",
+		"issue-map-attribution": "var(--text-xs)",
+		"issue-card-title": "var(--text-base)",
+	};
+
+	for (const [className, token] of Object.entries(sizeBindings)) {
+		it(`.${className} の文字サイズは ${token}`, () => {
+			const rule = css.match(new RegExp(`\\.${className}\\s*\\{([^}]*)\\}`));
+			expect(rule, `.${className} の定義が見つからない`).not.toBeNull();
+			expect(rule?.[1]).toContain(`font-size: ${token}`);
+		});
+	}
 });
 
 describe("同じ意味の色が同じ値で描かれる", () => {
@@ -187,12 +211,51 @@ describe("同じ意味の色が同じ値で描かれる", () => {
 
 	/*
 	 * クラス名が揃っているだけでは、実際に同じ色で描かれる保証にならない。
-	 * `.error-block` が --danger を指していることを CSS 側でも確かめる
+	 * クラスが存在して中身が空でも、色が別のトークンを指していても、
+	 * 描画結果の class 属性は変わらないため。意味を持つクラスについては
+	 * どのトークンを指しているかを CSS 側で照合する。
+	 *
+	 * ここを見ていないと、クラスを残したまま宣言だけ消しても
+	 * テストが通ってしまう（レビューで実際に指摘された穴）。
 	 */
-	it(".error-block は --danger で色を決めている", () => {
-		const rule = css.match(/\.error-block\s*\{([^}]*)\}/);
-		expect(rule?.[1]).toContain("color: var(--danger)");
+	const colorBindings: Record<string, string> = {
+		"error-block": "var(--danger)",
+		"text-danger": "var(--danger)",
+		"text-warning": "var(--warning)",
+		"text-success": "var(--success)",
+		"text-soft": "var(--ink-soft)",
+		"text-faint": "var(--ink-faint)",
+	};
+
+	for (const [className, token] of Object.entries(colorBindings)) {
+		it(`.${className} は ${token} で色を決めている`, () => {
+			const rule = css.match(new RegExp(`\\.${className}\\s*\\{([^}]*)\\}`));
+			expect(rule, `.${className} の定義が見つからない`).not.toBeNull();
+			expect(rule?.[1]).toContain(`color: ${token}`);
+		});
+	}
+
+	/*
+	 * `<output>` は既定で inline のため、単独の行として出したいときに
+	 * display の指定が要る。これが消えると文が前の要素に続いて表示される
+	 */
+	it(".notice は block で表示する", () => {
+		const rule = css.match(/\.notice\s*\{([^}]*)\}/);
+		expect(rule, ".notice の定義が見つからない").not.toBeNull();
+		expect(rule?.[1]).toContain("display: block");
 	});
+
+	/*
+	 * 枠を持つまとまり（カード）は、ルールごと消えても描画結果の
+	 * class 属性は変わらない。定義の存在と、枠がトークンを指すことを見る
+	 */
+	for (const className of ["issue-card", "comment-card"]) {
+		it(`.${className} は --line の枠を持つ`, () => {
+			const rule = css.match(new RegExp(`\\.${className}\\s*\\{([^}]*)\\}`));
+			expect(rule, `.${className} の定義が見つからない`).not.toBeNull();
+			expect(rule?.[1]).toContain("border: 1px solid var(--line)");
+		});
+	}
 
 	it("Issue 一覧の取得失敗は --danger で描く", () => {
 		const html = renderToStaticMarkup(
@@ -222,5 +285,72 @@ describe("同じ意味の色が同じ値で描かれる", () => {
 		} finally {
 			globalThis.fetch = originalFetch;
 		}
+	});
+});
+
+/*
+ * クラス名を書き間違えても、CSS が当たらないだけで描画は成立してしまう。
+ * 見た目だけが崩れて誰も気付かない状態になるので、主要な部品が
+ * 実際に出しているクラスを描画結果から確かめる。
+ *
+ * クラス名は境界付きで照合する。`toContain("issue-card")` だと
+ * `issue-card-title` にも一致して、カード本体のクラスが消えていても通る
+ * （`map.test.tsx` のマーカーの照合と同じ考え方）。
+ */
+describe("部品が期待するクラスを出している", () => {
+	function hasClass(html: string, className: string): boolean {
+		return [...html.matchAll(/class="([^"]*)"/g)].some((m) =>
+			m[1].split(/\s+/).includes(className),
+		);
+	}
+
+	const sampleIssue = {
+		id: "ebbcf9d7680ad57cedeeb513a90d461f",
+		title: "駅前の街灯が切れている",
+		description: "夜道が暗くて危ない",
+		scope: "community" as const,
+		status: "open" as const,
+		latitude: 35.681236,
+		longitude: 139.767125,
+		category: "道路・交通",
+		created_at: "2026-08-01 12:00:00.000",
+		updated_at: "2026-08-02 09:30:00.000",
+	};
+
+	const listResult = {
+		ok: true as const,
+		issues: [sampleIssue],
+		total: 1,
+		limit: 20,
+		offset: 0,
+	};
+
+	it("Issue カードは issue-card と、その中の見出し・説明・補助情報を出す", () => {
+		const html = renderToStaticMarkup(<IssueList result={listResult} />);
+		for (const className of [
+			"issue-cards",
+			"issue-card",
+			"issue-card-title",
+			"issue-card-description",
+			"issue-meta",
+			"list-summary",
+		]) {
+			expect(hasClass(html, className), `${className} が出ていない`).toBe(true);
+		}
+	});
+
+	it("自分の Issue 一覧も同じカードのクラスを使う", () => {
+		const html = renderToStaticMarkup(<MyIssueList result={listResult} />);
+		expect(hasClass(html, "issue-card")).toBe(true);
+		expect(hasClass(html, "list-summary")).toBe(true);
+	});
+
+	it("0 件の案内は text-soft で描く", () => {
+		const html = renderToStaticMarkup(
+			<IssueList
+				result={{ ok: true, issues: [], total: 0, limit: 20, offset: 0 }}
+			/>,
+		);
+		expect(hasClass(html, "text-soft")).toBe(true);
 	});
 });

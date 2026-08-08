@@ -105,7 +105,7 @@ li {
 }
 
 main p {
-	margin-bottom: 0.75rem;
+	margin-bottom: var(--space-3);
 }
 
 /*
@@ -385,15 +385,6 @@ main p {
 
 .text-success {
 	color: var(--success);
-}
-
-/* 文字サイズ。5 段階のうち、コンポーネントから直接指したいもの */
-.text-sm {
-	font-size: var(--text-sm);
-}
-
-.text-xs {
-	font-size: var(--text-xs);
 }
 
 /*
