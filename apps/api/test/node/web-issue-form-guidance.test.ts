@@ -17,6 +17,8 @@ import {
 	CreateIssueSchema,
 	ISSUE_SCOPE_LABELS,
 	IssueScope,
+	Locale,
+	UI_MESSAGES,
 } from "@world-issue-tracker/shared";
 import { describe, expect, it } from "vitest";
 import { ISSUE_CATEGORY_SUGGESTIONS } from "../../../web/src/lib/api";
@@ -26,7 +28,14 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const readRepoFile = (relativePath: string) =>
 	readFileSync(join(repoRoot, relativePath), "utf8");
 
-const formPage = readRepoFile("apps/web/src/app/issues/new/page.tsx");
+/**
+ * フォームの本体は `NewIssueForm`（Client Component）にある。
+ *
+ * Issue #82 で `issues/new/page.tsx` から切り出した。表示言語を Cookie から
+ * 読むのは Server Component 側の役目で、ページはそれを props で渡すだけの
+ * 薄いラッパになっている。入力補助の構造はすべて切り出した先にある。
+ */
+const formPage = readRepoFile("apps/web/src/app/components/NewIssueForm.tsx");
 
 /**
  * コメントを落とした本文。
@@ -62,30 +71,49 @@ describe("起票フォームの入力補助", () => {
 
 	it("placeholder の中身が空でなく、例として読める長さがある", () => {
 		// 属性の数だけ数えると `placeholder=""` を並べても通ってしまう。
-		// 「緯度経度を直接入力できない」への答えが例そのものなので中身を見る
-		const values = [
-			// 文字列リテラル（`placeholder="..."`）と
-			// JSX 式（`placeholder={"..."}`）の両方を拾う
-			...formPageBody.matchAll(
-				/placeholder=(?:"([^"]*)"|\{\s*"((?:[^"\\]|\\.)*)")/g,
-			),
-		].map((match) => match[1] ?? match[2] ?? "");
+		// 「緯度経度を直接入力できない」への答えが例そのものなので中身を見る。
+		//
+		// 文言は `UI_MESSAGES` に外部化した（Issue #82）ので、値は辞書から引く。
+		// 全ロケールを見ているのは、翻訳したときに例が空や記号だけになるのを
+		// 防ぐため
+		for (const locale of Locale.options) {
+			const newIssue = UI_MESSAGES[locale].newIssue;
+			const values = [
+				newIssue.titlePlaceholder,
+				newIssue.descriptionPlaceholder,
+				newIssue.categoryPlaceholder,
+				newIssue.latitudePlaceholder,
+				newIssue.longitudePlaceholder,
+			];
 
-		expect(values.length).toBeGreaterThanOrEqual(5);
-		for (const value of values) {
-			expect(value, "空の placeholder がある").not.toBe("");
-			expect(value.length, `placeholder「${value}」が短すぎる`).toBeGreaterThan(
-				3,
-			);
+			expect(values.length).toBeGreaterThanOrEqual(5);
+			for (const value of values) {
+				expect(value, `${locale} に空の placeholder がある`).not.toBe("");
+				expect(
+					value.length,
+					`${locale} の placeholder「${value}」が短すぎる`,
+				).toBeGreaterThan(3);
+			}
 		}
+
+		// 辞書に値があっても、フォームがそれを描いていなければ画面には出ない
+		expect(countAttribute("placeholder=")).toBeGreaterThanOrEqual(5);
 	});
 
 	it("緯度・経度に数値の入力例が入っている", () => {
 		// Issue が名指しした「一般の利用者が数値を直接入力できない」への答え。
 		// 小数を含む座標の例が出ていること
-		expect(formPageBody, "緯度経度の入力例が無い").toMatch(
-			/placeholder="[^"]*\d+\.\d+[^"]*"/,
-		);
+		for (const locale of Locale.options) {
+			const newIssue = UI_MESSAGES[locale].newIssue;
+			expect(
+				newIssue.latitudePlaceholder,
+				`${locale} の緯度の入力例が数値でない`,
+			).toMatch(/\d+\.\d+/);
+			expect(
+				newIssue.longitudePlaceholder,
+				`${locale} の経度の入力例が数値でない`,
+			).toMatch(/\d+\.\d+/);
+		}
 	});
 
 	it("入力中も読める補助テキストを aria-describedby で結んでいる", () => {
@@ -157,13 +185,31 @@ describe("起票フォームの入力補助", () => {
 	it("タイトルに粒度の分かる具体例を示している", () => {
 		// 「街灯が消えている」で止まらず、どこの・どれくらい続いているかまで
 		// 書いた例を出す。トップページの説明（街灯）と地続きにする
-		expect(formPageBody).toContain("街灯");
-		expect(formPageBody).toMatch(/placeholder="[^"]*街灯[^"]*"/);
+		for (const locale of Locale.options) {
+			expect(
+				UI_MESSAGES[locale].newIssue.titlePlaceholder,
+				`${locale} のタイトルの例がトップページの説明と繋がっていない`,
+			).toMatch(/街灯|streetlight/i);
+		}
 	});
 
 	it("説明欄に何を書けば解決に繋がるかの観点を示している", () => {
-		for (const keyword of ["いつから", "どこで", "誰が"]) {
-			expect(formPageBody, `説明の観点「${keyword}」が無い`).toContain(keyword);
+		// 「いつから / どこで / 誰が困っているか」の 3 観点。
+		// 英語では語順も語彙も変わるので、観点ごとに両ロケールの表現を並べる
+		const perspectives: { ja: RegExp; en: RegExp; name: string }[] = [
+			{ name: "いつから", ja: /いつから/, en: /since when/i },
+			{ name: "どこで", ja: /どこで/, en: /where/i },
+			{ name: "誰が", ja: /誰が/, en: /who/i },
+		];
+
+		for (const locale of Locale.options) {
+			const hint = UI_MESSAGES[locale].newIssue.descriptionHint;
+			for (const perspective of perspectives) {
+				expect(
+					hint,
+					`${locale} に説明の観点「${perspective.name}」が無い`,
+				).toMatch(perspective[locale]);
+			}
 		}
 	});
 });
@@ -208,13 +254,27 @@ describe("起票フォームのカテゴリ候補", () => {
 
 describe("起票フォームの位置情報の説明", () => {
 	it("現在地ボタンを押すと何が起きるかを事前に説明している", () => {
-		expect(formPageBody).toMatch(/許可|確認を求め/);
-		expect(formPageBody).toContain("位置情報");
+		for (const locale of Locale.options) {
+			const hint = UI_MESSAGES[locale].newIssue.locationHint;
+			expect(hint, `${locale} に許可を求める旨の説明が無い`).toMatch(
+				/許可|確認を求め|permission/i,
+			);
+			expect(hint, `${locale} に位置情報という語が無い`).toMatch(
+				/位置情報|location/i,
+			);
+		}
 	});
 
 	it("取得中の状態を表示する", () => {
 		// 押しても何も起きないように見える時間があると、連打されるか諦められる
-		expect(formPageBody).toMatch(/取得中/);
+		for (const locale of Locale.options) {
+			expect(
+				UI_MESSAGES[locale].newIssue.locating,
+				`${locale} に取得中の表示が無い`,
+			).toMatch(/取得中|Locating/i);
+		}
+		// 辞書にあっても、押した後にその文言へ切り替わらなければ意味が無い
+		expect(formPageBody).toContain("newIssue.locating");
 	});
 
 	it("取得に失敗したことを画面に出す", () => {
@@ -230,14 +290,29 @@ describe("起票フォームの位置情報の説明", () => {
 			failureBranch,
 			"失敗状態を描画する分岐が無い（拒否しても何も表示されない）",
 		).toBeTruthy();
-		expect(failureBranch).toMatch(/取得できませんでした|失敗/);
-		// 失敗したら手入力に切り替えられることを伝える
-		expect(failureBranch).toMatch(/直接入力|手入力/);
+		// 文言そのものは辞書にあるので、分岐がその文言を描いていることを見る
+		expect(failureBranch).toContain("newIssue.geolocationFailed");
+
+		for (const locale of Locale.options) {
+			const message = UI_MESSAGES[locale].newIssue.geolocationFailed;
+			expect(message, `${locale} に失敗した旨が無い`).toMatch(
+				/取得できませんでした|失敗|Could not get/i,
+			);
+			// 失敗したら手入力に切り替えられることを伝える
+			expect(message, `${locale} に手入力への案内が無い`).toMatch(
+				/直接入力|手入力|enter the coordinates directly/i,
+			);
+		}
 	});
 
 	it("現地にいないときの手段を案内している", () => {
 		// 地図 UI が無いので、緯度経度を自分で調べる手段を示す必要がある
-		expect(formPageBody).toMatch(/地図|現地にいない/);
+		for (const locale of Locale.options) {
+			expect(
+				UI_MESSAGES[locale].newIssue.locationHint,
+				`${locale} に現地にいないときの手段が無い`,
+			).toMatch(/地図|現地にいない|map service|not on site/i);
+		}
 	});
 });
 

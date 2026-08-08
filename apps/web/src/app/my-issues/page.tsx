@@ -1,6 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
+import { getUiMessages } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import { fetchMyIssues } from "../../lib/issues";
+import { getLocale } from "../../lib/locale";
 import { MyIssueList } from "../components/MyIssueList";
 
 /**
@@ -18,19 +20,20 @@ import { MyIssueList } from "../components/MyIssueList";
 export default async function MyIssuesPage() {
 	// `auth()` はリクエストごとに評価されるため、このページは動的レンダリングになる。
 	// 一覧の内容が利用者ごとに違う以上、静的化してはいけない画面でもある。
-	const { getToken } = await auth();
+	const [{ getToken }, locale] = await Promise.all([auth(), getLocale()]);
+	const messages = getUiMessages(locale);
 	const result = await fetchMyIssues({ token: await getToken() });
 
 	return (
 		<main>
-			<h1>自分が起票した Issue</h1>
-			<MyIssueList result={result} />
+			<h1>{messages.myIssuesPage.heading}</h1>
+			<MyIssueList result={result} locale={locale} />
 			<p>
-				<Link href="/issues/new">Issue を書く</Link>
+				<Link href="/issues/new">{messages.myIssuesPage.writeIssue}</Link>
 				{" / "}
-				<Link href="/issues">すべての Issue を見る</Link>
+				<Link href="/issues">{messages.myIssuesPage.viewAll}</Link>
 				{" / "}
-				<Link href="/">トップへ戻る</Link>
+				<Link href="/">{messages.myIssuesPage.backToHome}</Link>
 			</p>
 		</main>
 	);

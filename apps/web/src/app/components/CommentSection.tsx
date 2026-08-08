@@ -1,6 +1,11 @@
 "use client";
 
 import { SignInButton, useAuth } from "@clerk/nextjs";
+import {
+	DEFAULT_LOCALE,
+	getUiMessages,
+	type Locale,
+} from "@world-issue-tracker/shared";
 import { useState } from "react";
 import {
 	COMMENT_MAX_LENGTH,
@@ -27,11 +32,14 @@ import { formatCreatedAt } from "./IssueList";
 export function CommentSection({
 	issueId,
 	initialResult,
+	locale = DEFAULT_LOCALE,
 }: {
 	issueId: string;
 	initialResult: FetchCommentsResult;
+	locale?: Locale;
 }) {
 	const { isLoaded, isSignedIn, getToken } = useAuth();
+	const messages = getUiMessages(locale);
 
 	// 取得に失敗していたときは空から始める。失敗の表示は別に出す
 	const [comments, setComments] = useState<PublicComment[]>(
@@ -66,7 +74,7 @@ export function CommentSection({
 			setError(
 				err instanceof PostCommentError
 					? err.message
-					: "予期しないエラーが発生しました。時間をおいて再度お試しください。",
+					: messages.common.unexpectedError,
 			);
 		} finally {
 			setIsSubmitting(false);
@@ -75,16 +83,15 @@ export function CommentSection({
 
 	return (
 		<section>
-			<h2>コメント（{comments.length}）</h2>
+			<h2>{messages.comments.heading(comments.length)}</h2>
 			<p style={{ color: "#666", fontSize: "0.85rem" }}>
-				誰かを責めるためではなく、直すために書く場所です。似た経験、現地の状況、
-				使えそうな制度や連絡先など、解決に近づく情報を歓迎します。
+				{messages.comments.guide}
 			</p>
 
 			{!initialResult.ok && (
 				<div style={{ color: "#b00", padding: "0.5rem 0" }}>
 					<p style={{ margin: "0 0 0.25rem" }}>
-						コメントを取得できませんでした。時間をおいて再度お試しください。
+						{messages.comments.fetchFailed}
 					</p>
 					<p style={{ margin: 0, fontSize: "0.85rem" }}>
 						{initialResult.error}
@@ -93,9 +100,7 @@ export function CommentSection({
 			)}
 
 			{initialResult.ok && comments.length === 0 && (
-				<p style={{ color: "#666" }}>
-					まだコメントがありません。最初の一言を書いてみてください。
-				</p>
+				<p style={{ color: "#666" }}>{messages.comments.empty}</p>
 			)}
 
 			{comments.length > 0 && (
@@ -132,10 +137,10 @@ export function CommentSection({
 			*/}
 			{isLoaded && !isSignedIn && (
 				<output style={{ display: "block", color: "#b45309" }}>
-					コメントの投稿にはサインインが必要です。
+					{messages.comments.signInRequired}
 					<SignInButton mode="modal">
 						<button type="button" className="button-secondary">
-							サインイン
+							{messages.common.signIn}
 						</button>
 					</SignInButton>
 				</output>
@@ -144,10 +149,10 @@ export function CommentSection({
 			<form onSubmit={handleSubmit} noValidate>
 				<p className="form-field">
 					<label htmlFor="comment-body" style={{ display: "block" }}>
-						コメント
+						{messages.comments.label}
 					</label>
 					<span className="field-hint" id="comment-body-hint">
-						{COMMENT_MAX_LENGTH} 文字以内。
+						{messages.comments.lengthHint(COMMENT_MAX_LENGTH)}
 					</span>
 					<textarea
 						id="comment-body"
@@ -155,7 +160,7 @@ export function CommentSection({
 						onChange={(event) => setBody(event.target.value)}
 						rows={4}
 						maxLength={COMMENT_MAX_LENGTH}
-						placeholder="例: 同じ場所で先週も転びそうになりました。市の窓口には〇〇という制度があるようです。"
+						placeholder={messages.comments.placeholder}
 						aria-describedby="comment-body-hint"
 					/>
 				</p>
@@ -167,7 +172,7 @@ export function CommentSection({
 						{!isSignedIn && (
 							<SignInButton mode="modal">
 								<button type="button" className="button-secondary">
-									サインイン
+									{messages.common.signIn}
 								</button>
 							</SignInButton>
 						)}
@@ -179,7 +184,7 @@ export function CommentSection({
 					className="button-primary"
 					disabled={isSubmitting}
 				>
-					{isSubmitting ? "送信中…" : "コメントする"}
+					{isSubmitting ? messages.common.submitting : messages.comments.submit}
 				</button>
 			</form>
 		</section>

@@ -10,6 +10,7 @@ import {
 	IssueScope,
 	IssueStatus,
 	Locale,
+	UI_MESSAGES,
 } from "@world-issue-tracker/shared";
 import { describe, expect, it } from "vitest";
 
@@ -47,29 +48,64 @@ describe("トップページの導線", () => {
 	});
 
 	it("遷移先からトップへ戻れる", () => {
-		for (const route of ["issues", "issues/new"]) {
-			const page = readRepoFile(`apps/web/src/app/${route}/page.tsx`);
-			expect(page, `/${route} からトップへの導線が無い`).toMatch(
+		// `/issues/new` はフォーム本体を `NewIssueForm` に切り出している
+		// （Issue #82。Client Component へロケールを props で渡すため）。
+		// 導線はそちらにあるので、ページと実体の両方を見る
+		const pagesByRoute: Record<string, string[]> = {
+			issues: ["apps/web/src/app/issues/page.tsx"],
+			"issues/new": [
+				"apps/web/src/app/issues/new/page.tsx",
+				"apps/web/src/app/components/NewIssueForm.tsx",
+			],
+		};
+
+		for (const [route, paths] of Object.entries(pagesByRoute)) {
+			const sources = paths.map(readRepoFile).join("\n");
+			expect(sources, `/${route} からトップへの導線が無い`).toMatch(
 				/<Link\s+href="\/"/,
 			);
 		}
 	});
 
+	// 文言は `packages/shared` の `UI_MESSAGES` に外部化した（Issue #82）ので、
+	// 「何を伝えているか」は page.tsx のソースではなく辞書を見る。
+	// ページ側は「その文言を実際に描画しているか」だけを見る（下の it）。
+	//
+	// 全ロケールを回しているのは、翻訳したときに具体例や案内が抜け落ちるのを
+	// 防ぐため。日本語だけ通せばよいことにすると、英語版が中身の薄い直訳でも
+	// 気付けない
 	it("何をするサービスなのかを具体例つきで説明している", () => {
 		// キャッチコピー「地球のバグ」だけでは何を投稿する場所か伝わらない
-		expect(homePageBody).toContain("街灯");
-		expect(homePageBody).toMatch(/投稿/);
+		for (const locale of Locale.options) {
+			const home = UI_MESSAGES[locale].home;
+			const about = `${home.aboutBody1}${home.aboutBody2}`;
+
+			expect(about, `${locale} に身近な具体例が無い`).toMatch(
+				/街灯|streetlight/i,
+			);
+			expect(about, `${locale} に投稿するという説明が無い`).toMatch(
+				/投稿|post/i,
+			);
+		}
 	});
 
 	it("閲覧にログインが不要であることを明示している", () => {
 		// 「何があるか分からないサービスに人はログインしない」への対応
-		expect(homePageBody).toMatch(/ログインは不要/);
+		for (const locale of Locale.options) {
+			expect(
+				UI_MESSAGES[locale].home.viewIssuesHint,
+				`${locale} に閲覧がログイン不要である案内が無い`,
+			).toMatch(/ログインは不要|No sign-in required/i);
+		}
 	});
 
 	it("説明も導線も main の中にあり、コメントアウトされていない", () => {
 		const main = homePageBody.match(/<main>([\s\S]*)<\/main>/)?.[1];
 		expect(main, "<main> が無い").toBeTruthy();
-		expect(main).toContain("街灯");
+		// 説明の本文そのものは辞書にあるので、辞書のどのキーを描いているかで見る。
+		// キーごと消せばここが落ちる
+		expect(main).toContain("messages.home.aboutBody1");
+		expect(main).toContain("messages.home.aboutBody2");
 		expect(main).toMatch(/<Link\s+href="\/issues"/);
 		expect(main).toMatch(/<Link\s+href="\/issues\/new"/);
 	});
