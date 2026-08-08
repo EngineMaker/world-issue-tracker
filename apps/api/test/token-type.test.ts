@@ -10,13 +10,11 @@ vi.mock("@clerk/backend", async () => {
 
 import { createApp } from "../src/index";
 import { setMockUserId } from "./helpers/clerk-mock";
+import { applyMigrations } from "./helpers/migrate";
 
 const app = createApp();
 
 const ALLOWED_ORIGIN = "http://localhost:3000";
-
-const MIGRATION =
-	"CREATE TABLE IF NOT EXISTS issues (id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), title TEXT NOT NULL, description TEXT NOT NULL, scope TEXT NOT NULL CHECK (scope IN ('personal', 'community', 'municipality', 'national', 'global')), status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'triaged', 'in_progress', 'review', 'resolved', 'closed')), latitude REAL NOT NULL, longitude REAL NOT NULL, category TEXT, user_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));";
 
 /** マシントークンが「なりすます」対象のユーザー。 */
 const VICTIM_USER_ID = "user_victim123";
@@ -89,8 +87,12 @@ async function issueExists(id: string): Promise<boolean> {
  * 確かめるため。
  */
 describe("Machine tokens must not pass requireAuth", () => {
+	// スキーマは実マイグレーションから作る。手書きの CREATE TABLE を
+	// 持たせると、`migrations/` にカラムが増えてもここだけ古いままになり、
+	// このファイルのテストが本番と別物のスキーマに対して緑になる
+	// （`schema.test.ts` が同じ理由で手書き定数を廃した）。
 	beforeAll(async () => {
-		await env.DB.exec(MIGRATION);
+		await applyMigrations();
 	});
 
 	beforeEach(async () => {

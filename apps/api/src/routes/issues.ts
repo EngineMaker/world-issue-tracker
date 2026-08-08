@@ -48,9 +48,23 @@ export const PUBLIC_ISSUE_COLUMNS = [
 	"category",
 	"created_at",
 	"updated_at",
+	// 匿名で起票されたかどうか（#88）。返すのは真偽値だけで、`user_id` は
+	// ここに足さない。「誰が書いたか」を伏せる方針は変えず、
+	// 「名乗っているかどうか」だけを画面が出し分けられるようにする。
+	"is_anonymous",
 ] as const;
 
 type PublicIssue = Record<(typeof PUBLIC_ISSUE_COLUMNS)[number], unknown>;
+
+/**
+ * JSON で真偽値として返すカラム。
+ *
+ * SQLite に真偽値型は無く、`is_anonymous` は INTEGER の 0/1 として
+ * 返ってくる。そのまま載せると JSON にも 0/1 が出て、クライアント側で
+ * `0` を falsy として扱うか数値として扱うかが実装ごとにぶれる。
+ * 「匿名かどうか」は真偽値だという契約をレスポンスの形で固定する。
+ */
+const BOOLEAN_ISSUE_COLUMNS: ReadonlySet<string> = new Set(["is_anonymous"]);
 
 /**
  * 一覧の SELECT が返す行のうち、カーソル組み立てに使う分だけを型付けしたもの。
@@ -72,7 +86,15 @@ export const PUBLIC_SELECT = PUBLIC_ISSUE_COLUMNS.join(", ");
  */
 export function toPublicIssue(row: Record<string, unknown>): PublicIssue {
 	return Object.fromEntries(
-		PUBLIC_ISSUE_COLUMNS.map((column) => [column, row[column]]),
+		PUBLIC_ISSUE_COLUMNS.map((column) => [
+			column,
+			// 真偽値のカラムだけ 0/1 を boolean に直す。NULL は「値が無い」
+			// ではなく「匿名でない」に倒さないよう、Boolean() ではなく
+			// 明示的に 0 との比較で判定する（NOT NULL なので通常は来ない）。
+			BOOLEAN_ISSUE_COLUMNS.has(column)
+				? row[column] !== 0 && row[column] !== false
+				: row[column],
+		]),
 	) as PublicIssue;
 }
 
@@ -169,8 +191,15 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 		return c.json({ error: parsed.error.flatten() }, 400);
 	}
 
-	const { title, description, scope, latitude, longitude, category } =
-		parsed.data;
+	const {
+		title,
+		description,
+		scope,
+		latitude,
+		longitude,
+		category,
+		is_anonymous: isAnonymous,
+	} = parsed.data;
 	const auth = getAuth(c);
 	const userId = auth?.userId;
 
@@ -179,8 +208,8 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 	// `created_at` と `updated_at` が作成時点でずれる。
 	const result = await c.env.DB.prepare(
 		`WITH ts(v) AS (SELECT ${NEXT_CREATED_AT_SQL})
-     INSERT INTO issues (title, description, scope, latitude, longitude, category, user_id, created_at, updated_at)
-     SELECT ?, ?, ?, ?, ?, ?, ?, v, v FROM ts
+     INSERT INTO issues (title, description, scope, latitude, longitude, category, user_id, is_anonymous, created_at, updated_at)
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, v, v FROM ts
      RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(
@@ -191,6 +220,9 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 			longitude,
 			category ?? null,
 			userId,
+			// D1 に真偽値をそのまま渡せないため 0/1 に直す。
+			// スキーマの `.default(true)` が効いているので undefined は来ない。
+			isAnonymous ? 1 : 0,
 		)
 		.first();
 

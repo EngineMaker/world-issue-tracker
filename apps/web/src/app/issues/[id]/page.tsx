@@ -1,5 +1,6 @@
 import {
 	DEFAULT_LOCALE,
+	getIssueAnonymityLabel,
 	ISSUE_SCOPE_LABELS,
 	ISSUE_STATUS_LABELS,
 } from "@world-issue-tracker/shared";
@@ -96,6 +97,8 @@ export default async function IssueDetailPage({
 				<time dateTime={issue.created_at}>
 					{formatCreatedAt(issue.created_at)}
 				</time>
+				{" / "}
+				<span>{getIssueAnonymityLabel(issue.is_anonymous)}</span>
 			</p>
 
 			<section>
@@ -125,6 +128,15 @@ export default async function IssueDetailPage({
 
 					<dt>カテゴリ</dt>
 					<dd>{issue.category ?? "未設定"}</dd>
+
+					{/*
+					  起票者（#88）。今は「名乗っているかどうか」しか出せない。
+					  実際の表示名は Clerk Backend API から引く必要があり、
+					  それは #67 の範囲。ここが「投稿者あり」のまま名前が
+					  出ないのは未完成なのではなく、意図した段階
+					*/}
+					<dt>起票者</dt>
+					<dd>{getIssueAnonymityLabel(issue.is_anonymous)}</dd>
 
 					<dt>場所</dt>
 					{/*

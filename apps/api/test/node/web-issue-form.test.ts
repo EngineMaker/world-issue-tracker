@@ -23,6 +23,8 @@ const VALID_INPUT: IssueFormValues = {
 	latitude: "35.681236",
 	longitude: "139.767125",
 	category: "安全",
+	// フォームの初期状態と同じく、既定はチェックなし（＝匿名）。
+	showName: false,
 };
 
 describe("validateIssueForm", () => {
@@ -38,7 +40,27 @@ describe("validateIssueForm", () => {
 			latitude: 35.681236,
 			longitude: 139.767125,
 			category: "安全",
+			is_anonymous: true,
 		});
+	});
+
+	// 画面の「名前を出す」と API の `is_anonymous` は逆向きなので、
+	// 反転が抜けていないことを両方向で見る。片方だけだと、
+	// 常に true / 常に false を返す実装でも通ってしまう。
+	it("「名前を出す」が未チェックなら匿名として送る", () => {
+		const result = validateIssueForm({ ...VALID_INPUT, showName: false });
+
+		expect(result.success).toBe(true);
+		if (!result.success) return;
+		expect(result.data.is_anonymous).toBe(true);
+	});
+
+	it("「名前を出す」にチェックすると匿名にしない", () => {
+		const result = validateIssueForm({ ...VALID_INPUT, showName: true });
+
+		expect(result.success).toBe(true);
+		if (!result.success) return;
+		expect(result.data.is_anonymous).toBe(false);
 	});
 
 	it("緯度経度を数値に変換する（文字列のまま送らない）", () => {
@@ -157,6 +179,9 @@ describe("createIssue", () => {
 		scope: "community",
 		latitude: 35.5,
 		longitude: 139.5,
+		// `CreateIssue` は `validateIssueForm` を通った後の形なので、
+		// `is_anonymous` は既に確定している（`.default(true)` が適用済み）。
+		is_anonymous: true,
 	} as const;
 
 	afterEach(() => {
