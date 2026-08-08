@@ -37,4 +37,18 @@ mock.module("next/headers", () => ({
 		get: (name: string) =>
 			name in cookieValues ? { name, value: cookieValues[name] } : undefined,
 	}),
+
+	// `headers` と `draftMode` も必ず出すこと。
+	//
+	// `mock.module` はモジュール全体を差し替えるので、ここに書かなかった
+	// export は「存在しない」ことになる。`@clerk/nextjs` は
+	// `import { headers } from "next/headers"` をしており、モックに
+	// `headers` が無いと `Export named 'headers' not found in module` で
+	// 落ちる。実際に CI がこれで失敗した（手元では Clerk を読み込む
+	// テストが先に走らず再現しなかった）。
+	//
+	// このリポジトリのテストは `headers()` の中身を使わないので、
+	// 空の `Headers` を返す最小の代役で足りる。
+	headers: async () => new Headers(),
+	draftMode: async () => ({ isEnabled: false }),
 }));
