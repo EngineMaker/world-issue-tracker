@@ -1,7 +1,10 @@
 import { getAuth } from "@hono/clerk-auth";
 import { type Context, Hono } from "hono";
 import type { Bindings } from "../index";
-import { requireAuth } from "../middleware/auth";
+import {
+	viewerUserId as getViewerUserId,
+	requireAuth,
+} from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
 
 /**
@@ -69,26 +72,6 @@ function toPublicHelpOffer(row: Record<string, unknown>): PublicHelpOffer {
 }
 
 /**
- * 閲覧者の Clerk User ID。未ログイン・Clerk 未初期化なら null。
- *
- * 認証を要求しない GET で使う。`clerkMiddleware` は `c.set("clerkAuth", fn)` に
- * 関数を入れる形なので、Clerk の初期化に失敗して何も入っていない状態で
- * `getAuth` を呼ぶと TypeError になる（`middleware/auth.ts` の `hasClerkAuth`
- * と同じ理由）。公開エンドポイントを落とさないため、呼ぶ前に確認する。
- *
- * トークン種別を見ていないのは、ここが読み取り専用で、返すのが
- * 「あなたは表明済みか」という自分自身についての真偽値だけだから。
- * 種別を偽っても他人の情報は取れず、書き込みも起きない。
- * 書き込み系は従来どおり `requireAuth` がセッショントークンだけを通す。
- */
-function viewerId(c: Context<HelpOffersEnv>): string | null {
-	if (typeof c.get("clerkAuth") !== "function") {
-		return null;
-	}
-	return getAuth(c)?.userId ?? null;
-}
-
-/**
  * 対象の Issue が存在するか確かめる。存在しなければ 404 のレスポンスを返す。
  *
  * `help_offers.issue_id` には外部キー制約を張っているが、D1 / SQLite の
@@ -151,7 +134,7 @@ helpOffers.get("/", clerkAuth(), async (c) => {
 	// 返すのは自分自身の ID だけで、他人の身元がここから増えることはない。
 	//
 	// 未ログインなら `viewer_offered` は false、`viewer_user_id` は null。
-	const viewerUserId = viewerId(c);
+	const viewerUserId = getViewerUserId(c);
 	const viewerOffered =
 		viewerUserId !== null &&
 		data.some((offer) => offer.user_id === viewerUserId);

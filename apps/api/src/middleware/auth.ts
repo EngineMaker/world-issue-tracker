@@ -17,6 +17,26 @@ function hasClerkAuth(c: Context): boolean {
 }
 
 /**
+ * 閲覧者の Clerk User ID。未ログイン・Clerk 未初期化なら null。
+ *
+ * 認証を要求しない GET で「ログインしていれば自分についての情報を足す」ために使う
+ * （`/issues/:id/help-offers` の `viewer_offered`、`/issues/:id/viewer` の
+ * `viewer_is_owner`）。`hasClerkAuth` を挟んでいるので、Clerk の初期化に
+ * 失敗していても公開エンドポイントが 500 に落ちることはない。
+ *
+ * トークン種別を見ていないのは、この値を使う経路がいずれも読み取り専用で、
+ * 返すのが「自分自身についての真偽値」だけだから。種別を偽っても他人の情報は
+ * 取れず、書き込みも起きない。書き込み系は従来どおり `requireAuth` が
+ * セッショントークンだけを通す。
+ */
+export function viewerUserId(c: Context): string | null {
+	if (!hasClerkAuth(c)) {
+		return null;
+	}
+	return getAuth(c)?.userId ?? null;
+}
+
+/**
  * 書き込みを許可する Clerk のトークン種別。
  *
  * `clerkMiddleware()` は `acceptsToken: "any"` で認証するため、ブラウザの

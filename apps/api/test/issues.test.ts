@@ -1612,6 +1612,131 @@ describe("Issues CRUD", () => {
 		});
 	});
 
+	// --- GET /issues/:id/viewer ---
+	//
+	// 閲覧者がその Issue の起票者かどうかだけを返す（Issue #62）。
+	//
+	// ステータス変更の UI を「起票者にだけ」出すには、画面がその判定結果を
+	// 知る必要がある。しかし `GET /issues/:id` は `user_id` を返さない
+	// （#67 の「匿名を既定」を守るため）ので、突き合わせる材料が画面に無い。
+	//
+	// `GET /issues/:id` のレスポンスに真偽値を足す形にしなかったのは、
+	// あの経路が「Issue の行そのもの」を返す契約になっていて、公開キーの
+	// 集合がテストで固定されているため。行に属さない値を混ぜると、
+	// 「返ってきたキー = テーブルの公開カラム」という対応が崩れる。
+	// help-offers が `viewer_offered` を返せているのは、あちらが
+	// `{ data, total, ... }` というラップ済みの形をしているから。
+	describe("GET /issues/:id/viewer", () => {
+		const OWNER = "user_2ownerabcdefgh";
+		const OTHER = "user_2otherabcdefgh";
+
+		it("returns viewer_is_owner=true for the author", async () => {
+			setMockUserId(OWNER);
+			const created = await readBody(await createIssue());
+
+			const res = await app.request(`/issues/${created.id}/viewer`, {}, env);
+			expect(res.status).toBe(200);
+			const body = await readBody(res);
+			expect(body.viewer_is_owner).toBe(true);
+		});
+
+		it("returns viewer_is_owner=false for another user", async () => {
+			setMockUserId(OWNER);
+			const created = await readBody(await createIssue());
+
+			setMockUserId(OTHER);
+			const res = await app.request(`/issues/${created.id}/viewer`, {}, env);
+			expect(res.status).toBe(200);
+			const body = await readBody(res);
+			expect(body.viewer_is_owner).toBe(false);
+		});
+
+		// 未ログインでも 401 にしない。詳細ページは誰でも読める画面で、
+		// この値は「操作 UI を出すか」を決めるためだけに使う。
+		// ログインしていない閲覧者にとっての答えは常に false で確定している。
+		it("returns viewer_is_owner=false when signed out", async () => {
+			setMockUserId(OWNER);
+			const created = await readBody(await createIssue());
+
+			setMockUserId(null);
+			const res = await app.request(`/issues/${created.id}/viewer`, {}, env);
+			expect(res.status).toBe(200);
+			const body = await readBody(res);
+			expect(body.viewer_is_owner).toBe(false);
+		});
+
+		// 起票者が誰かを、真偽値以外の形で漏らさないこと。
+		// ここで user_id を返すと `PUBLIC_ISSUE_COLUMNS` で守っている
+		// 匿名性が、別の経路から抜ける。
+		it("never exposes the owner's user_id", async () => {
+			setMockUserId(OWNER);
+			const created = await readBody(await createIssue());
+
+			setMockUserId(OTHER);
+			const res = await app.request(`/issues/${created.id}/viewer`, {}, env);
+			const body = await readBody(res);
+			expect(JSON.stringify(body)).not.toContain(OWNER);
+			expect(body).not.toHaveProperty("user_id");
+			expect(Object.keys(body)).toEqual(["viewer_is_owner"]);
+		});
+
+		it("returns 404 for non-existent id", async () => {
+			setMockUserId(OWNER);
+			const res = await app.request("/issues/nonexistent/viewer", {}, env);
+			expect(res.status).toBe(404);
+			const body = await readBody(res);
+			expect(body.error).toBe("Issue not found");
+		});
+
+		// Clerk の初期化に失敗しても 500 に落ちないこと。
+		//
+		// `viewerUserId`（middleware/auth.ts）が `getAuth` の手前で
+		// コンテキストの有無を確かめているのが効く箇所。このガードを外すと、
+		// `clerkAuth()` がキー不在を握り潰して未認証のまま先へ進めた結果、
+		// `c.get("clerkAuth")` に何も入っていない状態で `getAuth` が呼ばれ
+		// TypeError になる。
+		//
+		// `wrangler secret` の設定漏れという現実的な事故で顕在化し、
+		// そのとき詳細ページのステータス欄が丸ごと壊れる。
+		// ガードの有無はレスポンスの形に出ないため、通常のテストでは
+		// 外しても気付けない（変異体で確認済み）。
+		it("keeps returning 200 when Clerk keys are missing", async () => {
+			setMockUserId(OWNER);
+			const created = await readBody(await createIssue());
+
+			const consoleError = vi
+				.spyOn(console, "error")
+				.mockImplementation(() => undefined);
+			try {
+				const res = await app.request(
+					`/issues/${created.id}/viewer`,
+					{},
+					{ ...env, CLERK_SECRET_KEY: "" },
+				);
+				expect(res.status).toBe(200);
+				// 認証できていない以上、答えは false（誰でもない人として見ている）
+				expect((await readBody(res)).viewer_is_owner).toBe(false);
+			} finally {
+				consoleError.mockRestore();
+			}
+		});
+
+		// user_id が NULL の legacy 行は誰のものでもない。
+		// 「起票者不明」を「あなたが起票者」に倒すと、他人が操作 UI を得る。
+		it("returns viewer_is_owner=false for a legacy row without user_id", async () => {
+			await env.DB.prepare(
+				`INSERT INTO issues (id, title, description, scope, latitude, longitude, user_id, created_at, updated_at)
+         VALUES ('legacy-1', 'Legacy', 'no owner', 'community', 35.68, 139.76, NULL, '2026-01-01 00:00:00.000', '2026-01-01 00:00:00.000')`,
+			).run();
+
+			setMockUserId(OWNER);
+			const res = await app.request("/issues/legacy-1/viewer", {}, env);
+			expect(res.status).toBe(200);
+			const body = await readBody(res);
+			expect(body.viewer_is_owner).toBe(false);
+		});
+	});
+
 	// --- GET /issues/mine ---
 	//
 	// 自分が起票した Issue だけを返す（Issue #68）。公開一覧と違って認証必須で、

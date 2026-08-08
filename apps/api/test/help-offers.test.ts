@@ -206,6 +206,42 @@ describe("Help offers", () => {
 			]);
 		});
 
+		// Clerk の初期化に失敗しても 500 に落ちないこと。
+		//
+		// 閲覧者の判定は `viewerUserId`（middleware/auth.ts）が担っていて、
+		// `getAuth` の手前でコンテキストの有無を確かめている。このガードを
+		// 外すと、キー不在時に `getAuth` が TypeError を投げて公開 GET が
+		// 丸ごと 500 になる（`wrangler secret` の設定漏れで起きる）。
+		//
+		// ガードの有無は正常系のレスポンスに出ないため、他のテストでは
+		// 外しても気付けない。`/issues/:id/viewer` にも同型のテストがある。
+		it("Clerk のキーが無くても 200 を返す", async () => {
+			await postOffer(ISSUE_ID);
+
+			const consoleError = vi
+				.spyOn(console, "error")
+				.mockImplementation(() => undefined);
+			try {
+				const res = await app.request(
+					offerUrl(ISSUE_ID),
+					{},
+					{
+						...env,
+						CLERK_SECRET_KEY: "",
+					},
+				);
+
+				expect(res.status).toBe(200);
+				const body = await readBody(res);
+				expect(body.total).toBe(1);
+				// 認証できていない以上、閲覧者は「誰でもない人」として扱う
+				expect(body.viewer_offered).toBe(false);
+				expect(body.viewer_user_id).toBeNull();
+			} finally {
+				consoleError.mockRestore();
+			}
+		});
+
 		it("表明が無ければ空の一覧を返す", async () => {
 			const res = await listOffers(ISSUE_ID);
 
