@@ -1,6 +1,7 @@
 import { getAuth } from "@hono/clerk-auth";
 import { CreateCommentSchema } from "@world-issue-tracker/shared";
 import { type Context, Hono } from "hono";
+import type { CommentRow, IssueRow } from "../db/rows";
 import type { Bindings } from "../index";
 import { requireAuth } from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
@@ -27,7 +28,18 @@ export const PUBLIC_COMMENT_COLUMNS = [
 	"created_at",
 ] as const;
 
-type PublicComment = Record<(typeof PUBLIC_COMMENT_COLUMNS)[number], unknown>;
+/**
+ * レスポンスに載るコメント。`CommentRow` から公開カラムだけを取り出したもの
+ * （`issues.ts` の `PublicIssue` と同じ導き方）。
+ */
+type PublicComment = Pick<CommentRow, (typeof PUBLIC_COMMENT_COLUMNS)[number]>;
+
+/**
+ * `toPublicComment` が受け取れる行。
+ * 二段構えの 2 段目なので、`SELECT *` 相当の行も受けられるようにする
+ * （`issues.ts` の `IssueRowLike` と同じ）。
+ */
+type CommentRowLike = PublicComment & Partial<CommentRow>;
 
 /**
  * レスポンスに載せるカラムだけを並べた SELECT / RETURNING 句。
@@ -39,7 +51,7 @@ export const PUBLIC_COMMENT_SELECT = PUBLIC_COMMENT_COLUMNS.join(", ");
  * DB の行から公開してよいカラムだけを取り出す。
  * SELECT で絞ったうえで返す直前にも通す二段構え（issues.ts と同じ方針）。
  */
-export function toPublicComment(row: Record<string, unknown>): PublicComment {
+export function toPublicComment(row: CommentRowLike): PublicComment {
 	return Object.fromEntries(
 		PUBLIC_COMMENT_COLUMNS.map((column) => [column, row[column]]),
 	) as PublicComment;
@@ -90,7 +102,7 @@ async function findIssue(
 
 	const row = await c.env.DB.prepare("SELECT id FROM issues WHERE id = ?")
 		.bind(issueId)
-		.first<{ id: string }>();
+		.first<Pick<IssueRow, "id">>();
 
 	if (!row) {
 		return { response: c.json({ error: "Issue not found" }, 404) };
@@ -120,7 +132,7 @@ comments.get("/", async (c) => {
 		`SELECT ${PUBLIC_COMMENT_SELECT} FROM comments WHERE issue_id = ? ORDER BY created_at ASC, id ASC`,
 	)
 		.bind(issueId)
-		.all<Record<string, unknown>>();
+		.all<PublicComment>();
 
 	return c.json({
 		data: rows.results.map(toPublicComment),
@@ -158,7 +170,7 @@ comments.post("/", clerkAuth(), requireAuth, async (c) => {
      RETURNING ${PUBLIC_COMMENT_SELECT}`,
 	)
 		.bind(issueId, userId, parsed.data.body)
-		.first();
+		.first<PublicComment>();
 
 	// INSERT が成功すれば RETURNING は必ず 1 行返すため、ここは実際には通らない。
 	// `first()` の戻り値が null を含む型であることに対する処理で、

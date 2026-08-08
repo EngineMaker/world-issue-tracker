@@ -8,6 +8,7 @@ import {
 	UpdateIssueSchema,
 } from "@world-issue-tracker/shared";
 import { type Context, Hono } from "hono";
+import type { IssueRow } from "../db/rows";
 import type { Bindings } from "../index";
 import { requireAuth, viewerUserId } from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
@@ -50,13 +51,31 @@ export const PUBLIC_ISSUE_COLUMNS = [
 	"updated_at",
 ] as const;
 
-type PublicIssue = Record<(typeof PUBLIC_ISSUE_COLUMNS)[number], unknown>;
+/**
+ * レスポンスに載る Issue。`IssueRow` から公開カラムだけを取り出したもの。
+ *
+ * `PUBLIC_ISSUE_COLUMNS` から導いているので、あの配列に無いキー
+ * （`user_id` など）はこの型にも現れない。逆に配列へカラムを足すと、
+ * `IssueRow` に無い名前ならここで型エラーになる。
+ *
+ * ただし型が捕まえるのは「テーブルに存在しないカラム名」までで、
+ * **`user_id` を配列に足す変更は型では止まらない**（実在するカラムなので
+ * `Pick` の制約を満たしてしまう）。何を公開してよいかは人が決める判断であり、
+ * 型で表現できない。そこを守っているのは `test/issues.test.ts` の
+ * `Defence layers` で、実際に足すとあのテストが落ちる。
+ * このリストを触るときは「型が通ったから安全」と判断しないこと。
+ */
+type PublicIssue = Pick<IssueRow, (typeof PUBLIC_ISSUE_COLUMNS)[number]>;
 
 /**
- * 一覧の SELECT が返す行のうち、カーソル組み立てに使う分だけを型付けしたもの。
- * 残りのカラムは `toPublicIssue` が拾うため、ここでは列挙しない。
+ * `toPublicIssue` が受け取れる行。
+ *
+ * 二段構えの 2 段目は「SELECT が内部フィールドまで拾ってしまった行」を
+ * 落とすためのものなので、`IssueRow` そのもの（= `SELECT *` 相当）も
+ * 公開カラムだけに絞った行も受けられる必要がある。公開カラムだけを必須にし、
+ * 残りは任意として扱う。
  */
-type CursorRow = Record<string, unknown> & { created_at: string; id: string };
+type IssueRowLike = PublicIssue & Partial<IssueRow>;
 
 /**
  * レスポンスに載せるカラムだけを並べた SELECT / RETURNING 句。
@@ -70,7 +89,7 @@ export const PUBLIC_SELECT = PUBLIC_ISSUE_COLUMNS.join(", ");
  * SELECT / RETURNING でカラムを絞ったうえで、返す直前にもここを通す二段構えに
  * している。句の書き漏れがあっても、内部フィールドはここで落ちる。
  */
-export function toPublicIssue(row: Record<string, unknown>): PublicIssue {
+export function toPublicIssue(row: IssueRowLike): PublicIssue {
 	return Object.fromEntries(
 		PUBLIC_ISSUE_COLUMNS.map((column) => [column, row[column]]),
 	) as PublicIssue;
@@ -192,7 +211,7 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 			category ?? null,
 			userId,
 		)
-		.first();
+		.first<PublicIssue>();
 
 	// INSERT が成功すれば RETURNING は必ず 1 行返すため、ここは実際には通らない。
 	// `first()` の戻り値が null を含む型であることに対する処理で、
@@ -385,7 +404,7 @@ async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 		`SELECT ${PUBLIC_SELECT} FROM issues ${where} ORDER BY created_at ${direction}, id ${direction} LIMIT ? OFFSET ?`,
 	)
 		.bind(...binds, limit + 1, offset)
-		.all<CursorRow>();
+		.all<PublicIssue>();
 
 	const hasMore = rows.results.length > limit;
 	const page = hasMore ? rows.results.slice(0, limit) : rows.results;
@@ -481,7 +500,7 @@ issues.get("/:id/viewer", clerkAuth(), async (c) => {
 	const id = c.req.param("id");
 	const row = await c.env.DB.prepare("SELECT user_id FROM issues WHERE id = ?")
 		.bind(id)
-		.first<{ user_id: string | null }>();
+		.first<Pick<IssueRow, "user_id">>();
 
 	if (!row) {
 		return c.json({ error: "Issue not found" }, 404);
@@ -502,7 +521,7 @@ issues.get("/:id", async (c) => {
 		`SELECT ${PUBLIC_SELECT} FROM issues WHERE id = ?`,
 	)
 		.bind(id)
-		.first();
+		.first<PublicIssue>();
 
 	if (!row) {
 		return c.json({ error: "Issue not found" }, 404);
@@ -524,7 +543,7 @@ async function checkOwnership(
 ): Promise<Response | null> {
 	const row = await c.env.DB.prepare("SELECT user_id FROM issues WHERE id = ?")
 		.bind(id)
-		.first<{ user_id: string | null }>();
+		.first<Pick<IssueRow, "user_id">>();
 
 	if (!row) {
 		return c.json({ error: "Issue not found" }, 404);
@@ -572,7 +591,7 @@ issues.patch("/:id", clerkAuth(), requireAuth, async (c) => {
 		`UPDATE issues SET ${setClauses.join(", ")} WHERE id = ? AND user_id = ? RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(...binds, id, auth?.userId)
-		.first();
+		.first<PublicIssue>();
 
 	if (!result) {
 		return c.json({ error: "Issue not found" }, 404);
@@ -604,7 +623,7 @@ issues.delete("/:id", clerkAuth(), requireAuth, async (c) => {
 		`DELETE FROM issues WHERE id = ? AND user_id = ? RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(id, auth?.userId)
-		.first();
+		.first<PublicIssue>();
 
 	if (!result) {
 		return c.json({ error: "Issue not found" }, 404);
