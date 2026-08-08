@@ -58,11 +58,9 @@ export default async function IssueDetailPage({
 		return (
 			<main>
 				<h1>Issue を表示できませんでした</h1>
-				<div style={{ color: "#b00", padding: "0.5rem 0" }}>
-					<p style={{ margin: "0 0 0.25rem" }}>
-						時間をおいて再度お試しください。
-					</p>
-					<p style={{ margin: 0, fontSize: "0.85rem" }}>{result.error}</p>
+				<div className="error-block">
+					<p className="block-message">時間をおいて再度お試しください。</p>
+					<p className="block-detail">{result.error}</p>
 				</div>
 				<p>
 					<Link href="/issues">Issue 一覧へ戻る</Link>
@@ -82,7 +80,7 @@ export default async function IssueDetailPage({
 			  スコープとステータスは enum の生値（`community` / `open`）のままだと
 			  読み手に伝わらない。ラベルは packages/shared に一本化している
 			*/}
-			<p style={{ color: "#666", fontSize: "0.9rem" }}>
+			<p className="issue-meta">
 				<span>{scope.label}</span>
 				{" / "}
 				<span>{STATUS_LABELS[issue.status]}</span>
@@ -104,7 +102,7 @@ export default async function IssueDetailPage({
 				  投稿は textarea への入力なので改行が意味を持つ。
 				  既定の `white-space` だと改行が潰れて 1 段落に見える
 				*/}
-				<p style={{ whiteSpace: "pre-wrap" }}>{issue.description}</p>
+				<p className="issue-description">{issue.description}</p>
 			</section>
 
 			<section>

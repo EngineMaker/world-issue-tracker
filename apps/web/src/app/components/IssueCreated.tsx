@@ -20,7 +20,7 @@ import Link from "next/link";
  */
 export function IssueCreated({ id }: { id: string }) {
 	return (
-		<output style={{ display: "block", color: "#15803d" }}>
+		<output className="notice text-success">
 			起票しました（ID: {id}）。{" "}
 			<Link href={`/issues/${id}`}>投稿した Issue を見る</Link>
 			{" / "}
