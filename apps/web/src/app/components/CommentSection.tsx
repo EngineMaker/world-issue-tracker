@@ -76,46 +76,33 @@ export function CommentSection({
 	return (
 		<section>
 			<h2>コメント（{comments.length}）</h2>
-			<p style={{ color: "#666", fontSize: "0.85rem" }}>
+			<p className="section-lead">
 				誰かを責めるためではなく、直すために書く場所です。似た経験、現地の状況、
 				使えそうな制度や連絡先など、解決に近づく情報を歓迎します。
 			</p>
 
 			{!initialResult.ok && (
-				<div style={{ color: "#b00", padding: "0.5rem 0" }}>
-					<p style={{ margin: "0 0 0.25rem" }}>
+				<div className="error-block">
+					<p className="block-message">
 						コメントを取得できませんでした。時間をおいて再度お試しください。
 					</p>
-					<p style={{ margin: 0, fontSize: "0.85rem" }}>
-						{initialResult.error}
-					</p>
+					<p className="block-detail">{initialResult.error}</p>
 				</div>
 			)}
 
 			{initialResult.ok && comments.length === 0 && (
-				<p style={{ color: "#666" }}>
+				<p className="text-soft">
 					まだコメントがありません。最初の一言を書いてみてください。
 				</p>
 			)}
 
 			{comments.length > 0 && (
-				<ul style={{ padding: 0, margin: "0 0 1rem" }}>
+				<ul className="comment-cards">
 					{comments.map((comment) => (
-						<li
-							key={comment.id}
-							style={{
-								border: "1px solid #eee",
-								borderRadius: "6px",
-								padding: "0.75rem 1rem",
-								marginBottom: "0.5rem",
-								listStyle: "none",
-							}}
-						>
+						<li key={comment.id} className="comment-card">
 							{/* 改行を含む本文をそのまま読めるようにする */}
-							<p style={{ margin: "0 0 0.5rem", whiteSpace: "pre-wrap" }}>
-								{comment.body}
-							</p>
-							<p style={{ margin: 0, fontSize: "0.8rem", color: "#666" }}>
+							<p className="comment-body">{comment.body}</p>
+							<p className="comment-date">
 								<time dateTime={comment.created_at}>
 									{formatCreatedAt(comment.created_at)}
 								</time>
@@ -131,7 +118,7 @@ export function CommentSection({
 			  （起票フォームと同じ方針）。
 			*/}
 			{isLoaded && !isSignedIn && (
-				<output style={{ display: "block", color: "#b45309" }}>
+				<output className="notice text-warning">
 					コメントの投稿にはサインインが必要です。
 					<SignInButton mode="modal">
 						<button type="button" className="button-secondary">
@@ -143,7 +130,7 @@ export function CommentSection({
 
 			<form onSubmit={handleSubmit} noValidate>
 				<p className="form-field">
-					<label htmlFor="comment-body" style={{ display: "block" }}>
+					<label htmlFor="comment-body" className="field-label">
 						コメント
 					</label>
 					<span className="field-hint" id="comment-body-hint">
@@ -161,7 +148,7 @@ export function CommentSection({
 				</p>
 
 				{error && (
-					<output style={{ display: "block", color: "#b91c1c" }}>
+					<output className="notice text-danger">
 						{error}
 						{/* 未ログインが原因なら、その場でサインインできるようにする */}
 						{!isSignedIn && (

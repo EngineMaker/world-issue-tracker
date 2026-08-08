@@ -5,19 +5,11 @@ import Link from "next/link";
 
 export function Header() {
 	return (
-		<header
-			style={{
-				display: "flex",
-				justifyContent: "space-between",
-				alignItems: "center",
-				padding: "1rem",
-				borderBottom: "1px solid #eee",
-			}}
-		>
-			<h1 style={{ margin: 0, fontSize: "1.2rem" }}>
+		<header className="site-header">
+			<h1 className="site-header-title">
 				<Link href="/">World Issue Tracker</Link>
 			</h1>
-			<nav style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+			<nav className="site-header-nav">
 				<Link href="/issues/new">Issue を起票</Link>
 				<SignedIn>
 					{/*

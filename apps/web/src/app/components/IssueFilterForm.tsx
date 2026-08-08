@@ -41,7 +41,7 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 				<legend>絞り込み・並べ替え</legend>
 
 				<p className="form-field">
-					<label htmlFor="filter-q" style={{ display: "block" }}>
+					<label htmlFor="filter-q" className="field-label">
 						キーワード
 					</label>
 					<span className="field-hint" id="filter-q-hint">
@@ -59,7 +59,7 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 				</p>
 
 				<p className="form-field">
-					<label htmlFor="filter-scope" style={{ display: "block" }}>
+					<label htmlFor="filter-scope" className="field-label">
 						スコープ
 					</label>
 					<span className="field-hint" id="filter-scope-hint">
@@ -81,7 +81,7 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 				</p>
 
 				<p className="form-field">
-					<label htmlFor="filter-status" style={{ display: "block" }}>
+					<label htmlFor="filter-status" className="field-label">
 						ステータス
 					</label>
 					<span className="field-hint" id="filter-status-hint">
@@ -103,7 +103,7 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 				</p>
 
 				<p className="form-field">
-					<label htmlFor="filter-category" style={{ display: "block" }}>
+					<label htmlFor="filter-category" className="field-label">
 						カテゴリ
 					</label>
 					<span className="field-hint" id="filter-category-hint">
@@ -131,7 +131,7 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 				</p>
 
 				<p className="form-field">
-					<label htmlFor="filter-sort" style={{ display: "block" }}>
+					<label htmlFor="filter-sort" className="field-label">
 						並べ替え
 					</label>
 					<span className="field-hint" id="filter-sort-hint">

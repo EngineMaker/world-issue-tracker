@@ -124,7 +124,7 @@ export default function NewIssuePage() {
 	};
 
 	return (
-		<main style={{ padding: "1rem", maxWidth: "40rem" }}>
+		<main className="narrow-page">
 			<h1>Issue を起票する</h1>
 			<p>気づいた「地球のバグ」を登録します。</p>
 
@@ -134,7 +134,7 @@ export default function NewIssuePage() {
 			  実際の送信は下のボタンでサインインへ誘導する。
 			*/}
 			{isLoaded && !isSignedIn && (
-				<output style={{ display: "block", color: "#b45309" }}>
+				<output className="notice text-warning">
 					投稿にはサインインが必要です。
 					<SignInButton mode="modal">
 						<button type="button" className="button-secondary">
@@ -291,14 +291,14 @@ export default function NewIssuePage() {
 					</p>
 
 					{geolocation === "failed" && (
-						<output style={{ display: "block", color: "#b45309" }}>
+						<output className="notice text-warning">
 							位置情報を取得できませんでした。緯度経度を直接入力してください。
 						</output>
 					)}
 				</fieldset>
 
 				{submitError && (
-					<output style={{ display: "block", color: "#b91c1c" }}>
+					<output className="notice text-danger">
 						{submitError}
 						{/*
 						  未ログインが原因なら、その場でサインインできるようにする。
@@ -366,7 +366,7 @@ function FormField({
 }) {
 	return (
 		<p className="form-field">
-			<label htmlFor={id} style={{ display: "block" }}>
+			<label htmlFor={id} className="field-label">
 				{label}
 			</label>
 			<span className="field-hint" id={`${id}-hint`}>
@@ -374,9 +374,7 @@ function FormField({
 			</span>
 			{children}
 			{errors && errors.length > 0 && (
-				<output style={{ display: "block", color: "#b91c1c" }}>
-					{errors.join(" / ")}
-				</output>
+				<output className="notice text-danger">{errors.join(" / ")}</output>
 			)}
 		</p>
 	);

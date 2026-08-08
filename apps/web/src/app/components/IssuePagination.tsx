@@ -50,7 +50,7 @@ export function IssuePagination({
 					</Link>
 				) : (
 					// リンクにしないことで「これ以上戻れない」ことを見せる
-					<span style={{ color: "#999" }}>前のページ</span>
+					<span className="text-faint">前のページ</span>
 				)}
 				{" / "}
 				<span>
@@ -62,7 +62,7 @@ export function IssuePagination({
 						次のページ
 					</Link>
 				) : (
-					<span style={{ color: "#999" }}>次のページ</span>
+					<span className="text-faint">次のページ</span>
 				)}
 			</p>
 		</nav>
