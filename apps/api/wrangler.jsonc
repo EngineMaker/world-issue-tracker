@@ -26,5 +26,24 @@
 			"database_name": "world-issue-tracker",
 			"database_id": "546b760c-e10c-45cf-8c40-f3ec508e82fa"
 		}
+	],
+	// Issue に添付する写真の置き場（#65）。
+	//
+	// バケットは `wrangler r2 bucket create world-issue-tracker-photos` で
+	// 作成済み。画像の実体はここに置き、D1 の行にはキーだけを持つ
+	// （理由は `migrations/0007_add_photo.sql`）。
+	//
+	// 公開バケットにはしていない。R2 のカスタムドメインを当てれば
+	// 画像を直接配信できるが、そうすると Worker を通らない経路ができ、
+	// 通報による非公開化（#65 の範囲外）を後から入れる余地が無くなる。
+	// 配信は `GET /issues/:id/photo` が仲介する。
+	//
+	// `preview_bucket_name` は置いていない。`wrangler dev` / テストは
+	// ローカルのシミュレーション（miniflare）で完結し、実バケットを触らない。
+	"r2_buckets": [
+		{
+			"binding": "PHOTOS",
+			"bucket_name": "world-issue-tracker-photos"
+		}
 	]
 }

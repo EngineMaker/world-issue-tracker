@@ -60,6 +60,50 @@ export const CreateIssueSchema = z.object({
 });
 export type CreateIssue = z.infer<typeof CreateIssueSchema>;
 
+/**
+ * 添付できる写真の最大バイト数（#65）。
+ *
+ * ブラウザ側は送る前に縮小するので、通常はここに当たらない。それでも
+ * サーバー側で必ず検査する。縮小は迂回できるため防御にはならず、
+ * 上限が無いと Worker が任意サイズのボディを R2 へ書けてしまう。
+ *
+ * 5MB にしているのは、長辺 1600px の JPEG なら余裕をもって収まり、
+ * かつ縮小をすり抜けた原寸の写真も概ね拾えるため。
+ */
+export const ISSUE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * 受け付ける画像の MIME タイプ。
+ *
+ * ブラウザ側は JPEG に変換して送るので通常は `image/jpeg` だけだが、
+ * 変換を経ない経路（curl、将来の別クライアント）も想定して、
+ * ブラウザが確実に描画できる形式を並べている。
+ *
+ * SVG を含めていないのは、SVG がスクリプトを埋め込める文書形式であり、
+ * 同一オリジンで配信すると XSS の経路になるため。配信側
+ * （`GET /issues/:id/photo`）はこの集合に無い値を保存させない前提で
+ * `Content-Type` を組み立てる。
+ */
+export const ISSUE_PHOTO_CONTENT_TYPES = [
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+] as const;
+
+export type IssuePhotoContentType = (typeof ISSUE_PHOTO_CONTENT_TYPES)[number];
+
+/**
+ * 保存してよい画像の MIME タイプかどうか。
+ *
+ * `Content-Type` は `image/jpeg; charset=binary` のようにパラメータが
+ * 付くことがあるため、呼び出し側は `;` より前を取り出してから渡すこと。
+ */
+export function isIssuePhotoContentType(
+	value: string,
+): value is IssuePhotoContentType {
+	return (ISSUE_PHOTO_CONTENT_TYPES as readonly string[]).includes(value);
+}
+
 export const UpdateIssueSchema = z
 	.object({
 		title: z.string().min(1).max(200).optional(),
