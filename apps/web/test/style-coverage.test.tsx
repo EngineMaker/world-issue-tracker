@@ -68,6 +68,37 @@ const css = readFileSync(GLOBALS_CSS, "utf8");
 const cssWithoutComments = stripBlockComments(css);
 
 /**
+ * `open` の位置から、対応する閉じ括弧までの中身を返す。
+ *
+ * **正規表現でネストした括弧は取れない。** `\{([^}]*)\}` は最初の `}` で
+ * 止まるので、`className={clsx({ active: x })}` のような式は途中で切れ、
+ * そこに書かれたクラス名が **黙って検査から消える**（レビュー指摘）。
+ * 同じ形で `<form[^>]*>` はアロー関数の `=>` で切れる。
+ *
+ * 数えて取ればどちらも起きない。閉じ括弧が見つからなければ null。
+ */
+function balancedSlice(
+	source: string,
+	open: number,
+	openChar: string,
+	closeChar: string,
+): string | null {
+	let depth = 0;
+	for (let i = open; i < source.length; i++) {
+		const char = source[i];
+		if (char === openChar) {
+			depth++;
+		} else if (char === closeChar) {
+			depth--;
+			if (depth === 0) {
+				return source.slice(open + 1, i);
+			}
+		}
+	}
+	return null;
+}
+
+/**
  * tsx が `className` に書いているクラス名を、ファイルごとに集める。
  *
  * `className="a b"` に加えて `className={cond ? "a" : "b"}` も拾う。
@@ -76,37 +107,89 @@ const cssWithoutComments = stripBlockComments(css);
  * 見ると、条件分岐の中に書いたクラスが黙って検査から外れる
  * （検査が効いているように見えて効いていない状態になる）。
  *
+ * 式の範囲は括弧を数えて取る。正規表現で `\{([^}]*)\}` と書くと、式の中に
+ * `}` が現れた時点（`clsx({ active: x })` など）でマッチが壊れ、
+ * **そのクラス名が検査から静かに外れる**。テンプレートリテラルを禁じる
+ * 下の検査もバッククォートが無ければ発火しないので、2 枚とも同時に抜ける。
+ *
  * 拾えるのは式の中の文字列リテラルまで。テンプレートリテラルで組み立てる
  * 形（`` `card ${variant}` ``）は拾えないので、その書き方が入ったことを
  * 下の「クラス名が文字列リテラルとして読める」で落とす。
  */
 function classNamesIn(source: string): string[] {
 	const withoutComments = stripBlockComments(source);
-	const names: string[] = [];
-	// `className="..."` と `className={... "..." ...}` の両方。
-	// 後者は式の中に現れる文字列リテラルをすべて拾う
-	for (const match of withoutComments.matchAll(
-		/className=(?:"([^"]*)"|\{([^}]*)\})/g,
-	)) {
-		const literals =
-			match[1] !== undefined
-				? [match[1]]
-				: [...(match[2] ?? "").matchAll(/"([^"]*)"/g)].map((m) => m[1]);
-		for (const literal of literals) {
-			names.push(...literal.split(/\s+/).filter((name) => name.length > 0));
+	const literals: string[] = [];
+
+	// `className="..."` の静的な形
+	for (const match of withoutComments.matchAll(/className="([^"]*)"/g)) {
+		literals.push(match[1]);
+	}
+
+	// `className={...}` の式。中に現れる文字列リテラルをすべて拾う
+	for (const expression of classNameExpressions(withoutComments)) {
+		for (const literal of expression.matchAll(/"([^"]*)"/g)) {
+			literals.push(literal[1]);
 		}
+	}
+
+	const names: string[] = [];
+	for (const literal of literals) {
+		names.push(...literal.split(/\s+/).filter((name) => name.length > 0));
 	}
 	return names;
 }
 
-/** CSS のセレクタ列に現れるクラス名をすべて集める */
+/**
+ * `className={...}` の式の中身を、括弧の対応を数えて取り出す。
+ *
+ * 式の中に `}` が現れる書き方（`clsx({ active: x })` など）でも
+ * 途中で切れない。ここが切れると、その式に書かれたクラス名が
+ * 突き合わせから静かに消える。
+ */
+function classNameExpressions(source: string): string[] {
+	const expressions: string[] = [];
+	for (const match of source.matchAll(/className=\{/g)) {
+		const open = match.index + match[0].length - 1;
+		const expression = balancedSlice(source, open, "{", "}");
+		if (expression !== null) {
+			expressions.push(expression);
+		}
+	}
+	return expressions;
+}
+
+/**
+ * 実際にスタイルが当たるクラス名を集める。
+ *
+ * 「セレクタ列に名前が現れるか」ではなく「**そのクラスに宣言が届くか**」を
+ * 見る。名前が現れるだけを条件にすると、定義したふりが通ってしまう
+ * （レビューで見つかった見逃し）:
+ *
+ * - `.issue-filters {}` — ブロックだけあって中身が空
+ * - `.issue-cards:not(.issue-filters) { ... }` — 否定の中に現れるだけで、
+ *   むしろそのクラスを持つ要素は対象外
+ *
+ * どちらも「CSS を書いた」とは言えないが、名前は現れている。
+ * 宣言を 1 つ以上持つルールに限り、かつ否定（`:not(...)`）の中は外す。
+ *
+ * ここで拾えない見逃しも残る。`@media print { .foo { ... } }` は印刷時にしか
+ * 効かないが「定義あり」になる。宣言が届く条件（メディアクエリの評価）は
+ * 実際の描画環境に依存し、静的な走査では判定できないため踏み込まない。
+ */
 function definedClassNames(): Set<string> {
 	const names = new Set<string>();
-	// 宣言ブロックの中（プロパティ値）を除いてセレクタ側だけを見る。
-	// `content: ".foo"` のような値をクラス定義と誤認しないため
-	const selectorText = cssWithoutComments.replace(/\{[^{}]*\}/g, "{}");
-	for (const match of selectorText.matchAll(/\.([\w-]+)/g)) {
-		names.add(match[1]);
+	for (const match of cssWithoutComments.matchAll(
+		/(?<=^|[{}])\s*([^{}]+?)\{([^{}]*)\}/g,
+	)) {
+		// 宣言が 1 つも無いルール（`.foo {}`）はスタイルを当てていない
+		if (!/[\w-]+\s*:/.test(match[2])) {
+			continue;
+		}
+		// `:not(.foo)` の中の名前は、むしろそのクラスを除外している
+		const selectors = match[1].replace(/:not\([^)]*\)/g, "");
+		for (const name of selectors.matchAll(/\.([\w-]+)/g)) {
+			names.add(name[1]);
+		}
 	}
 	return names;
 }
@@ -125,6 +208,12 @@ describe("tsx が出すクラスに CSS の定義がある", () => {
 	 * - `.issue-pagination`（一覧のページ送り）
 	 *
 	 * どちらも #86 より前から tsx にあり、385 件のテストをすべてすり抜けていた。
+	 *
+	 * **この検査が見るのは「宣言が 1 つでも届くか」までで、その中身が
+	 * 十分かは見ない。** 破綻を止めるための最小の定義（`.issue-pagination` の
+	 * `margin-top` だけ、など）を置くと、以後このクラスについては
+	 * 何も言わなくなる。デザインを当てる #95 では、ここを通ることを
+	 * 「見た目が決まっている」の根拠にしないこと（レビュー指摘）。
 	 */
 	const defined = definedClassNames();
 
@@ -265,10 +354,45 @@ describe("フォームの入力欄がスタイルの届く場所に置かれて�
 	 */
 	const INPUT_ELEMENTS = /<(input|textarea|select)\b/;
 
+	/**
+	 * `<form ...>` の開きタグを、属性の値まで含めて取り出す。
+	 *
+	 * `<form\b[^>]*>` では取れない。**属性値の中の `>` で切れる**ため、
+	 * `<form onSubmit={(e) => submit(e)} className="issue-form">` は
+	 * `<form onSubmit={(e) =>` までしか拾えず、実装が正しいのに
+	 * 「issue-form が無い」と落ちる（レビュー指摘。属性の並び順を
+	 * 強制する制約が意図せず入っていた）。
+	 *
+	 * 属性値の `{...}` は括弧を数えて丸ごと飛ばし、その外側の `>` を終端とする。
+	 */
+	function formOpenTags(source: string): string[] {
+		const tags: string[] = [];
+		for (const match of source.matchAll(/<form\b/g)) {
+			let i = match.index + match[0].length;
+			while (i < source.length) {
+				const char = source[i];
+				if (char === "{") {
+					const expression = balancedSlice(source, i, "{", "}");
+					if (expression === null) {
+						break;
+					}
+					i += expression.length + 2;
+					continue;
+				}
+				if (char === ">") {
+					tags.push(source.slice(match.index, i + 1));
+					break;
+				}
+				i++;
+			}
+		}
+		return tags;
+	}
+
 	for (const file of tsxFiles) {
 		const relative = file.slice(APP_DIR.length + 1);
 		const source = stripBlockComments(readFileSync(file, "utf8"));
-		const formTags = [...source.matchAll(/<form\b[^>]*>/g)].map((m) => m[0]);
+		const formTags = formOpenTags(source);
 		if (formTags.length === 0) {
 			continue;
 		}
@@ -303,9 +427,11 @@ describe("クラス名が文字列リテラルとして読める", () => {
 		const relative = file.slice(APP_DIR.length + 1);
 		const source = stripBlockComments(readFileSync(file, "utf8"));
 		it(`${relative} は className を組み立てずに書いている`, () => {
-			const composed = [...source.matchAll(/className=\{([^}]*)\}/g)]
-				.map((m) => m[1])
-				.filter((expression) => /[`]/.test(expression));
+			// 式の範囲は上と同じく括弧を数えて取る。`\{([^}]*)\}` だと
+			// 式の中の `}` で切れ、その後ろにあるバッククォートを見落とす
+			const composed = classNameExpressions(source).filter((expression) =>
+				/[`]/.test(expression),
+			);
 			expect(
 				composed,
 				"className がテンプレートリテラルで組み立てられており、" +
@@ -324,11 +450,33 @@ describe("手で見る手順が残っている", () => {
 	 * 中身が正しいかは機械では見られないので、**確認軸が消えていないこと**
 	 * だけを見る。Issue #96 が挙げた軸（幅 360px / 日本語・英語 /
 	 * キーボードのみ）と、#93 で実際に壊れていた 4 箇所を残す。
+	 *
+	 * 見られるのは軸の見出しが在ることまで。「横スクロールは確認しない」の
+	 * ように中身を骨抜きにされても落ちない。`toContain` による存在検査である
+	 * 以上ここは避けられないので、限界として明示しておく。
 	 */
 	const checklistPath = join(DOCS_DIR, "visual-check.md");
 
-	it("視覚確認の手順書がある", () => {
-		expect(() => statSync(checklistPath)).not.toThrow();
+	/*
+	 * 手順書は 1 回だけ読む。各テストで readFileSync を呼ぶと、パスが
+	 * 壊れたときに ENOENT が 9 件同時に出て、**手順書が消されたのか
+	 * 参照パスが壊れたのかを区別できない**（レビュー指摘）。
+	 * ここで読んで、読めたかどうかを下の 1 件だけで判定する。
+	 */
+	let checklist: string | null = null;
+	let readError: unknown = null;
+	try {
+		checklist = readFileSync(checklistPath, "utf8");
+	} catch (error) {
+		readError = error;
+	}
+
+	it("視覚確認の手順書を読める", () => {
+		expect(
+			readError,
+			`${checklistPath} が読めない。手順書が消されたか、` +
+				`テストからの相対パスが壊れている`,
+		).toBeNull();
 	});
 
 	for (const axis of [
@@ -342,8 +490,12 @@ describe("手で見る手順が残っている", () => {
 		"横スクロール",
 	]) {
 		it(`手順書に「${axis}」の確認軸が残っている`, () => {
-			const doc = readFileSync(checklistPath, "utf8");
-			expect(doc).toContain(axis);
+			// 読めていないことは上の 1 件が報告済み。ここで重ねて落とすと
+			// 原因が 9 件に散らばって読みにくくなる
+			if (checklist === null) {
+				return;
+			}
+			expect(checklist).toContain(axis);
 		});
 	}
 });
