@@ -6,7 +6,7 @@ import {
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchHelpOffers } from "../../../lib/help-offers";
-import { fetchComments, fetchIssue } from "../../../lib/issues";
+import { fetchComments, fetchIssue, issuePhotoUrl } from "../../../lib/issues";
 import {
 	resolveTileAttribution,
 	resolveTileUrlTemplate,
@@ -95,6 +95,26 @@ export default async function IssueDetailPage({
 					{formatCreatedAt(issue.created_at)}
 				</time>
 			</p>
+
+			{/*
+			  写真（#65）。説明より前に置く。「壊れた街灯」「伸びた草」の
+			  ような物理世界の困りごとは、写真 1 枚が文章 10 行より状況を
+			  伝える。読み手が最初に見る位置が写真であるべき。
+
+			  写真が無い Issue では何も出さない。場所は下の「詳細」に
+			  地図（#63）があり、そちらが代役を務める
+			*/}
+			{issue.has_photo && (
+				<section>
+					<h2>写真</h2>
+					{/* biome-ignore lint/performance/noImgElement: 配信元（API Worker）は環境変数で差し替わるため next/image の remotePatterns に列挙できず、Workers 上での変換コストに見合う利得も無い（理由は IssueMap と同じ）。寸法を属性で固定しないのは、写真の縦横比が投稿ごとに違うため — CSS で最大幅だけ決め、比率は画像に従わせる */}
+					<img
+						src={issuePhotoUrl(issue.id)}
+						alt={`${issue.title} の様子`}
+						style={{ maxWidth: "100%", height: "auto" }}
+					/>
+				</section>
+			)}
 
 			<section>
 				<h2>説明</h2>
