@@ -118,7 +118,7 @@ export function StatusUnavailable({ status }: { status: IssueStatusType }) {
 		<section aria-labelledby="issue-status-heading">
 			<h2 id="issue-status-heading">ステータス</h2>
 			<p>{STATUS_LABELS[status]}</p>
-			<p style={{ color: "#b45309" }}>
+			<p className="text-warning">
 				ステータスを変更できるかどうかを確認できませんでした。 この Issue
 				を起票した方は、ページを再読み込みしてください。
 			</p>
@@ -242,14 +242,12 @@ export function StatusControl({
 			</p>
 
 			{updated && (
-				<output style={{ display: "block", color: "#15803d" }}>
+				<output className="notice text-success">
 					ステータスを「{STATUS_LABELS[status]}」に更新しました。
 				</output>
 			)}
 
-			{error && (
-				<output style={{ display: "block", color: "#b91c1c" }}>{error}</output>
-			)}
+			{error && <output className="notice text-danger">{error}</output>}
 		</section>
 	);
 }

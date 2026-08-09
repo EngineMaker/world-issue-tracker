@@ -23,11 +23,11 @@ export function MyIssueList({ result }: { result: FetchMyIssuesResult }) {
 			// ここに来るのはセッションが切れたときか URL を直接開いたとき。
 			// どちらもサインインし直せば解決するので、そう案内する。
 			return (
-				<div style={{ padding: "0.5rem 0" }}>
-					<p style={{ margin: "0 0 0.25rem" }}>
+				<div className="notice-block">
+					<p className="block-message">
 						自分が起票した Issue を見るにはサインインが必要です。
 					</p>
-					<p style={{ margin: 0, fontSize: "0.85rem", color: "#666" }}>
+					<p className="block-detail text-soft">
 						画面右上の「Sign In」からサインインすると、ここに表示されます。
 					</p>
 				</div>
@@ -35,18 +35,18 @@ export function MyIssueList({ result }: { result: FetchMyIssuesResult }) {
 		}
 
 		return (
-			<div style={{ color: "#b00", padding: "0.5rem 0" }}>
-				<p style={{ margin: "0 0 0.25rem" }}>
+			<div className="error-block">
+				<p className="block-message">
 					Issue を取得できませんでした。時間をおいて再度お試しください。
 				</p>
-				<p style={{ margin: 0, fontSize: "0.85rem" }}>{result.error}</p>
+				<p className="block-detail">{result.error}</p>
 			</div>
 		);
 	}
 
 	if (result.issues.length === 0) {
 		return (
-			<p style={{ color: "#666" }}>
+			<p className="text-soft">
 				まだ Issue を起票していません。
 				<Link href="/issues/new">最初の 1 件を書いてみる</Link>
 			</p>
@@ -55,10 +55,10 @@ export function MyIssueList({ result }: { result: FetchMyIssuesResult }) {
 
 	return (
 		<>
-			<p style={{ color: "#666", fontSize: "0.85rem" }}>
+			<p className="list-summary">
 				{result.total} 件中 {result.issues.length} 件を表示
 			</p>
-			<ul style={{ padding: 0, margin: 0 }}>
+			<ul className="issue-cards">
 				{result.issues.map((issue) => (
 					<IssueCard key={issue.id} issue={issue} />
 				))}
