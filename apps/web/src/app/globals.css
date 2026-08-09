@@ -528,6 +528,39 @@ main p {
 	font-size: var(--text-sm);
 }
 
+/*
+ * 一覧の絞り込みフォームとページ送り（Issue #96）。
+ *
+ * どちらも tsx が `className` を出しているのに、globals.css に定義が
+ * 1 行も無かった。既存のテスト 385 件はすべて通っていた —
+ * 直書きの色もインライン style も無く、描画結果にクラス名も出ているので、
+ * 「値が正しいか」を見る検査には引っかかりようがない。
+ * **指定が存在しないことだけが、誰にも見えていなかった。**
+ *
+ * ここは破綻を止める範囲に留めている。まとまりとして認識できる枠と、
+ * 前後との間隔だけを与える（どの見た目を目指すかは #94 / #95 で決まる）。
+ */
+
+.issue-filters {
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: var(--space-3) var(--space-4);
+	margin-bottom: var(--space-4);
+}
+
+/*
+ * 絞り込みの各項目。`.form-field` の 1.25rem は縦に 5 項目並ぶこの
+ * フォームでは間延びするので、絞り込みの中だけ詰める
+ */
+.issue-filters .form-field {
+	margin-bottom: var(--space-3);
+}
+
+/* ページ送りは一覧の末尾に置く。上の最後のカードとくっつかないよう離す */
+.issue-pagination {
+	margin-top: var(--space-4);
+}
+
 /* カードを並べる ul。素の ul はタグを横に並べるスタイルなので打ち消す */
 .issue-cards {
 	display: block;
@@ -705,7 +738,8 @@ main p {
 	 */
 	.issue-card,
 	.comment-card,
-	.location {
+	.location,
+	.issue-filters {
 		padding-left: var(--space-3);
 		padding-right: var(--space-3);
 	}
