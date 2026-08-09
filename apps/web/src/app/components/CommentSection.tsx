@@ -129,7 +129,14 @@ export function CommentSection({
 				</output>
 			)}
 
-			<form onSubmit={handleSubmit} noValidate>
+			{/*
+			  `.issue-form` は起票フォーム専用の見た目ではなく、入力要素の
+			  スタイルを閉じ込めるためのスコープ（globals.css のコメント参照）。
+			  これが無いと textarea に幅の指定がまったく当たらず、
+			  2000 文字書ける入力欄がブラウザ既定の `cols` 幅（約 3 行分）で
+			  表示されていた（Issue #93）
+			*/}
+			<form className="issue-form" onSubmit={handleSubmit} noValidate>
 				<p className="form-field">
 					<label htmlFor="comment-body" className="field-label">
 						{messages.comments.label}
