@@ -1,3 +1,4 @@
+import { getUiMessages } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import {
 	fetchIssues,
@@ -5,6 +6,7 @@ import {
 	parseIssueFilters,
 	type RawSearchParams,
 } from "../../lib/issues";
+import { getLocale } from "../../lib/locale";
 import { IssueFilterForm } from "../components/IssueFilterForm";
 import { IssueList } from "../components/IssueList";
 import { IssuePagination } from "../components/IssuePagination";
@@ -28,14 +30,16 @@ export default async function IssuesPage({
 	// Next.js 15 以降 `searchParams` は Promise で渡る
 	searchParams: Promise<RawSearchParams>;
 }) {
+	const locale = await getLocale();
+	const messages = getUiMessages(locale);
 	const filters = parseIssueFilters(await searchParams);
 	const result = await fetchIssues({ limit: PAGE_SIZE, filters });
 
 	return (
 		<main>
-			<h1>Issue 一覧</h1>
+			<h1>{messages.issuesPage.heading}</h1>
 
-			<IssueFilterForm filters={filters} />
+			<IssueFilterForm filters={filters} locale={locale} />
 
 			{/*
 			  絞り込みの結果 0 件になったときに「まだ Issue がありません」とだけ
@@ -44,12 +48,12 @@ export default async function IssuesPage({
 			*/}
 			{result.ok && result.issues.length === 0 && hasActiveFilters(filters) ? (
 				<p className="text-soft">
-					条件に合う Issue はありませんでした。 条件をゆるめるか、
-					<Link href="/issues">条件をすべて解除</Link>
-					してみてください。
+					{messages.issuesPage.noMatch}
+					<Link href="/issues">{messages.filterForm.clear}</Link>
+					{messages.issuesPage.noMatchSuffix}
 				</p>
 			) : (
-				<IssueList result={result} />
+				<IssueList result={result} locale={locale} />
 			)}
 
 			{result.ok ? (
@@ -58,13 +62,14 @@ export default async function IssuesPage({
 					total={result.total}
 					limit={result.limit}
 					offset={result.offset}
+					locale={locale}
 				/>
 			) : null}
 
 			<p>
-				<Link href="/issues/new">Issue を書く</Link>
+				<Link href="/issues/new">{messages.issuesPage.writeIssue}</Link>
 				{" / "}
-				<Link href="/">トップへ戻る</Link>
+				<Link href="/">{messages.issuesPage.backToHome}</Link>
 			</p>
 		</main>
 	);

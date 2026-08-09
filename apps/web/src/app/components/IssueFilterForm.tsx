@@ -1,5 +1,6 @@
 import {
 	DEFAULT_LOCALE,
+	getUiMessages,
 	ISSUE_SCOPE_LABELS,
 	ISSUE_SEARCH_MAX_LENGTH,
 	ISSUE_SORT_LABELS,
@@ -7,14 +8,11 @@ import {
 	IssueScope,
 	IssueSort,
 	IssueStatus,
+	type Locale,
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import { ISSUE_CATEGORY_SUGGESTIONS } from "../../lib/api";
 import { hasActiveFilters, type IssueFilters } from "../../lib/issues";
-
-const SCOPE_LABELS = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
-const STATUS_LABELS = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
-const SORT_LABELS = ISSUE_SORT_LABELS[DEFAULT_LOCALE];
 
 /**
  * 一覧の絞り込み・並べ替えフォーム。
@@ -34,18 +32,29 @@ const SORT_LABELS = ISSUE_SORT_LABELS[DEFAULT_LOCALE];
  * 未指定として扱う（`q`）か、そもそもこちらで落としてから送る
  * （`parseIssueFilters`）ので、絞り込み無しとして成立する。
  */
-export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
+export function IssueFilterForm({
+	filters,
+	locale = DEFAULT_LOCALE,
+}: {
+	filters: IssueFilters;
+	locale?: Locale;
+}) {
+	const messages = getUiMessages(locale);
+	const scopeLabels = ISSUE_SCOPE_LABELS[locale];
+	const statusLabels = ISSUE_STATUS_LABELS[locale];
+	const sortLabels = ISSUE_SORT_LABELS[locale];
+
 	return (
 		<form method="get" action="/issues" className="issue-filters">
 			<fieldset>
-				<legend>絞り込み・並べ替え</legend>
+				<legend>{messages.filterForm.legend}</legend>
 
 				<p className="form-field">
 					<label htmlFor="filter-q" className="field-label">
-						キーワード
+						{messages.filterForm.keyword}
 					</label>
 					<span className="field-hint" id="filter-q-hint">
-						タイトルと説明から探します。
+						{messages.filterForm.keywordHint}
 					</span>
 					<input
 						id="filter-q"
@@ -53,17 +62,17 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 						name="q"
 						defaultValue={filters.q ?? ""}
 						maxLength={ISSUE_SEARCH_MAX_LENGTH}
-						placeholder="例: 街灯"
+						placeholder={messages.filterForm.keywordPlaceholder}
 						aria-describedby="filter-q-hint"
 					/>
 				</p>
 
 				<p className="form-field">
 					<label htmlFor="filter-scope" className="field-label">
-						スコープ
+						{messages.filterForm.scope}
 					</label>
 					<span className="field-hint" id="filter-scope-hint">
-						どこまで広がる課題かで絞ります。
+						{messages.filterForm.scopeHint}
 					</span>
 					<select
 						id="filter-scope"
@@ -71,10 +80,10 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 						defaultValue={filters.scope ?? ""}
 						aria-describedby="filter-scope-hint"
 					>
-						<option value="">すべて</option>
+						<option value="">{messages.filterForm.all}</option>
 						{IssueScope.options.map((scope) => (
 							<option key={scope} value={scope}>
-								{SCOPE_LABELS[scope].label}
+								{scopeLabels[scope].label}
 							</option>
 						))}
 					</select>
@@ -82,10 +91,10 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 
 				<p className="form-field">
 					<label htmlFor="filter-status" className="field-label">
-						ステータス
+						{messages.filterForm.status}
 					</label>
 					<span className="field-hint" id="filter-status-hint">
-						解決の進み具合で絞ります。
+						{messages.filterForm.statusHint}
 					</span>
 					<select
 						id="filter-status"
@@ -93,10 +102,10 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 						defaultValue={filters.status ?? ""}
 						aria-describedby="filter-status-hint"
 					>
-						<option value="">すべて</option>
+						<option value="">{messages.filterForm.all}</option>
 						{IssueStatus.options.map((status) => (
 							<option key={status} value={status}>
-								{STATUS_LABELS[status]}
+								{statusLabels[status]}
 							</option>
 						))}
 					</select>
@@ -104,14 +113,19 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 
 				<p className="form-field">
 					<label htmlFor="filter-category" className="field-label">
-						カテゴリ
+						{messages.filterForm.category}
 					</label>
 					<span className="field-hint" id="filter-category-hint">
-						起票時と同じ表記で完全一致します。候補から選ぶと確実です。
+						{messages.filterForm.categoryHint}
 					</span>
 					{/*
 					  起票フォームと同じ `<datalist>` を使う。候補に無いカテゴリで
-					  起票された Issue も探せるよう、自由入力は残す
+					  起票された Issue も探せるよう、自由入力は残す。
+
+					  候補そのものは翻訳していない。API に保存されているカテゴリは
+					  起票時の文字列そのままで、完全一致で絞り込むため。訳した候補を
+					  出すと、選んでも 1 件も引っかからない検索になる（Issue #82 の
+					  範囲外として PR に記載）
 					*/}
 					<input
 						id="filter-category"
@@ -120,7 +134,7 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 						defaultValue={filters.category ?? ""}
 						maxLength={100}
 						list="filter-category-suggestions"
-						placeholder="例: 道路・交通"
+						placeholder={messages.filterForm.categoryPlaceholder}
 						aria-describedby="filter-category-hint"
 					/>
 					<datalist id="filter-category-suggestions">
@@ -132,10 +146,10 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 
 				<p className="form-field">
 					<label htmlFor="filter-sort" className="field-label">
-						並べ替え
+						{messages.filterForm.sort}
 					</label>
 					<span className="field-hint" id="filter-sort-hint">
-						投稿された日時の順に並べます。
+						{messages.filterForm.sortHint}
 					</span>
 					<select
 						id="filter-sort"
@@ -145,7 +159,7 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 					>
 						{IssueSort.options.map((sort) => (
 							<option key={sort} value={sort}>
-								{SORT_LABELS[sort]}
+								{sortLabels[sort]}
 							</option>
 						))}
 					</select>
@@ -153,7 +167,7 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 
 				<p>
 					<button type="submit" className="button-primary">
-						絞り込む
+						{messages.filterForm.submit}
 					</button>
 					{/*
 					  条件が付いているときだけ解除の導線を出す。
@@ -163,7 +177,7 @@ export function IssueFilterForm({ filters }: { filters: IssueFilters }) {
 					{hasActiveFilters(filters) ? (
 						<>
 							{" "}
-							<Link href="/issues">条件をすべて解除</Link>
+							<Link href="/issues">{messages.filterForm.clear}</Link>
 						</>
 					) : null}
 				</p>

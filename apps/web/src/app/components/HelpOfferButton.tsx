@@ -1,6 +1,11 @@
 "use client";
 
 import { SignInButton, useAuth } from "@clerk/nextjs";
+import {
+	DEFAULT_LOCALE,
+	getUiMessages,
+	type Locale,
+} from "@world-issue-tracker/shared";
 import { useState } from "react";
 import {
 	fetchHelpOffers,
@@ -23,22 +28,21 @@ import {
 export function HelpOfferButton({
 	issueId,
 	initialSummary,
+	locale = DEFAULT_LOCALE,
 }: {
 	issueId: string;
 	initialSummary: HelpOfferSummary | null;
+	locale?: Locale;
 }) {
 	const { isLoaded, isSignedIn, getToken } = useAuth();
+	const messages = getUiMessages(locale);
 
 	const [summary, setSummary] = useState(initialSummary);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
 	if (!summary) {
-		return (
-			<p className="text-warning">
-				手伝いの表明を取得できませんでした。時間をおいて再度お試しください。
-			</p>
-		);
+		return <p className="text-warning">{messages.helpOffer.fetchFailed}</p>;
 	}
 
 	/**
@@ -80,7 +84,7 @@ export function HelpOfferButton({
 			setError(
 				err instanceof HelpOfferError
 					? err.message
-					: "予期しないエラーが発生しました。時間をおいて再度お試しください。",
+					: messages.common.unexpectedError,
 			);
 		} finally {
 			setIsSubmitting(false);
@@ -89,12 +93,12 @@ export function HelpOfferButton({
 
 	return (
 		<section aria-labelledby="help-offers-heading">
-			<h2 id="help-offers-heading">解決に動く人</h2>
+			<h2 id="help-offers-heading">{messages.helpOffer.heading}</h2>
 
 			<p>
 				{summary.total === 0
-					? "まだ誰も手を挙げていません。"
-					: `${summary.total} 人が「手伝います」と表明しています。`}
+					? messages.helpOffer.none
+					: messages.helpOffer.count(summary.total)}
 			</p>
 
 			{/*
@@ -106,10 +110,10 @@ export function HelpOfferButton({
 				<p>
 					<SignInButton mode="modal">
 						<button type="button" className="button-primary">
-							手伝います
+							{messages.helpOffer.offer}
 						</button>
 					</SignInButton>
-					<span> — 表明するにはサインインが必要です</span>
+					<span>{messages.helpOffer.signInHint}</span>
 				</p>
 			) : (
 				<p>
@@ -122,13 +126,13 @@ export function HelpOfferButton({
 						disabled={isSubmitting || !isLoaded}
 					>
 						{isSubmitting
-							? "送信中…"
+							? messages.common.submitting
 							: summary.viewerOffered
-								? "表明を取り消す"
-								: "手伝います"}
+								? messages.helpOffer.withdraw
+								: messages.helpOffer.offer}
 					</button>
 					{summary.viewerOffered && (
-						<span> — あなたはこの Issue に手を挙げています</span>
+						<span>{messages.helpOffer.youOffered}</span>
 					)}
 				</p>
 			)}
@@ -137,7 +141,7 @@ export function HelpOfferButton({
 
 			{summary.offers.length > 0 && (
 				<>
-					<h3>表明した人</h3>
+					<h3>{messages.helpOffer.offerersHeading}</h3>
 					{/*
 					  API が持っているのは Clerk の内部 ID までで、表示名は無い。
 					  ID をそのまま並べても読み手には意味が無く、かといって誰が
@@ -149,8 +153,8 @@ export function HelpOfferButton({
 						{summary.offers.map((offer) => (
 							<li key={offer.id}>
 								{offer.user_id === summary.viewerUserId
-									? "あなた"
-									: shortUserId(offer.user_id)}
+									? messages.helpOffer.you
+									: shortUserId(offer.user_id, locale)}
 							</li>
 						))}
 					</ul>
@@ -166,7 +170,10 @@ export function HelpOfferButton({
  * `user_2abc...` の形なので、接頭辞を落として先頭 8 文字だけを出す。
  * 個人を特定する情報ではないが、同じ人が複数回出ていないことは確認できる。
  */
-export function shortUserId(userId: string): string {
+export function shortUserId(
+	userId: string,
+	locale: Locale = DEFAULT_LOCALE,
+): string {
 	const withoutPrefix = userId.replace(/^user_/, "");
-	return `参加者 ${withoutPrefix.slice(0, 8)}`;
+	return getUiMessages(locale).helpOffer.participant(withoutPrefix.slice(0, 8));
 }

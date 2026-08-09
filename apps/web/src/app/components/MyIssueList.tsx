@@ -1,3 +1,8 @@
+import {
+	DEFAULT_LOCALE,
+	getUiMessages,
+	type Locale,
+} from "@world-issue-tracker/shared";
 import Link from "next/link";
 import type { FetchMyIssuesResult } from "../../lib/issues";
 import { IssueCard } from "./IssueList";
@@ -16,7 +21,15 @@ import { IssueCard } from "./IssueList";
  *
  * 取得そのものは呼び出し側（`page.tsx`）が行う。
  */
-export function MyIssueList({ result }: { result: FetchMyIssuesResult }) {
+export function MyIssueList({
+	result,
+	locale = DEFAULT_LOCALE,
+}: {
+	result: FetchMyIssuesResult;
+	locale?: Locale;
+}) {
+	const messages = getUiMessages(locale);
+
 	if (!result.ok) {
 		if (result.unauthorized) {
 			// ヘッダの「自分の Issue」リンクはサインイン中しか出ないため、
@@ -24,11 +37,9 @@ export function MyIssueList({ result }: { result: FetchMyIssuesResult }) {
 			// どちらもサインインし直せば解決するので、そう案内する。
 			return (
 				<div className="notice-block">
-					<p className="block-message">
-						自分が起票した Issue を見るにはサインインが必要です。
-					</p>
+					<p className="block-message">{messages.myIssueList.signInRequired}</p>
 					<p className="block-detail text-soft">
-						画面右上の「Sign In」からサインインすると、ここに表示されます。
+						{messages.myIssueList.signInHint}
 					</p>
 				</div>
 			);
@@ -36,9 +47,7 @@ export function MyIssueList({ result }: { result: FetchMyIssuesResult }) {
 
 		return (
 			<div className="error-block">
-				<p className="block-message">
-					Issue を取得できませんでした。時間をおいて再度お試しください。
-				</p>
+				<p className="block-message">{messages.issueList.fetchFailed}</p>
 				<p className="block-detail">{result.error}</p>
 			</div>
 		);
@@ -47,8 +56,8 @@ export function MyIssueList({ result }: { result: FetchMyIssuesResult }) {
 	if (result.issues.length === 0) {
 		return (
 			<p className="text-soft">
-				まだ Issue を起票していません。
-				<Link href="/issues/new">最初の 1 件を書いてみる</Link>
+				{messages.myIssueList.empty}
+				<Link href="/issues/new">{messages.myIssueList.writeFirst}</Link>
 			</p>
 		);
 	}
@@ -56,11 +65,11 @@ export function MyIssueList({ result }: { result: FetchMyIssuesResult }) {
 	return (
 		<>
 			<p className="list-summary">
-				{result.total} 件中 {result.issues.length} 件を表示
+				{messages.issueList.countSummary(result.total, result.issues.length)}
 			</p>
 			<ul className="issue-cards">
 				{result.issues.map((issue) => (
-					<IssueCard key={issue.id} issue={issue} />
+					<IssueCard key={issue.id} issue={issue} locale={locale} />
 				))}
 			</ul>
 		</>

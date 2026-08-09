@@ -1,4 +1,9 @@
 import {
+	DEFAULT_LOCALE,
+	getUiMessages,
+	type Locale,
+} from "@world-issue-tracker/shared";
+import {
 	latitudeToTileY,
 	longitudeToTileX,
 	MAP_ZOOM,
@@ -47,6 +52,7 @@ export function IssueMap({
 	title,
 	tileUrlTemplate,
 	attribution,
+	locale = DEFAULT_LOCALE,
 }: {
 	latitude: number;
 	longitude: number;
@@ -56,6 +62,8 @@ export function IssueMap({
 	tileUrlTemplate: string | null;
 	/** 配信元が要求する帰属表示。無ければ null。 */
 	attribution: string | null;
+	/** 読み上げ用ラベルの言語。地図そのものは言語に依らない */
+	locale?: Locale;
 }) {
 	// 配信元が決まっていないときは何も描かない。
 	// 適当な既定値でタイルを取りに行くと、規約違反のトラフィックを出すか、
@@ -95,7 +103,7 @@ export function IssueMap({
 			<div
 				className="issue-map-view"
 				role="img"
-				aria-label={`${title} の位置。緯度 ${latitude} / 経度 ${longitude}`}
+				aria-label={getUiMessages(locale).map.label(title, latitude, longitude)}
 				style={{ width: VIEW_SIZE, height: VIEW_SIZE }}
 			>
 				<div
