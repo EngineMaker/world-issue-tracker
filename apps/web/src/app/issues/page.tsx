@@ -7,6 +7,7 @@ import {
 	type RawSearchParams,
 } from "../../lib/issues";
 import { getLocale } from "../../lib/locale";
+import { EmptyState } from "../components/EmptyState";
 import { IssueFilterForm } from "../components/IssueFilterForm";
 import { IssueList } from "../components/IssueList";
 import { IssuePagination } from "../components/IssuePagination";
@@ -47,11 +48,10 @@ export default async function IssuesPage({
 			  条件が付いているときは、条件のせいであることをここで伝える
 			*/}
 			{result.ok && result.issues.length === 0 && hasActiveFilters(filters) ? (
-				<p className="text-soft">
-					{messages.issuesPage.noMatch}
-					<Link href="/issues">{messages.filterForm.clear}</Link>
-					{messages.issuesPage.noMatchSuffix}
-				</p>
+				<EmptyState
+					message={messages.issuesPage.noMatch}
+					action={<Link href="/issues">{messages.filterForm.clear}</Link>}
+				/>
 			) : (
 				<IssueList result={result} locale={locale} />
 			)}
@@ -66,9 +66,12 @@ export default async function IssuesPage({
 				/>
 			) : null}
 
-			<p>
+			{/*
+			  ページ末尾の導線（#95）。区切りの「/」を CSS の余白に置き換えた。
+			  文字で区切ると、狭い画面で区切りだけが行頭に残る
+			*/}
+			<p className="page-nav">
 				<Link href="/issues/new">{messages.issuesPage.writeIssue}</Link>
-				{" / "}
 				<Link href="/">{messages.issuesPage.backToHome}</Link>
 			</p>
 		</main>

@@ -17,10 +17,16 @@
 import { describe, expect, it } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import {
+	ISSUE_STATUS_LABELS,
+	ISSUE_STATUS_VALUES,
+} from "@world-issue-tracker/shared";
 import { renderToStaticMarkup } from "react-dom/server";
 import { IssueList } from "../src/app/components/IssueList";
 import { MyIssueList } from "../src/app/components/MyIssueList";
+import { StatusPill } from "../src/app/components/StatusPill";
 import IssueDetailPage from "../src/app/issues/[id]/page";
+import IssuesPage from "../src/app/issues/page";
 
 const APP_DIR = join(import.meta.dir, "../src/app");
 const GLOBALS_CSS = join(APP_DIR, "globals.css");
@@ -50,6 +56,19 @@ const css = readFileSync(GLOBALS_CSS, "utf8");
  */
 function stripBlockComments(source: string): string {
 	return source.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+/**
+ * 描画結果がそのクラスを出しているか。
+ *
+ * クラス名は境界付きで照合する。`toContain("issue-card")` だと
+ * `issue-card-title` にも一致して、カード本体のクラスが消えていても通る
+ * （`map.test.tsx` のマーカーの照合と同じ考え方）。
+ */
+function hasClass(html: string, className: string): boolean {
+	return [...html.matchAll(/class="([^"]*)"/g)].some((m) =>
+		m[1].split(/\s+/).includes(className),
+	);
 }
 
 /** `--token: 値;` の宣言を拾う。`var(--token)` の参照側とは区別する */
@@ -84,12 +103,77 @@ describe("トークンの定義", () => {
 		"--text-base": "1rem",
 		"--text-sm": "0.875rem",
 		"--text-xs": "0.75rem",
+
+		/*
+		 * 見出しの段階（#94 の結論）。5 段階には畳まず、見出し専用に
+		 * 3 段階を持つ。#86 は「畳むかどうかは後続の Issue で決める」と
+		 * 申し送っていた。
+		 *
+		 * --text-heading-site だけは 1.2rem → 1.0625rem に変更した。
+		 * サイト名が本文より大きい必要はなく、狭い画面でヘッダが崩れる一因
+		 * でもあるため。#94 が認めた既存値の変更はこの 1 つだけ
+		 */
+		"--text-heading-page": "2rem",
+		"--text-heading-section": "1.25rem",
+		"--text-heading-site": "1.0625rem",
+
 		"--space-1": "0.25rem",
 		"--space-2": "0.5rem",
 		"--space-3": "0.75rem",
 		"--space-4": "1rem",
 		"--space-5": "1.25rem",
 		"--space-6": "1.5rem",
+
+		/*
+		 * ここから下は #94 で足すことが決まったトークン（#95 で実装）。
+		 *
+		 * #94 は「影 / 角丸の段階 / 遷移 / 行間 / 面で使う色の段階を足す」
+		 * ところまでを文章で決めており、それぞれの実寸は #95 で置いた。
+		 * 以後はこの表が正本になるので、実装に合わせて書き換えないこと。
+		 */
+
+		/* 節の区切り。0.25rem 刻みの続きにせず、用途の名前で 2 段階だけ持つ */
+		"--space-section": "2rem",
+		"--space-page": "3rem",
+
+		/* 行間。見出しは字が大きい分だけ本文より詰める */
+		"--leading-body": "1.7",
+		"--leading-heading": "1.3",
+
+		/* 角丸。以前は 4px / 6px が場当たりで混在していた */
+		"--radius-sm": "6px",
+		"--radius-md": "10px",
+		"--radius-pill": "999px",
+
+		/* 影。色は無彩色の黒ではなく --ink に寄せて、緑がかった面と喧嘩させない */
+		"--shadow-raised": "0 1px 2px rgba(28, 36, 32, 0.06)",
+		"--shadow-hover": "0 4px 12px rgba(28, 36, 32, 0.1)",
+
+		/* 遷移。速い方は色や影、遅い方は寸法が動くもの */
+		"--transition-fast": "120ms ease-out",
+		"--transition-slow": "200ms ease-out",
+
+		/*
+		 * ライフサイクル 6 段階の色。進むほど --accent（緑）に近づく。
+		 * 下の「ピルの文字色がコントラスト比を満たす」が、この組み合わせを
+		 * 実際に計算して検証している
+		 */
+		"--status-open": "#55605a",
+		"--status-open-soft": "#eef1ef",
+		"--status-triaged": "#7a5f14",
+		"--status-triaged-soft": "#fbf3de",
+		"--status-in-progress": "#1f6f8b",
+		"--status-in-progress-soft": "#e4f1f6",
+		"--status-review": "#2a6f5c",
+		"--status-review-soft": "#e6f2ee",
+		"--status-resolved": "#146b4c",
+		"--status-resolved-soft": "#e8f5ef",
+		"--status-closed": "#5d6763",
+		"--status-closed-soft": "#f2f4f3",
+
+		/* ヒーローと空の状態にだけ使う暖色。緑と競合しないよう彩度を抑えてある */
+		"--sun": "#a1522a",
+		"--sun-soft": "#fdf1e7",
 	};
 
 	for (const [name, value] of Object.entries(expected)) {
@@ -141,12 +225,20 @@ describe("インライン style が残っていない", () => {
 	 * `style={{ ... }}` のうち、値が定数でないもの（テンプレートリテラルや
 	 * 変数を含むもの）は対象外。地図（`IssueMap`）のタイル配置は座標から
 	 * 計算した px を渡していて、CSS へ移せない。
+	 *
+	 * #95 で `fill` / `index` を除外に足した。どちらもデータから算出した値を
+	 * CSS カスタムプロパティ（`--fill` / `--depth`）へ渡すためのもので、
+	 * 色や寸法の直書きではない。CSS 側に段数を書くと、段階が増えたときに
+	 * 片方だけ古くなるので、あえてこの向きにしている
 	 */
 	function constantInlineStyles(source: string): string[] {
 		return [...source.matchAll(/style=\{\{([^}]*)\}\}/g)]
 			.map((m) => m[1])
 			.filter(
-				(body) => !/[`$]|\b(VIEW_SIZE|TILE_SIZE|offsetX|offsetY)\b/.test(body),
+				(body) =>
+					!/[`$]|\b(VIEW_SIZE|TILE_SIZE|offsetX|offsetY|fill|index)\b/.test(
+						body,
+					),
 			);
 	}
 
@@ -182,7 +274,12 @@ describe("文字サイズは 5 段階に収まっている", () => {
 		"field-hint": "var(--text-sm)",
 		"comment-date": "var(--text-xs)",
 		"issue-map-attribution": "var(--text-xs)",
-		"issue-card-title": "var(--text-base)",
+		/*
+		 * カードの見出しは #95 で --text-base（本文と同じ）から --text-lg へ上げた。
+		 * 一覧はカードが並ぶ画面で、タイトルが説明文と同じ重みだと
+		 * どこから読めばよいか分からない（#94 の見本もタイトルを一段強くしている）
+		 */
+		"issue-card-title": "var(--text-lg)",
 	};
 
 	for (const [className, token] of Object.entries(sizeBindings)) {
@@ -298,12 +395,6 @@ describe("同じ意味の色が同じ値で描かれる", () => {
  * （`map.test.tsx` のマーカーの照合と同じ考え方）。
  */
 describe("部品が期待するクラスを出している", () => {
-	function hasClass(html: string, className: string): boolean {
-		return [...html.matchAll(/class="([^"]*)"/g)].some((m) =>
-			m[1].split(/\s+/).includes(className),
-		);
-	}
-
 	const sampleIssue = {
 		id: "ebbcf9d7680ad57cedeeb513a90d461f",
 		title: "駅前の街灯が切れている",
@@ -345,12 +436,351 @@ describe("部品が期待するクラスを出している", () => {
 		expect(hasClass(html, "list-summary")).toBe(true);
 	});
 
-	it("0 件の案内は text-soft で描く", () => {
+	/*
+	 * 0 件の案内（#95 で `.empty-state` に統一）。
+	 *
+	 * 以前は `<p className="text-soft">` の 1 行で、しかも出す場所ごとに
+	 * 書き方が割れていた（4 通り）。まとまりとして出す形に変えたので、
+	 * クラスの存在と、色がトークンを指していることの両方を見る。
+	 * クラスだけを見ると、ルールごと消えても描画結果の class 属性は
+	 * 変わらないため通ってしまう（上の .issue-card と同じ考え方）
+	 */
+	it("0 件の案内は empty-state で描く", () => {
 		const html = renderToStaticMarkup(
 			<IssueList
 				result={{ ok: true, issues: [], total: 0, limit: 20, offset: 0 }}
 			/>,
 		);
-		expect(hasClass(html, "text-soft")).toBe(true);
+		expect(hasClass(html, "empty-state")).toBe(true);
+	});
+
+	it(".empty-state は本文より弱い色（--ink-soft）で描く", () => {
+		const rule = css.match(/\.empty-state\s*\{([^}]*)\}/);
+		expect(rule, ".empty-state の定義が見つからない").not.toBeNull();
+		expect(rule?.[1]).toContain("color: var(--ink-soft)");
+	});
+});
+
+/*
+ * ここから下は #95（見本を各画面に当てる）で足した部品の検証。
+ *
+ * 見た目そのもの（ピクセル）は見ていない（それは #96 の担当）。
+ * 見ているのは「Issue の受け入れ条件として機械的に確かめられること」で、
+ * 具体的にはコントラスト比・色以外の手がかり・トークン経由かの 3 つ。
+ */
+
+/** `#rrggbb` の相対輝度（WCAG 2.1 の定義） */
+function relativeLuminance(hex: string): number {
+	const value = hex.replace("#", "");
+	const channels = [0, 2, 4].map(
+		(i) => Number.parseInt(value.slice(i, i + 2), 16) / 255,
+	);
+	const [r, g, b] = channels.map((c) =>
+		c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4,
+	);
+	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** 2 色のコントラスト比（1〜21）。順序は問わない */
+function contrastRatio(a: string, b: string): number {
+	const [lighter, darker] = [relativeLuminance(a), relativeLuminance(b)].sort(
+		(x, y) => y - x,
+	);
+	return (lighter + 0.05) / (darker + 0.05);
+}
+
+describe("ライフサイクルの段階が読み取れる", () => {
+	const tokens = declaredTokens(css);
+
+	/*
+	 * ピルは色で段階を示すが、文字が読めなければ意味が無い。
+	 * Issue #95 の受け入れ条件は「本文 4.5:1 以上」。
+	 * ピルの文字は本文と同じ扱いなので、この基準を全段階に課す。
+	 *
+	 * 値を目で確かめるのではなく計算する。手で計算した結果をコメントに
+	 * 書く方式だと、後から色を変えたときにコメントだけが古くなる
+	 */
+	for (const status of ISSUE_STATUS_VALUES) {
+		// CSS のトークン名は `in_progress` ではなく `in-progress`
+		const name = status.replace(/_/g, "-");
+
+		it(`${status} のピルは文字色と下地が 4.5:1 以上`, () => {
+			const foreground = tokens.get(`--status-${name}`);
+			const background = tokens.get(`--status-${name}-soft`);
+			expect(foreground, `--status-${name} が無い`).toBeTruthy();
+			expect(background, `--status-${name}-soft が無い`).toBeTruthy();
+
+			const ratio = contrastRatio(foreground ?? "", background ?? "");
+			expect(
+				ratio,
+				`${status} のコントラスト比が ${ratio.toFixed(2)}:1 しかない`,
+			).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+
+	/*
+	 * 色だけに頼らない（#94 が明記した条件）。段階ごとに印の塗りが変わり、
+	 * 色を見分けられなくても順序が読める。
+	 *
+	 * 塗りの割合は段階の並びから算出しているので、実際に描いた結果の
+	 * `--fill` が段階ごとに違うことを見る。CSS の宣言を見るだけだと、
+	 * 全段階が同じ値を渡していても気付けない
+	 */
+	it("段階ごとに印の塗りが変わる（色を見分けられなくても順序が読める）", () => {
+		const fills = ISSUE_STATUS_VALUES.map((status) => {
+			const html = renderToStaticMarkup(<StatusPill status={status} />);
+			return html.match(/--fill:\s*([\d.]+)/)?.[1];
+		});
+
+		// どの段階でも印が出ていること（値が取れない＝印そのものが無い）
+		for (const [index, fill] of fills.entries()) {
+			expect(fill, `${ISSUE_STATUS_VALUES[index]} に印が無い`).toBeTruthy();
+		}
+		// 段階の数だけ違う値になっていること
+		expect(new Set(fills).size).toBe(ISSUE_STATUS_VALUES.length);
+		// 進むほど増えること。順序が読めることがこの印の役目
+		const numbers = fills.map((fill) => Number(fill));
+		for (let i = 1; i < numbers.length; i++) {
+			expect(numbers[i]).toBeGreaterThan(numbers[i - 1]);
+		}
+		// 最初の段階でも 0 にしない。塗りが無いと印が出ていないのと区別できない
+		expect(numbers[0]).toBeGreaterThan(0);
+	});
+
+	/*
+	 * 印は装飾なので読み上げから外す。ラベルの文字列だけが読まれればよく、
+	 * 印まで読ませると「● 受付」のように冗長になる
+	 */
+	it("印は読み上げから外してある", () => {
+		const html = renderToStaticMarkup(<StatusPill status="open" />);
+		expect(html).toMatch(/status-pill-mark[^>]*aria-hidden="true"/);
+	});
+
+	/*
+	 * ピルのラベルは辞書から引く（#82）。ここに写すと、
+	 * 英語表示のときにピルだけ日本語が残る
+	 */
+	for (const locale of ["ja", "en"] as const) {
+		it(`${locale} でのラベルが辞書と一致する`, () => {
+			const html = renderToStaticMarkup(
+				<StatusPill status="in_progress" locale={locale} />,
+			);
+			expect(html).toContain(ISSUE_STATUS_LABELS[locale].in_progress);
+		});
+	}
+});
+
+describe("#95 で足した部品がトークン経由で描かれている", () => {
+	/*
+	 * クラスが存在して中身が空でも描画結果は変わらない。
+	 * 意味を持つ部品については、どのトークンを指しているかを CSS 側で照合する
+	 * （上の .issue-card / .comment-card と同じ考え方）
+	 */
+	const tokenBindings: Record<string, string[]> = {
+		// カードの面と浮き。#94 が「border だけで平面的」と指摘した点
+		"issue-card": [
+			"var(--surface)",
+			"var(--shadow-raised)",
+			"var(--radius-md)",
+		],
+		// 0 件のまとまり。暖色を使うのはヒーローとここだけ
+		"empty-state": ["var(--sun-soft)", "var(--radius-md)"],
+		// ヒーロー。文字は絵に重ねず隣に置く
+		hero: ["var(--sun-soft)", "var(--radius-md)"],
+		// 絞り込み・ページ送りはクラスだけあって定義が無かった
+		"issue-filters": ["var(--surface)", "var(--radius-md)"],
+		// ピルは丸め切る段階を使う
+		"status-pill": ["var(--radius-pill)"],
+	};
+
+	for (const [className, tokens] of Object.entries(tokenBindings)) {
+		for (const token of tokens) {
+			it(`.${className} は ${token} を使う`, () => {
+				const rule = css.match(new RegExp(`\\.${className}\\s*\\{([^}]*)\\}`));
+				expect(rule, `.${className} の定義が見つからない`).not.toBeNull();
+				expect(rule?.[1]).toContain(token);
+			});
+		}
+	}
+
+	/*
+	 * 遷移（#94 が「現在ゼロ。手触りの硬さの主因」とした点）。
+	 * トークンを定義しただけで誰も使っていない状態を弾く
+	 */
+	it("遷移のトークンが実際に使われている", () => {
+		const withoutRoot = stripBlockComments(css).replace(
+			/:root\s*\{[^}]*\}/g,
+			"",
+		);
+		for (const token of ["--transition-fast", "--transition-slow"]) {
+			expect(
+				withoutRoot.includes(`var(${token})`),
+				`${token} を参照している箇所が無い`,
+			).toBe(true);
+		}
+	});
+
+	/*
+	 * 影も同じ。#94 が足すと決めたもので、定義だけあって使われていないと
+	 * 「平面的なまま」の状態が変わらない
+	 */
+	it("影のトークンが実際に使われている", () => {
+		const withoutRoot = stripBlockComments(css).replace(
+			/:root\s*\{[^}]*\}/g,
+			"",
+		);
+		for (const token of ["--shadow-raised", "--shadow-hover"]) {
+			expect(
+				withoutRoot.includes(`var(${token})`),
+				`${token} を参照している箇所が無い`,
+			).toBe(true);
+		}
+	});
+
+	/*
+	 * 入力欄のスタイルは、要素セレクタではなくまとまりのクラスに閉じる
+	 * （globals.css のコメント参照。Clerk のモーダルに当たるため）。
+	 * #95 で対象を .issue-filters / .status-control へ広げたので、
+	 * 素の要素セレクタに戻っていないことを見る
+	 */
+	it("入力要素のスタイルを素の要素セレクタで書いていない", () => {
+		const withoutRoot = stripBlockComments(css);
+		for (const element of ["input", "textarea", "select", "button"]) {
+			// 行頭またはカンマ直後に素の要素名が来るセレクタを探す
+			const bare = new RegExp(
+				`(?:^|,)\\s*${element}\\s*(?::[\\w-]+(?:\\([^)]*\\))?)?\\s*[,{]`,
+				"m",
+			);
+			expect(
+				bare.test(withoutRoot),
+				`${element} を素の要素セレクタで指定している（Clerk のモーダルにも当たる）`,
+			).toBe(false);
+		}
+	});
+
+	/*
+	 * #95 で入力欄を持つまとまりを増やした。フォーカスの見え方が
+	 * まとまりごとに欠けていないことを見る（受け入れ条件の
+	 * 「キーボードのみで全操作ができ、フォーカス位置が常に見える」）
+	 */
+	/*
+	 * セレクタの存在だけを見ると、そのルールの `outline` の宣言を消しても
+	 * 通ってしまう（変異体で実際にすり抜けた）。フォーカス位置が見えるかは
+	 * 「そのまとまりを含むルールが outline を引いているか」で決まるので、
+	 * まとまりごとに、それを含むルールの中身まで見る
+	 */
+	const focusScopes = [
+		".issue-form",
+		".issue-filters",
+		".status-control",
+		".button-primary",
+		".button-secondary",
+		".button-link",
+		"a",
+	];
+
+	for (const scope of focusScopes) {
+		it(`${scope} の :focus-visible がアウトラインを引いている`, () => {
+			const rules = [
+				...stripBlockComments(css).matchAll(
+					/([^{}]*:focus-visible[^{}]*)\{([^}]*)\}/g,
+				),
+			];
+
+			/*
+			 * セレクタ列を分解して、そのまとまりに属するものを含むルールを拾う。
+			 * `a` が `.locale-switcher a` に一致してしまわないよう、
+			 * `a:focus-visible` のように「まとまり名で始まる」ものだけを見る
+			 */
+			const matching = rules.filter((rule) =>
+				rule[1]
+					.split(",")
+					.map((part) => part.trim())
+					.some(
+						(selector) =>
+							selector === `${scope}:focus-visible` ||
+							selector.startsWith(`${scope} `) ||
+							selector.startsWith(`${scope}:`),
+					),
+			);
+
+			expect(
+				matching.length,
+				`${scope} を含む :focus-visible のルールが無い`,
+			).toBeGreaterThan(0);
+			// 中身が空でも、outline 以外しか書いていなくても落ちる
+			expect(
+				matching.some((rule) => /(?:^|;)\s*outline\s*:/.test(rule[2])),
+				`${scope} の :focus-visible に outline の指定が無い`,
+			).toBe(true);
+		});
+	}
+});
+
+/*
+ * 空の状態（#94 が「決めること」に挙げた項目）。
+ *
+ * 見た目が整っているかではなく、**空の画面が行き止まりになっていないか**を見る。
+ * 0 件のときこそ次に何をすればよいかが要る。`EmptyState` の `action` を
+ * 渡し忘れても描画は成立してしまうので、実際に導線が出ているかを確かめる。
+ */
+describe("空の画面が行き止まりになっていない", () => {
+	/** 描画結果に含まれるリンクの遷移先 */
+	function linkTargets(html: string): string[] {
+		return [...html.matchAll(/<a[^>]*href="([^"]*)"/g)].map((m) => m[1]);
+	}
+
+	it("Issue が 1 件も無いときは起票への導線を出す", () => {
+		const html = renderToStaticMarkup(
+			<IssueList
+				result={{ ok: true, issues: [], total: 0, limit: 20, offset: 0 }}
+			/>,
+		);
+		expect(hasClass(html, "empty-state-action"), "次の一歩が出ていない").toBe(
+			true,
+		);
+		expect(linkTargets(html)).toContain("/issues/new");
+	});
+
+	it("自分の Issue が 1 件も無いときも起票への導線を出す", () => {
+		const html = renderToStaticMarkup(
+			<MyIssueList
+				result={{ ok: true, issues: [], total: 0, limit: 20, offset: 0 }}
+			/>,
+		);
+		expect(hasClass(html, "empty-state-action"), "次の一歩が出ていない").toBe(
+			true,
+		);
+		expect(linkTargets(html)).toContain("/issues/new");
+	});
+
+	/*
+	 * 絞り込みの結果 0 件は、投稿が無いのとは意味が違う。
+	 * 次の一歩も「起票する」ではなく「条件を解除する」でなければならない
+	 */
+	it("絞り込みの結果 0 件のときは条件を解除する導線を出す", async () => {
+		const originalFetch = globalThis.fetch;
+		// レスポンスの形は `parseListIssuesResponse`（lib/issues.ts）が決めている。
+		// `{ data, total }` 以外を返すと「形式が想定と異なる」として失敗扱いになり、
+		// 空の状態ではなくエラーの画面が描かれる
+		globalThis.fetch = (async () =>
+			new Response(JSON.stringify({ data: [], total: 0 }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			})) as unknown as typeof globalThis.fetch;
+		try {
+			const html = renderToStaticMarkup(
+				await IssuesPage({
+					searchParams: Promise.resolve({ scope: "personal" }),
+				}),
+			);
+			expect(hasClass(html, "empty-state-action"), "次の一歩が出ていない").toBe(
+				true,
+			);
+			// 条件を解除した先（条件なしの一覧）へ戻れること
+			expect(linkTargets(html)).toContain("/issues");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
 	});
 });

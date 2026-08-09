@@ -76,26 +76,37 @@ function rulesFor(selector: string): string[] {
  *
  * `@media` はネストした波括弧を持つので `[^}]*` では取れない。
  * 開き括弧から数えて対応する閉じ括弧までを手で拾う。
+ *
+ * `max-width` の `@media` が**複数ある前提**で、すべての中身を繋いで返す。
+ * 以前は最初の 1 つだけを見ていたが、#95 で 2 つ目
+ * （`.detail-list` を 1 列に落とすもの）が先に現れた途端、
+ * 「body の余白を詰めているか」を見ていたテストがそちらを見て落ちた。
+ * どの `@media` に書くかは実装の都合で、テストが縛るべきことではない。
  */
-function narrowScreenBlock(): string | null {
-	const opening = cssWithoutComments.match(/@media[^{]*max-width[^{]*\{/);
-	if (!opening?.index) {
-		return null;
-	}
-	let depth = 0;
-	const start = opening.index + opening[0].length;
-	for (let i = start - 1; i < cssWithoutComments.length; i++) {
-		const char = cssWithoutComments[i];
-		if (char === "{") {
-			depth++;
-		} else if (char === "}") {
-			depth--;
-			if (depth === 0) {
-				return cssWithoutComments.slice(start, i);
+function narrowScreenBlocks(): string {
+	const found: string[] = [];
+	for (const opening of cssWithoutComments.matchAll(
+		/@media[^{]*max-width[^{]*\{/g,
+	)) {
+		if (opening.index === undefined) {
+			continue;
+		}
+		let depth = 0;
+		const start = opening.index + opening[0].length;
+		for (let i = start - 1; i < cssWithoutComments.length; i++) {
+			const char = cssWithoutComments[i];
+			if (char === "{") {
+				depth++;
+			} else if (char === "}") {
+				depth--;
+				if (depth === 0) {
+					found.push(cssWithoutComments.slice(start, i));
+					break;
+				}
 			}
 		}
 	}
-	return null;
+	return found.join("\n");
 }
 
 /** 宣言ブロック群のどれかが指定のプロパティを持つか */
@@ -289,10 +300,10 @@ describe("狭い画面で横スクロールが出ない", () => {
 	 * 分岐後の値がそれ以上なら詰めた意味が無いので、上限も見る
 	 */
 	it("狭い画面では body の余白が 2rem より小さくなる", () => {
-		const narrow = narrowScreenBlock();
-		expect(narrow, "max-width の @media の中身が取れない").not.toBeNull();
+		const narrow = narrowScreenBlocks();
+		expect(narrow, "max-width の @media の中身が取れない").not.toBe("");
 
-		const bodyRule = narrow?.match(/(?:^|})\s*body\s*\{([^}]*)\}/);
+		const bodyRule = narrow.match(/(?:^|})\s*body\s*\{([^}]*)\}/);
 		expect(bodyRule, "@media の中で body の余白を詰めていない").not.toBeNull();
 
 		const padding = bodyRule?.[1].match(/padding\s*:\s*([^;]+);/)?.[1].trim();

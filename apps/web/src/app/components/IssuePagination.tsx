@@ -52,7 +52,12 @@ export function IssuePagination({
 
 	return (
 		<nav aria-label={messages.pagination.label} className="issue-pagination">
-			<p>
+			{/*
+			  区切りの「/」は CSS の余白（.issue-pagination-inner の gap）に
+			  置き換えた（Issue #95）。文字で区切ると、狭い画面で区切り文字だけが
+			  行頭に取り残される。読み上げでも「スラッシュ」が読まれて邪魔になる
+			*/}
+			<p className="issue-pagination-inner">
 				{hasPrevious ? (
 					<Link href={buildIssuesHref({ ...filters, offset: previousOffset })}>
 						{messages.pagination.previous}
@@ -61,9 +66,9 @@ export function IssuePagination({
 					// リンクにしないことで「これ以上戻れない」ことを見せる
 					<span className="text-faint">{messages.pagination.previous}</span>
 				)}
-				{" / "}
-				<span>{messages.pagination.position(currentPage, totalPages)}</span>
-				{" / "}
+				<span className="issue-pagination-position">
+					{messages.pagination.position(currentPage, totalPages)}
+				</span>
 				{hasNext ? (
 					<Link href={buildIssuesHref({ ...filters, offset: nextOffset })}>
 						{messages.pagination.next}

@@ -7,6 +7,8 @@ import {
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import type { FetchIssuesResult, PublicIssue } from "../../lib/issues";
+import { EmptyState } from "./EmptyState";
+import { StatusPill } from "./StatusPill";
 
 /**
  * 画面に出すスコープ・ステータスのラベル。
@@ -61,7 +63,6 @@ export function IssueCard({
 	locale?: Locale;
 }) {
 	const scopes = ISSUE_SCOPE_LABELS[locale];
-	const statuses = ISSUE_STATUS_LABELS[locale];
 
 	return (
 		<li className="issue-card">
@@ -81,18 +82,22 @@ export function IssueCard({
 			  投稿本文の翻訳は Issue #66（LLM 翻訳）の担当
 			*/}
 			<p className="issue-card-description">{issue.description}</p>
+			{/*
+			  補助情報（Issue #95）。以前は「/」で繋いだ 1 行だったが、
+			  狭い画面では区切り文字の位置で折り返して読めなくなっていた。
+			  項目ごとの要素にして CSS（.issue-meta）が並べる形にすると、
+			  日本語と英語で語の長さが変わっても項目の単位で折り返す。
+
+			  ステータスだけはピル（StatusPill）で出す。一覧を眺めたときに
+			  どこまで進んでいるかが読み取れることが #94 の狙い
+			*/}
 			<p className="issue-meta">
-				<span>{scopes[issue.scope].label}</span>
-				{" / "}
-				<span>{statuses[issue.status]}</span>
+				<StatusPill status={issue.status} locale={locale} />
+				<span className="issue-meta-item">{scopes[issue.scope].label}</span>
 				{issue.category ? (
-					<>
-						{" / "}
-						<span>{issue.category}</span>
-					</>
+					<span className="issue-meta-item">{issue.category}</span>
 				) : null}
-				{" / "}
-				<time dateTime={issue.created_at}>
+				<time className="issue-meta-item" dateTime={issue.created_at}>
 					{formatCreatedAt(issue.created_at)}
 				</time>
 			</p>
@@ -129,7 +134,19 @@ export function IssueList({
 	}
 
 	if (result.issues.length === 0) {
-		return <p className="text-soft">{messages.issueList.empty}</p>;
+		/*
+		 * 0 件（#95）。以前は本文と同じ 1 行だけで、取得に失敗したのか
+		 * 本当に無いのかが見分けにくかった。面を持たせたうえで、
+		 * 空のときにこそ次の一歩（起票する）を出す
+		 */
+		return (
+			<EmptyState
+				message={messages.issueList.empty}
+				action={
+					<Link href="/issues/new">{messages.issueList.emptyAction}</Link>
+				}
+			/>
+		);
 	}
 
 	// 複数ページに分かれているときは「N 件中 M 件」だけではどこを見ているのか

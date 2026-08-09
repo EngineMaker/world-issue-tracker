@@ -336,9 +336,14 @@ const JA_UI_MESSAGES = {
 		actionsLabel: "主な操作",
 		actionsHeading: "まずはここから",
 		viewIssues: "Issue を見る",
-		viewIssuesHint: " — 投稿された困りごとを一覧で読む。ログインは不要です",
+		/*
+		 * 導線の説明。以前は先頭に " — " が入っていたが、#95 でリンクと説明を
+		 * 別々の行に置く形（.action-card）にしたので区切り文字は要らなくなった。
+		 * 文言に区切りを含めると、置き場所を変えるたびに辞書を直すことになる
+		 */
+		viewIssuesHint: "投稿された困りごとを一覧で読む。ログインは不要です",
 		writeIssue: "Issue を書く",
-		writeIssueHint: " — 困っていることを投稿する。投稿にはログインが必要です",
+		writeIssueHint: "困っていることを投稿する。投稿にはログインが必要です",
 		recentHeading: "最近の Issue",
 		viewAll: "すべての Issue を見る",
 		scopesHeading: "Issue の大きさ（スコープ）",
@@ -353,6 +358,12 @@ const JA_UI_MESSAGES = {
 		fetchFailed:
 			"Issue を取得できませんでした。時間をおいて再度お試しください。",
 		empty: "まだ Issue がありません。最初の 1 件を起票してみてください。",
+		/**
+		 * 0 件のときに示す次の一歩（#95）。空の画面で行き止まりにしないための導線。
+		 * `empty` の文中に含めず別のキーにしているのは、リンクにする範囲を
+		 * 画面側で決めるため（文中の一部をリンクにすると訳文で位置が変わる）
+		 */
+		emptyAction: "最初の 1 件を起票する",
 		/** ページ分割されていないときの件数表示 */
 		countSummary: (total: number, shown: number) =>
 			`${total} 件中 ${shown} 件を表示`,
@@ -403,8 +414,15 @@ const JA_UI_MESSAGES = {
 	/** Issue 一覧ページ（`/issues`） */
 	issuesPage: {
 		heading: "Issue 一覧",
-		noMatch: "条件に合う Issue はありませんでした。条件をゆるめるか、",
-		noMatchSuffix: "してみてください。",
+		/*
+		 * 絞り込みの結果 0 件（#95）。以前は `noMatch` と `noMatchSuffix` で
+		 * 文を割り、その間に「条件をすべて解除」のリンクを挟んでいた。
+		 * 語順が言語ごとに違うので文の途中にリンクを差し込む形は成立せず、
+		 * 英語版は "Try loosening them, or " + リンク + "." と不自然な文に
+		 * なっていた。文と導線を分けて、リンクは独立した次の一歩として出す
+		 */
+		noMatch:
+			"条件に合う Issue はありませんでした。条件をゆるめてみてください。",
 		writeIssue: "Issue を書く",
 		backToHome: "トップへ戻る",
 	},
@@ -614,9 +632,9 @@ const EN_UI_MESSAGES: UiMessages = {
 		actionsLabel: "Main actions",
 		actionsHeading: "Start here",
 		viewIssues: "Browse issues",
-		viewIssuesHint: " — read the posted problems. No sign-in required",
+		viewIssuesHint: "Read the posted problems. No sign-in required",
 		writeIssue: "Write an issue",
-		writeIssueHint: " — post what troubles you. Posting requires signing in",
+		writeIssueHint: "Post what troubles you. Posting requires signing in",
 		recentHeading: "Recent issues",
 		viewAll: "See all issues",
 		scopesHeading: "How far an issue reaches (scope)",
@@ -629,6 +647,7 @@ const EN_UI_MESSAGES: UiMessages = {
 	issueList: {
 		fetchFailed: "Could not load issues. Please try again later.",
 		empty: "No issues yet. Be the first to post one.",
+		emptyAction: "Post the first issue",
 		countSummary: (total: number, shown: number) =>
 			`Showing ${shown} of ${total}`,
 		rangeSummary: (total: number, from: number, to: number) =>
@@ -671,8 +690,7 @@ const EN_UI_MESSAGES: UiMessages = {
 
 	issuesPage: {
 		heading: "Issues",
-		noMatch: "No issues matched your filters. Try loosening them, or ",
-		noMatchSuffix: ".",
+		noMatch: "No issues matched your filters. Try loosening them.",
 		writeIssue: "Write an issue",
 		backToHome: "Back to home",
 	},

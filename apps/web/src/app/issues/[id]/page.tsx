@@ -1,8 +1,4 @@
-import {
-	getUiMessages,
-	ISSUE_SCOPE_LABELS,
-	ISSUE_STATUS_LABELS,
-} from "@world-issue-tracker/shared";
+import { getUiMessages, ISSUE_SCOPE_LABELS } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchHelpOffers } from "../../../lib/help-offers";
@@ -17,6 +13,7 @@ import { HelpOfferButton } from "../../components/HelpOfferButton";
 import { formatCreatedAt } from "../../components/IssueList";
 import { IssueMap } from "../../components/IssueMap";
 import { IssueStatusSection } from "../../components/StatusControl";
+import { StatusPill } from "../../components/StatusPill";
 
 /**
  * Issue 詳細ページ。
@@ -47,7 +44,6 @@ export default async function IssueDetailPage({
 	const locale = await getLocale();
 	const messages = getUiMessages(locale);
 	const scopeLabels = ISSUE_SCOPE_LABELS[locale];
-	const statusLabels = ISSUE_STATUS_LABELS[locale];
 
 	const [result, commentsResult, offers] = await Promise.all([
 		fetchIssue(id),
@@ -69,7 +65,7 @@ export default async function IssueDetailPage({
 					<p className="block-message">{messages.issueDetail.retryLater}</p>
 					<p className="block-detail">{result.error}</p>
 				</div>
-				<p>
+				<p className="page-nav">
 					<Link href="/issues">{messages.issueDetail.backToList}</Link>
 				</p>
 			</main>
@@ -88,17 +84,16 @@ export default async function IssueDetailPage({
 			  読み手に伝わらない。ラベルは packages/shared に一本化している
 			*/}
 			<p className="issue-meta">
-				<span>{scope.label}</span>
-				{" / "}
-				<span>{statusLabels[issue.status]}</span>
+				{/*
+				  ステータスはピルで出す（#95）。一覧と同じ部品を使うことで、
+				  一覧から詳細へ移っても同じ Issue が同じ見た目で続く
+				*/}
+				<StatusPill status={issue.status} locale={locale} />
+				<span className="issue-meta-item">{scope.label}</span>
 				{issue.category ? (
-					<>
-						{" / "}
-						<span>{issue.category}</span>
-					</>
+					<span className="issue-meta-item">{issue.category}</span>
 				) : null}
-				{" / "}
-				<time dateTime={issue.created_at}>
+				<time className="issue-meta-item" dateTime={issue.created_at}>
 					{formatCreatedAt(issue.created_at)}
 				</time>
 			</p>
@@ -135,7 +130,12 @@ export default async function IssueDetailPage({
 
 			<section>
 				<h2>{messages.issueDetail.detailsHeading}</h2>
-				<dl>
+				{/*
+				  項目名と値の対（#95）。以前はクラスが無く、ブラウザ既定の
+				  `dd` の字下げだけで対になっていることを示していた。
+				  幅があるときは項目名を左の列に置いて、対応を横並びで見せる
+				*/}
+				<dl className="detail-list">
 					<dt>{messages.issueDetail.scope}</dt>
 					<dd>
 						{scope.label} — {scope.description}
@@ -147,7 +147,9 @@ export default async function IssueDetailPage({
 					  起票者かどうかを確かめてから出す
 					*/}
 					<dt>{messages.issueDetail.status}</dt>
-					<dd>{statusLabels[issue.status]}</dd>
+					<dd>
+						<StatusPill status={issue.status} locale={locale} />
+					</dd>
 
 					<dt>{messages.issueDetail.category}</dt>
 					<dd>{issue.category ?? messages.issueDetail.categoryUnset}</dd>
@@ -217,9 +219,8 @@ export default async function IssueDetailPage({
 			/>
 
 			{/* 読み終えたときに行き止まりにしない */}
-			<p>
+			<p className="page-nav">
 				<Link href="/issues">{messages.issueDetail.backToList}</Link>
-				{" / "}
 				<Link href="/issues/new">{messages.issueDetail.writeIssue}</Link>
 			</p>
 		</main>

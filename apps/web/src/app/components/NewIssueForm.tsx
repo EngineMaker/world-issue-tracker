@@ -478,17 +478,17 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 					type="submit"
 					className="button-primary"
 					disabled={isSubmitting}
+					// 押した直後に何が起きているかを読み上げにも伝える（#95）
+					aria-busy={isSubmitting}
 				>
 					{isSubmitting ? messages.common.submitting : messages.newIssue.submit}
 				</button>
 			</form>
 
 			{/* 書くのをやめたときに行き止まりにしない */}
-			<p>
+			<p className="page-nav">
 				<Link href="/issues">{messages.newIssue.viewIssues}</Link>
-				{" / "}
 				<Link href="/my-issues">{messages.newIssue.myIssues}</Link>
-				{" / "}
 				<Link href="/">{messages.newIssue.backToHome}</Link>
 			</p>
 		</main>
