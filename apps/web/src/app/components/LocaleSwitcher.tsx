@@ -33,14 +33,13 @@ export function LocaleSwitcher({ locale }: { locale: Locale }) {
 	const next = query ? `${pathname}?${query}` : pathname;
 
 	return (
-		<span
-			className="locale-switcher"
-			style={{ fontSize: "0.85rem", display: "flex", gap: "0.4rem" }}
-		>
-			<span style={{ color: "#666" }}>{messages.localeSwitcher.label}:</span>
+		<span className="locale-switcher">
+			<span className="locale-switcher-label">
+				{messages.localeSwitcher.label}:
+			</span>
 			{Locale.options.map((option, index) => (
 				<span key={option}>
-					{index > 0 && <span style={{ color: "#ccc" }}> / </span>}
+					{index > 0 && <span className="locale-switcher-separator"> / </span>}
 					{option === locale ? (
 						// 現在の言語はリンクにしない。押しても何も変わらない導線を出さない
 						<strong aria-current="true">

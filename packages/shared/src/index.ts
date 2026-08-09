@@ -60,6 +60,50 @@ export const CreateIssueSchema = z.object({
 });
 export type CreateIssue = z.infer<typeof CreateIssueSchema>;
 
+/**
+ * 添付できる写真の最大バイト数（#65）。
+ *
+ * ブラウザ側は送る前に縮小するので、通常はここに当たらない。それでも
+ * サーバー側で必ず検査する。縮小は迂回できるため防御にはならず、
+ * 上限が無いと Worker が任意サイズのボディを R2 へ書けてしまう。
+ *
+ * 5MB にしているのは、長辺 1600px の JPEG なら余裕をもって収まり、
+ * かつ縮小をすり抜けた原寸の写真も概ね拾えるため。
+ */
+export const ISSUE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * 受け付ける画像の MIME タイプ。
+ *
+ * ブラウザ側は JPEG に変換して送るので通常は `image/jpeg` だけだが、
+ * 変換を経ない経路（curl、将来の別クライアント）も想定して、
+ * ブラウザが確実に描画できる形式を並べている。
+ *
+ * SVG を含めていないのは、SVG がスクリプトを埋め込める文書形式であり、
+ * 同一オリジンで配信すると XSS の経路になるため。配信側
+ * （`GET /issues/:id/photo`）はこの集合に無い値を保存させない前提で
+ * `Content-Type` を組み立てる。
+ */
+export const ISSUE_PHOTO_CONTENT_TYPES = [
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+] as const;
+
+export type IssuePhotoContentType = (typeof ISSUE_PHOTO_CONTENT_TYPES)[number];
+
+/**
+ * 保存してよい画像の MIME タイプかどうか。
+ *
+ * `Content-Type` は `image/jpeg; charset=binary` のようにパラメータが
+ * 付くことがあるため、呼び出し側は `;` より前を取り出してから渡すこと。
+ */
+export function isIssuePhotoContentType(
+	value: string,
+): value is IssuePhotoContentType {
+	return (ISSUE_PHOTO_CONTENT_TYPES as readonly string[]).includes(value);
+}
+
 export const UpdateIssueSchema = z
 	.object({
 		title: z.string().min(1).max(200).optional(),
@@ -380,6 +424,9 @@ const JA_UI_MESSAGES = {
 		backToList: "Issue 一覧へ戻る",
 		writeIssue: "Issue を書く",
 		descriptionHeading: "説明",
+		photoHeading: "写真",
+		/** 写真の代替テキスト。読み上げで何の写真かが分かるよう題名を添える */
+		photoAlt: (title: string) => `${title} の様子`,
 		detailsHeading: "詳細",
 		scope: "スコープ",
 		status: "ステータス",
@@ -462,6 +509,17 @@ const JA_UI_MESSAGES = {
 		categoryHint:
 			"入力欄をクリックするか文字を入力すると候補が出ます。当てはまるものが無ければ自由に入力してください。後から同じ種類の Issue を探すときの手がかりになります。",
 		categoryPlaceholder: "例: 道路・交通",
+		photo: "写真（任意）",
+		photoHint:
+			"困りごとが写っている写真を 1 枚まで添付できます。写真は文章より状況が伝わり、手伝う人が判断しやすくなります。大きい写真は送信前に自動で縮小されます。",
+		photoProcessing: "写真を準備しています…",
+		photoPreviewAlt: "選択した写真のプレビュー",
+		photoRemove: "写真を外す",
+		photoTooLarge:
+			"写真のサイズが大きすぎます。別の写真を選ぶか、撮り直してください。",
+		photoUnreadable:
+			"この画像は読み込めませんでした。JPEG・PNG・WebP のいずれかの写真を選んでください。",
+		photoNotReady: "写真を準備しています。完了までお待ちください。",
 		locationLegend: "場所",
 		locationHint:
 			"困りごとが起きている場所の座標です。「現在地から入力」を押すと、ブラウザが位置情報の使用許可を確認します（許可すると緯度経度が自動で入ります）。現地にいないときは、地図サービスで目的の地点を右クリックすると座標を調べられます。",
@@ -632,6 +690,8 @@ const EN_UI_MESSAGES: UiMessages = {
 		backToList: "Back to the issue list",
 		writeIssue: "Write an issue",
 		descriptionHeading: "Description",
+		photoHeading: "Photo",
+		photoAlt: (title: string) => `Photo of ${title}`,
 		detailsHeading: "Details",
 		scope: "Scope",
 		status: "Status",
@@ -706,6 +766,18 @@ const EN_UI_MESSAGES: UiMessages = {
 		categoryHint:
 			"Click the field or start typing to see suggestions. If none fit, type your own. It becomes a clue when looking for similar issues later.",
 		categoryPlaceholder: "e.g. Roads and transport",
+		photo: "Photo (optional)",
+		photoHint:
+			"You can attach up to one photo showing the problem. A photo conveys the situation better than text and helps people decide whether they can act. Large photos are resized automatically before sending.",
+		photoProcessing: "Preparing the photo…",
+		photoPreviewAlt: "Preview of the selected photo",
+		photoRemove: "Remove photo",
+		photoTooLarge:
+			"This photo is too large. Choose another photo, or take a new one.",
+		photoUnreadable:
+			"This image could not be read. Choose a JPEG, PNG, or WebP photo.",
+		photoNotReady:
+			"The photo is still being prepared. Please wait until it is done.",
 		locationLegend: "Location",
 		locationHint:
 			"The coordinates of where the problem is. Pressing “Use my location” asks the browser for permission to use your location (allowing it fills in the latitude and longitude). If you are not on site, right-click the spot in a map service to look up its coordinates.",

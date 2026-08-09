@@ -59,7 +59,7 @@ export function IssuePagination({
 					</Link>
 				) : (
 					// リンクにしないことで「これ以上戻れない」ことを見せる
-					<span style={{ color: "#999" }}>{messages.pagination.previous}</span>
+					<span className="text-faint">{messages.pagination.previous}</span>
 				)}
 				{" / "}
 				<span>{messages.pagination.position(currentPage, totalPages)}</span>
@@ -69,7 +69,7 @@ export function IssuePagination({
 						{messages.pagination.next}
 					</Link>
 				) : (
-					<span style={{ color: "#999" }}>{messages.pagination.next}</span>
+					<span className="text-faint">{messages.pagination.next}</span>
 				)}
 			</p>
 		</nav>

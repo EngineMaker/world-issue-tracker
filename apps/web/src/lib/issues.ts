@@ -33,6 +33,14 @@ export type PublicIssue = {
 	category: string | null;
 	created_at: string;
 	updated_at: string;
+	/**
+	 * 写真が添付されているか（#65）。
+	 *
+	 * 画像そのものの URL ではなく有無だけが返る。R2 のオブジェクトキーは
+	 * 内部の識別子で公開されないため、画像は `issuePhotoUrl()` が組み立てる
+	 * `GET /issues/:id/photo` から読む。
+	 */
+	has_photo: boolean;
 };
 
 const SCOPES: readonly string[] = IssueScope.options;
@@ -63,6 +71,7 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 		category,
 		created_at,
 		updated_at,
+		has_photo,
 	} = value;
 
 	if (typeof id !== "string") return null;
@@ -77,6 +86,16 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 	if (category !== null && typeof category !== "string") return null;
 	if (typeof created_at !== "string") return null;
 	if (typeof updated_at !== "string") return null;
+	// `has_photo`（#65）は、他の項目と違って欠けていても弾かない。
+	//
+	// Web と API は別 Worker で、デプロイのタイミングがずれる。API が
+	// まだ古いときに一覧ごと「取得できませんでした」にすると、写真という
+	// 付加的な機能のために画面全体が失われる。写真が出ないだけで済ませたい。
+	//
+	// 一方、値が入っているのに真偽値でない（型が変わった）場合は弾く。
+	// 「無い」と「想定と違う形で来た」は別で、後者を握り潰すと API 側の
+	// 変更が画面に静かに影響する。
+	if (has_photo !== undefined && typeof has_photo !== "boolean") return null;
 
 	return {
 		id,
@@ -89,7 +108,22 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 		category,
 		created_at,
 		updated_at,
+		has_photo: has_photo ?? false,
 	};
+}
+
+/**
+ * Issue に添付された写真の URL を組み立てる。
+ *
+ * R2 のバケットは公開しておらず、画像は API の
+ * `GET /issues/:id/photo` からしか読めない（#65）。Worker を必ず通す
+ * ことで、通報された画像の非公開化を後から差し込む余地が残る。
+ *
+ * `has_photo` が false の Issue に対して呼んでも URL は返る（叩けば 404）。
+ * 出し分けは呼び出し側の責務で、この関数は URL の組み立てだけを担う。
+ */
+export function issuePhotoUrl(issueId: string): string {
+	return `${resolveApiBaseUrl()}/issues/${encodeURIComponent(issueId)}/photo`;
 }
 
 /** `GET /issues` のレスポンスを検証する。合わなければ null。 */

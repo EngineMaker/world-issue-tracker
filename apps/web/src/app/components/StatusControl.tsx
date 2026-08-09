@@ -129,7 +129,7 @@ export function StatusUnavailable({
 		<section aria-labelledby="issue-status-heading">
 			<h2 id="issue-status-heading">{messages.statusControl.heading}</h2>
 			<p>{ISSUE_STATUS_LABELS[locale][status]}</p>
-			<p style={{ color: "#b45309" }}>{messages.statusControl.unavailable}</p>
+			<p className="text-warning">{messages.statusControl.unavailable}</p>
 		</section>
 	);
 }
@@ -258,14 +258,12 @@ export function StatusControl({
 			</p>
 
 			{updated && (
-				<output style={{ display: "block", color: "#15803d" }}>
+				<output className="notice text-success">
 					{messages.statusControl.updated(statusLabels[status])}
 				</output>
 			)}
 
-			{error && (
-				<output style={{ display: "block", color: "#b91c1c" }}>{error}</output>
-			)}
+			{error && <output className="notice text-danger">{error}</output>}
 		</section>
 	);
 }

@@ -6,7 +6,7 @@ import {
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchHelpOffers } from "../../../lib/help-offers";
-import { fetchComments, fetchIssue } from "../../../lib/issues";
+import { fetchComments, fetchIssue, issuePhotoUrl } from "../../../lib/issues";
 import { getLocale } from "../../../lib/locale";
 import {
 	resolveTileAttribution,
@@ -65,11 +65,9 @@ export default async function IssueDetailPage({
 		return (
 			<main>
 				<h1>{messages.issueDetail.unavailableHeading}</h1>
-				<div style={{ color: "#b00", padding: "0.5rem 0" }}>
-					<p style={{ margin: "0 0 0.25rem" }}>
-						{messages.issueDetail.retryLater}
-					</p>
-					<p style={{ margin: 0, fontSize: "0.85rem" }}>{result.error}</p>
+				<div className="error-block">
+					<p className="block-message">{messages.issueDetail.retryLater}</p>
+					<p className="block-detail">{result.error}</p>
 				</div>
 				<p>
 					<Link href="/issues">{messages.issueDetail.backToList}</Link>
@@ -89,7 +87,7 @@ export default async function IssueDetailPage({
 			  スコープとステータスは enum の生値（`community` / `open`）のままだと
 			  読み手に伝わらない。ラベルは packages/shared に一本化している
 			*/}
-			<p style={{ color: "#666", fontSize: "0.9rem" }}>
+			<p className="issue-meta">
 				<span>{scope.label}</span>
 				{" / "}
 				<span>{statusLabels[issue.status]}</span>
@@ -105,6 +103,26 @@ export default async function IssueDetailPage({
 				</time>
 			</p>
 
+			{/*
+			  写真（#65）。説明より前に置く。「壊れた街灯」「伸びた草」の
+			  ような物理世界の困りごとは、写真 1 枚が文章 10 行より状況を
+			  伝える。読み手が最初に見る位置が写真であるべき。
+
+			  写真が無い Issue では何も出さない。場所は下の「詳細」に
+			  地図（#63）があり、そちらが代役を務める
+			*/}
+			{issue.has_photo && (
+				<section>
+					<h2>{messages.issueDetail.photoHeading}</h2>
+					{/* biome-ignore lint/performance/noImgElement: 配信元（API Worker）は環境変数で差し替わるため next/image の remotePatterns に列挙できず、Workers 上での変換コストに見合う利得も無い（理由は IssueMap と同じ）。寸法を属性で固定しないのは、写真の縦横比が投稿ごとに違うため — CSS で最大幅だけ決め、比率は画像に従わせる */}
+					<img
+						className="issue-photo"
+						src={issuePhotoUrl(issue.id)}
+						alt={messages.issueDetail.photoAlt(issue.title)}
+					/>
+				</section>
+			)}
+
 			<section>
 				<h2>{messages.issueDetail.descriptionHeading}</h2>
 				{/*
@@ -112,7 +130,7 @@ export default async function IssueDetailPage({
 				  既定の `white-space` だと改行が潰れて 1 段落に見える。
 				  本文そのものは投稿された言語のまま出す（翻訳は #66）
 				*/}
-				<p style={{ whiteSpace: "pre-wrap" }}>{issue.description}</p>
+				<p className="issue-description">{issue.description}</p>
 			</section>
 
 			<section>

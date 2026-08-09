@@ -47,7 +47,7 @@ export default async function IssuesPage({
 			  条件が付いているときは、条件のせいであることをここで伝える
 			*/}
 			{result.ok && result.issues.length === 0 && hasActiveFilters(filters) ? (
-				<p style={{ color: "#666" }}>
+				<p className="text-soft">
 					{messages.issuesPage.noMatch}
 					<Link href="/issues">{messages.filterForm.clear}</Link>
 					{messages.issuesPage.noMatchSuffix}

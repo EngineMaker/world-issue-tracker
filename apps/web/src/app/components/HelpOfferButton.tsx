@@ -42,7 +42,7 @@ export function HelpOfferButton({
 	const [error, setError] = useState<string | null>(null);
 
 	if (!summary) {
-		return <p style={{ color: "#b45309" }}>{messages.helpOffer.fetchFailed}</p>;
+		return <p className="text-warning">{messages.helpOffer.fetchFailed}</p>;
 	}
 
 	/**
@@ -137,9 +137,7 @@ export function HelpOfferButton({
 				</p>
 			)}
 
-			{error && (
-				<output style={{ display: "block", color: "#b91c1c" }}>{error}</output>
-			)}
+			{error && <output className="notice text-danger">{error}</output>}
 
 			{summary.offers.length > 0 && (
 				<>

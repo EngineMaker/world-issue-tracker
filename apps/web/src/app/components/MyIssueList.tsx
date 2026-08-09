@@ -36,11 +36,9 @@ export function MyIssueList({
 			// ここに来るのはセッションが切れたときか URL を直接開いたとき。
 			// どちらもサインインし直せば解決するので、そう案内する。
 			return (
-				<div style={{ padding: "0.5rem 0" }}>
-					<p style={{ margin: "0 0 0.25rem" }}>
-						{messages.myIssueList.signInRequired}
-					</p>
-					<p style={{ margin: 0, fontSize: "0.85rem", color: "#666" }}>
+				<div className="notice-block">
+					<p className="block-message">{messages.myIssueList.signInRequired}</p>
+					<p className="block-detail text-soft">
 						{messages.myIssueList.signInHint}
 					</p>
 				</div>
@@ -48,18 +46,16 @@ export function MyIssueList({
 		}
 
 		return (
-			<div style={{ color: "#b00", padding: "0.5rem 0" }}>
-				<p style={{ margin: "0 0 0.25rem" }}>
-					{messages.issueList.fetchFailed}
-				</p>
-				<p style={{ margin: 0, fontSize: "0.85rem" }}>{result.error}</p>
+			<div className="error-block">
+				<p className="block-message">{messages.issueList.fetchFailed}</p>
+				<p className="block-detail">{result.error}</p>
 			</div>
 		);
 	}
 
 	if (result.issues.length === 0) {
 		return (
-			<p style={{ color: "#666" }}>
+			<p className="text-soft">
 				{messages.myIssueList.empty}
 				<Link href="/issues/new">{messages.myIssueList.writeFirst}</Link>
 			</p>
@@ -68,10 +64,10 @@ export function MyIssueList({
 
 	return (
 		<>
-			<p style={{ color: "#666", fontSize: "0.85rem" }}>
+			<p className="list-summary">
 				{messages.issueList.countSummary(result.total, result.issues.length)}
 			</p>
-			<ul style={{ padding: 0, margin: 0 }}>
+			<ul className="issue-cards">
 				{result.issues.map((issue) => (
 					<IssueCard key={issue.id} issue={issue} locale={locale} />
 				))}

@@ -13,19 +13,11 @@ export function Header({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 	const messages = getUiMessages(locale);
 
 	return (
-		<header
-			style={{
-				display: "flex",
-				justifyContent: "space-between",
-				alignItems: "center",
-				padding: "1rem",
-				borderBottom: "1px solid #eee",
-			}}
-		>
-			<h1 style={{ margin: 0, fontSize: "1.2rem" }}>
+		<header className="site-header">
+			<h1 className="site-header-title">
 				<Link href="/">{messages.common.siteTitle}</Link>
 			</h1>
-			<nav style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+			<nav className="site-header-nav">
 				{/*
 				  言語の切り替え（Issue #82）。全ページに出るヘッダに置く。
 				  読めない言語で表示されている人が、探さずに見つけられる場所が要る

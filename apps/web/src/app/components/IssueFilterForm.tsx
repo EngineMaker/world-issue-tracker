@@ -50,7 +50,7 @@ export function IssueFilterForm({
 				<legend>{messages.filterForm.legend}</legend>
 
 				<p className="form-field">
-					<label htmlFor="filter-q" style={{ display: "block" }}>
+					<label htmlFor="filter-q" className="field-label">
 						{messages.filterForm.keyword}
 					</label>
 					<span className="field-hint" id="filter-q-hint">
@@ -68,7 +68,7 @@ export function IssueFilterForm({
 				</p>
 
 				<p className="form-field">
-					<label htmlFor="filter-scope" style={{ display: "block" }}>
+					<label htmlFor="filter-scope" className="field-label">
 						{messages.filterForm.scope}
 					</label>
 					<span className="field-hint" id="filter-scope-hint">
@@ -90,7 +90,7 @@ export function IssueFilterForm({
 				</p>
 
 				<p className="form-field">
-					<label htmlFor="filter-status" style={{ display: "block" }}>
+					<label htmlFor="filter-status" className="field-label">
 						{messages.filterForm.status}
 					</label>
 					<span className="field-hint" id="filter-status-hint">
@@ -112,7 +112,7 @@ export function IssueFilterForm({
 				</p>
 
 				<p className="form-field">
-					<label htmlFor="filter-category" style={{ display: "block" }}>
+					<label htmlFor="filter-category" className="field-label">
 						{messages.filterForm.category}
 					</label>
 					<span className="field-hint" id="filter-category-hint">
@@ -145,7 +145,7 @@ export function IssueFilterForm({
 				</p>
 
 				<p className="form-field">
-					<label htmlFor="filter-sort" style={{ display: "block" }}>
+					<label htmlFor="filter-sort" className="field-label">
 						{messages.filterForm.sort}
 					</label>
 					<span className="field-hint" id="filter-sort-hint">

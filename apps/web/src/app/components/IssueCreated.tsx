@@ -33,7 +33,7 @@ export function IssueCreated({
 	const messages = getUiMessages(locale);
 
 	return (
-		<output style={{ display: "block", color: "#15803d" }}>
+		<output className="notice text-success">
 			{messages.issueCreated.created(id)}{" "}
 			<Link href={`/issues/${id}`}>{messages.issueCreated.viewCreated}</Link>
 			{" / "}

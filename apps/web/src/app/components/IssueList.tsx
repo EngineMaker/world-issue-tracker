@@ -64,15 +64,7 @@ export function IssueCard({
 	const statuses = ISSUE_STATUS_LABELS[locale];
 
 	return (
-		<li
-			style={{
-				border: "1px solid #eee",
-				borderRadius: "6px",
-				padding: "0.75rem 1rem",
-				marginBottom: "0.75rem",
-				listStyle: "none",
-			}}
-		>
+		<li className="issue-card">
 			{/*
 			  タイトルを詳細ページ (`/issues/[id]`) への入口にする。
 			  コメント欄はその画面にあるため、ここに導線が無いと
@@ -81,15 +73,15 @@ export function IssueCard({
 			  カード全体ではなくタイトルをリンクにする。カード全体を <a> で
 			  包むと、読み上げ時に説明文まで一続きのリンク名として読まれる
 			*/}
-			<h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem" }}>
+			<h3 className="issue-card-title">
 				<Link href={`/issues/${issue.id}`}>{issue.title}</Link>
 			</h3>
 			{/*
 			  タイトルと説明は利用者が投稿した文章なので、そのまま出す。
 			  投稿本文の翻訳は Issue #66（LLM 翻訳）の担当
 			*/}
-			<p style={{ margin: "0 0 0.5rem", color: "#444" }}>{issue.description}</p>
-			<p style={{ margin: 0, fontSize: "0.85rem", color: "#666" }}>
+			<p className="issue-card-description">{issue.description}</p>
+			<p className="issue-meta">
 				<span>{scopes[issue.scope].label}</span>
 				{" / "}
 				<span>{statuses[issue.status]}</span>
@@ -125,21 +117,19 @@ export function IssueList({
 
 	if (!result.ok) {
 		return (
-			<div style={{ color: "#b00", padding: "0.5rem 0" }}>
-				<p style={{ margin: "0 0 0.25rem" }}>
-					{messages.issueList.fetchFailed}
-				</p>
+			<div className="error-block">
+				<p className="block-message">{messages.issueList.fetchFailed}</p>
 				{/*
 				  API が返したエラーの文言は翻訳していない（Issue #82 の範囲外）。
 				  上の一文で何が起きたかは伝わるので、詳細は原文のまま出す
 				*/}
-				<p style={{ margin: 0, fontSize: "0.85rem" }}>{result.error}</p>
+				<p className="block-detail">{result.error}</p>
 			</div>
 		);
 	}
 
 	if (result.issues.length === 0) {
-		return <p style={{ color: "#666" }}>{messages.issueList.empty}</p>;
+		return <p className="text-soft">{messages.issueList.empty}</p>;
 	}
 
 	// 複数ページに分かれているときは「N 件中 M 件」だけではどこを見ているのか
@@ -154,12 +144,12 @@ export function IssueList({
 
 	return (
 		<>
-			<p style={{ color: "#666", fontSize: "0.85rem" }}>
+			<p className="list-summary">
 				{isPaged
 					? messages.issueList.rangeSummary(result.total, from, to)
 					: messages.issueList.countSummary(result.total, result.issues.length)}
 			</p>
-			<ul style={{ padding: 0, margin: 0 }}>
+			<ul className="issue-cards">
 				{result.issues.map((issue) => (
 					<IssueCard key={issue.id} issue={issue} locale={locale} />
 				))}
