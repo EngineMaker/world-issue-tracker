@@ -12,6 +12,7 @@ import {
 	UpdateIssueSchema,
 } from "@world-issue-tracker/shared";
 import { type Context, Hono } from "hono";
+import type { IssueRow } from "../db/rows";
 import type { Bindings } from "../index";
 import { requireAuth, viewerUserId } from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
@@ -65,9 +66,27 @@ export const PUBLIC_ISSUE_COLUMNS = [
  * `photo_content_type` も同じ理由で載せない。画像の形式は配信側の
  * `Content-Type` が伝えるもので、Issue の行の属性として見せる意味が無い。
  */
-const INTERNAL_PHOTO_COLUMNS = ["photo_key", "photo_content_type"] as const;
+const INTERNAL_PHOTO_COLUMNS = [
+	"photo_key",
+	"photo_content_type",
+] as const satisfies readonly (keyof IssueRow)[];
 
-type PublicIssue = Record<(typeof PUBLIC_ISSUE_COLUMNS)[number], unknown> & {
+/**
+ * レスポンスに載る Issue。`IssueRow` から公開カラムだけを取り出し、
+ * 写真の有無を表す派生フィールドを足したもの。
+ *
+ * 素の列は `PUBLIC_ISSUE_COLUMNS` から導いているので、あの配列に無いキー
+ * （`user_id` など）はこの型にも現れない。逆に配列へカラムを足すと、
+ * `IssueRow` に無い名前ならここで型エラーになる。
+ *
+ * ただし型が捕まえるのは「テーブルに存在しないカラム名」までで、
+ * **`user_id` を配列に足す変更は型では止まらない**（実在するカラムなので
+ * `Pick` の制約を満たしてしまう）。何を公開してよいかは人が決める判断であり、
+ * 型で表現できない。そこを守っているのは `test/issues.test.ts` の
+ * `Defence layers` で、実際に足すとあのテストが落ちる。
+ * このリストを触るときは「型が通ったから安全」と判断しないこと。
+ */
+type PublicIssue = Pick<IssueRow, (typeof PUBLIC_ISSUE_COLUMNS)[number]> & {
 	/**
 	 * この Issue に写真が添付されているか。
 	 *
@@ -78,10 +97,19 @@ type PublicIssue = Record<(typeof PUBLIC_ISSUE_COLUMNS)[number], unknown> & {
 };
 
 /**
- * 一覧の SELECT が返す行のうち、カーソル組み立てに使う分だけを型付けしたもの。
- * 残りのカラムは `toPublicIssue` が拾うため、ここでは列挙しない。
+ * `toPublicIssue` が受け取れる行。
+ *
+ * 二段構えの 2 段目は「SELECT が内部フィールドまで拾ってしまった行」を
+ * 落とすためのものなので、`IssueRow` そのもの（= `SELECT *` 相当）も
+ * 公開カラムだけに絞った行も受けられる必要がある。公開カラムだけを必須にし、
+ * 残りは任意として扱う。
+ *
+ * 必須の側を `PublicIssue` ではなく `Pick` で書いているのは、
+ * `PublicIssue` が派生フィールド（`has_photo`）を持つため。あれは
+ * この関数が組み立てるものであって、入力の行には無い。
  */
-type CursorRow = Record<string, unknown> & { created_at: string; id: string };
+type IssueRowLike = Pick<IssueRow, (typeof PUBLIC_ISSUE_COLUMNS)[number]> &
+	Partial<IssueRow>;
 
 /**
  * レスポンスに載せるカラムだけを並べた SELECT / RETURNING 句。
@@ -105,11 +133,11 @@ export const PUBLIC_SELECT = [
  * 空文字が入ることは無い想定だが、`Boolean()` ではなく null 比較にすると
  * 「キーはあるが空」を写真ありと誤って扱うため、真値判定に寄せている。
  */
-export function toPublicIssue(row: Record<string, unknown>): PublicIssue {
+export function toPublicIssue(row: IssueRowLike): PublicIssue {
 	return {
 		...(Object.fromEntries(
 			PUBLIC_ISSUE_COLUMNS.map((column) => [column, row[column]]),
-		) as Record<(typeof PUBLIC_ISSUE_COLUMNS)[number], unknown>),
+		) as Pick<IssueRow, (typeof PUBLIC_ISSUE_COLUMNS)[number]>),
 		has_photo: Boolean(row.photo_key),
 	};
 }
@@ -420,7 +448,7 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 			category ?? null,
 			userId,
 		)
-		.first();
+		.first<IssueRowLike>();
 
 	// INSERT が成功すれば RETURNING は必ず 1 行返すため、ここは実際には通らない。
 	// `first()` の戻り値が null を含む型であることに対する処理で、
@@ -471,7 +499,7 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 		`UPDATE issues SET photo_key = ?, photo_content_type = ? WHERE id = ? RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(key, photoContentType, issueId)
-		.first();
+		.first<IssueRowLike>();
 
 	if (!updated) {
 		console.error("Failed to attach photo to issue", issueId);
@@ -669,7 +697,7 @@ async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 		`SELECT ${PUBLIC_SELECT} FROM issues ${where} ORDER BY created_at ${direction}, id ${direction} LIMIT ? OFFSET ?`,
 	)
 		.bind(...binds, limit + 1, offset)
-		.all<CursorRow>();
+		.all<IssueRowLike>();
 
 	const hasMore = rows.results.length > limit;
 	const page = hasMore ? rows.results.slice(0, limit) : rows.results;
@@ -765,7 +793,7 @@ issues.get("/:id/viewer", clerkAuth(), async (c) => {
 	const id = c.req.param("id");
 	const row = await c.env.DB.prepare("SELECT user_id FROM issues WHERE id = ?")
 		.bind(id)
-		.first<{ user_id: string | null }>();
+		.first<Pick<IssueRow, "user_id">>();
 
 	if (!row) {
 		return c.json({ error: "Issue not found" }, 404);
@@ -847,7 +875,7 @@ issues.get("/:id", async (c) => {
 		`SELECT ${PUBLIC_SELECT} FROM issues WHERE id = ?`,
 	)
 		.bind(id)
-		.first();
+		.first<IssueRowLike>();
 
 	if (!row) {
 		return c.json({ error: "Issue not found" }, 404);
@@ -869,7 +897,7 @@ async function checkOwnership(
 ): Promise<Response | null> {
 	const row = await c.env.DB.prepare("SELECT user_id FROM issues WHERE id = ?")
 		.bind(id)
-		.first<{ user_id: string | null }>();
+		.first<Pick<IssueRow, "user_id">>();
 
 	if (!row) {
 		return c.json({ error: "Issue not found" }, 404);
@@ -917,7 +945,7 @@ issues.patch("/:id", clerkAuth(), requireAuth, async (c) => {
 		`UPDATE issues SET ${setClauses.join(", ")} WHERE id = ? AND user_id = ? RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(...binds, id, auth?.userId)
-		.first();
+		.first<IssueRowLike>();
 
 	if (!result) {
 		return c.json({ error: "Issue not found" }, 404);
@@ -949,7 +977,7 @@ issues.delete("/:id", clerkAuth(), requireAuth, async (c) => {
 		`DELETE FROM issues WHERE id = ? AND user_id = ? RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(id, auth?.userId)
-		.first();
+		.first<IssueRowLike>();
 
 	if (!result) {
 		return c.json({ error: "Issue not found" }, 404);

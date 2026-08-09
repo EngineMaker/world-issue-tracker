@@ -12,6 +12,7 @@ vi.mock("@clerk/backend", async () => {
 	return clerkBackendMockFactory();
 });
 
+import type { IssueRow } from "../src/db/rows";
 import { createApp } from "../src/index";
 import {
 	PUBLIC_ISSUE_COLUMNS as PUBLIC_ISSUE_COLUMNS_FOR_TEST,
@@ -2404,13 +2405,18 @@ describe("Issues CRUD", () => {
 				// 実際に SELECT * で取った行を GET と同じ整形にかけて確かめる。
 				await createIssue();
 
+				// `SELECT *` が返すのは内部フィールドまで含んだ行なので `IssueRow` で受ける
+				// （公開してよい形の `PublicIssue` ではない）。
 				const rawQuery = env.DB.prepare("SELECT * FROM issues LIMIT 1");
-				const raw = await rawQuery.first<Record<string, unknown>>();
+				const raw = await rawQuery.first<IssueRow>();
 
 				// 前提: 生の行には user_id が含まれている
 				expect(raw).toHaveProperty("user_id", "user_2abcSECRETclerkid");
+				if (!raw) {
+					throw new Error("SELECT * が行を返さなかった");
+				}
 
-				const shaped = toPublicIssueForTest(raw ?? {});
+				const shaped = toPublicIssueForTest(raw);
 				expect(shaped).not.toHaveProperty("user_id");
 				expect(Object.keys(shaped).sort()).toEqual([...PUBLIC_KEYS].sort());
 			});
