@@ -10,7 +10,7 @@
 		"check": "tsc --noEmit",
 		"lint": "biome check .",
 		"test": "bun test",
-		"deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+		"deploy": "bun run scripts/check-clerk-keys.ts && opennextjs-cloudflare build && opennextjs-cloudflare deploy"
 	},
 	"dependencies": {
 		"@clerk/nextjs": "^6.39.0",

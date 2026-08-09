@@ -1,3 +1,8 @@
 # Clerk のキー https://dashboard.clerk.com/ の API Keys から取得する
+#
+# ローカル開発は開発用インスタンス（pk_test_ / sk_test_）でよい。
+# 本番の Workers Secrets には本番インスタンス（pk_live_ / sk_live_）を入れること。
+# web と api は同時に切り替える。片方だけだとトークンを発行した先と
+# 検証する先が食い違って認証が通らなくなる（#98）。
 CLERK_SECRET_KEY=sk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 CLERK_PUBLISHABLE_KEY=pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
