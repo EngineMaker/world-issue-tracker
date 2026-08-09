@@ -91,6 +91,36 @@ API は `http://localhost:8787`、Web は `http://localhost:3000` で起動し�
 - `CLERK_SECRET_KEY` — Clerk シークレットキー（Web ビルド用）
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` — Clerk パブリッシャブルキー（Web ビルド用）
 
+#### Clerk は本番用インスタンスのキーを使うこと
+
+本番へ出すキーは **`pk_live_` / `sk_live_` で始まる本番インスタンスのもの**である
+必要があります。開発用インスタンスのキー（`pk_test_` / `sk_test_`）でも認証は
+一見動きますが、Clerk 側に利用者数の上限があり、**上限に達するとサインインできなく
+なります**。サインイン画面にも「Development mode」が表示されます（#98）。
+
+開発用キーはローカル・CI・本番のどこでも同じように動くため、テストも型検査も
+ビルドも通ってしまいます。そこで本番デプロイの経路にだけ検査を置いています:
+
+- **Web**: `bun run deploy` が `apps/web/scripts/check-clerk-keys.ts` を先に実行し、
+  `pk_live_` / `sk_live_` でなければビルドへ進まずに失敗します
+- **API**: キーは Workers Secrets にありビルド時には読めないため、止められません。
+  代わりに開発用キーで動いていると警告をログへ出します（Worker インスタンスごとに 1 回）。
+  Cloudflare の Observability / `wrangler tail` で確認できます
+
+検査は接頭辞が `pk_live_` / `sk_live_` であることだけを見ます。**判定できない値
+（未設定、空、想定外の接頭辞）は「本番用ではない」として扱い、デプロイを止めます。**
+Clerk が接頭辞の形式を変えた場合、キーが正しくてもデプロイが全面的に止まることになりますが、
+検査が黙って無効化されるよりは安全側に倒す判断として意図的にこうしています。その状況に当たったら
+`packages/shared/src/index.ts` の `clerkKeyKind()` を更新してください。
+
+**web と api は必ず同時に切り替えてください。** 片方だけだとトークンを発行した先と
+検証する先が食い違い、認証が通らなくなります。API 側は
+`wrangler secret put CLERK_SECRET_KEY` / `wrangler secret put CLERK_PUBLISHABLE_KEY`
+（`apps/api` で実行）で設定します。
+
+なお **Clerk の開発用インスタンスと本番インスタンスはユーザーを共有しません。**
+切り替えると既存のログイン済みユーザーは引き継がれず、サインアップし直しになります。
+
 Web が参照する API の URL (`NEXT_PUBLIC_API_URL`) はシークレットではないため、
 設定ファイルに直接書いています。デプロイ先を変えたときは **2 箇所**を更新してください:
 

@@ -976,3 +976,52 @@ export const ListIssuesQuerySchema = z
 		path: ["cursor"],
 	});
 export type ListIssuesQuery = z.infer<typeof ListIssuesQuerySchema>;
+
+/**
+ * Clerk のキーが開発用インスタンスのものか（#98）。
+ *
+ * Clerk のキーは接頭辞で種別が分かる。publishable key は `pk_test_` /
+ * `pk_live_`、secret key は `sk_test_` / `sk_live_` で始まり、`test` が
+ * 開発用インスタンス、`live` が本番用インスタンスを指す。
+ *
+ * この判定を置いている理由は、開発用キーが本番に出ても**何も落ちない**から。
+ * ローカルでも CI でも本番でも同じように認証が通り、テストも型検査も
+ * ビルドも全部緑になる。実際 #98 は、本番サイトを人が操作していて
+ * ブラウザのコンソールに出た Clerk 自身の警告で見つかっている。
+ *
+ * 開発用インスタンスには Clerk 側の利用者数上限があり、上限に達すると
+ * サインインできなくなる。つまり「人が増えたら止まる」種類の不備で、
+ * 出てから気付くのでは遅い。ビルド時に落とすための判定材料にする。
+ *
+ * 接頭辞で見ているのは、キーの本体（base64 のインスタンス識別子）を
+ * 復号しなくても種別が確定するため。Clerk がこの接頭辞を変えた場合は
+ * 判定が効かなくなるが、そのときは `null`（判定不能）を返して
+ * 呼び出し側に委ねる。誤って「本番用」と断定して素通りさせるより、
+ * 判定できないことが分かるほうが安全。
+ */
+export type ClerkKeyKind = "development" | "production";
+
+export function clerkKeyKind(key: string | undefined): ClerkKeyKind | null {
+	if (!key) {
+		return null;
+	}
+	// `pk_test_` / `sk_test_` / `pk_live_` / `sk_live_` のいずれか。
+	// 接頭辞だけを見て、本体の中身は問わない。
+	const match = /^(?:pk|sk)_(test|live)_/.exec(key);
+	if (!match) {
+		return null;
+	}
+	return match[1] === "live" ? "production" : "development";
+}
+
+/**
+ * 本番デプロイで使ってはいけないキーか（#98）。
+ *
+ * 判定不能（`null`）を「使ってよい」に倒していないことに注意。キーの形式が
+ * 想定と違うなら、それは Clerk の仕様変更か設定ミスのどちらかで、
+ * どちらも本番に黙って出してよい状態ではない。空文字・未設定も同様に弾く
+ * （認証が丸ごと動かないビルドを本番へ出すことになるため）。
+ */
+export function isUnsafeForProduction(key: string | undefined): boolean {
+	return clerkKeyKind(key) !== "production";
+}
