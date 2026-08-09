@@ -76,6 +76,17 @@ body {
 	max-width: 800px;
 	margin: 0 auto;
 	padding: 2rem;
+	/*
+	 * 折り返せない長い文字列を、どうしても入らないときだけ途中で割る（#93）。
+	 * コメントは 2000 文字の自由入力で、URL の貼り付けは普通に起きる。
+	 * 幅の制限（max-width）では防げない経路で、URL を 1 本貼っただけで
+	 * ページ全体に横スクロールが出ていた。
+	 *
+	 * `break-word` ではなく `anywhere` にしているのは、flex や grid の
+	 * アイテムの最小幅の計算にも反映されるため（`break-word` は
+	 * 計算上は割れない扱いのままで、親を押し広げる場合がある）
+	 */
+	overflow-wrap: anywhere;
 }
 
 /*
@@ -108,9 +119,17 @@ a:visited {
 	color: var(--accent);
 }
 
-a:hover {
-	/* 下地を薄い緑にして、押せる場所であることを面で示す */
-	background: var(--accent-soft);
+/*
+ * 下地を薄い緑にして、押せる場所であることを面で示す。
+ *
+ * `@media (hover: hover)` で括っているのは、タッチ端末で hover が
+ * 貼り付いたままになるため。Issue #93 の症状が出ている実機は
+ * Android / Chrome で、タップしたリンクだけ背景が残り続ける
+ */
+@media (hover: hover) {
+	a:hover {
+		background: var(--accent-soft);
+	}
 }
 
 /*

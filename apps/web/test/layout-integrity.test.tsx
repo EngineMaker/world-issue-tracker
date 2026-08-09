@@ -51,8 +51,11 @@ const cssWithoutComments = stripBlockComments(css);
  */
 function rulesFor(selector: string): string[] {
 	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	// 先頭のアンカーに `{` を含めること。含めないと `@media (...) {` の
+	// 直後に来る最初のルールを取りこぼす。素の要素セレクタを禁じるテストが
+	// `@media` の中だけすり抜ける穴になっていた（レビューで指摘）
 	const pattern = new RegExp(
-		`(?:^|[},])\\s*((?:[^{}]*?,\\s*)?${escaped}\\s*(?:,[^{}]*?)?)\\{([^}]*)\\}`,
+		`(?:^|[{},])\\s*((?:[^{}]*?,\\s*)?${escaped}\\s*(?:,[^{}]*?)?)\\{([^}]*)\\}`,
 		"g",
 	);
 	const found: string[] = [];
@@ -124,6 +127,11 @@ describe("リンクに色と状態が当たっている", () => {
 		const blocks = rulesFor("a:visited");
 		expect(blocks.length, "a:visited のルールが無い").toBeGreaterThan(0);
 		expect(declares(blocks, "color"), "a:visited に色の指定が無い").toBe(true);
+		// 値まで見ること。プロパティの有無だけだと `color: purple` でも通る
+		// （受け入れ条件を直撃する変異が検出できていなかった）
+		expect(blocks.join("\n"), "訪問済みの色がトークンを指していない").toContain(
+			"var(--accent)",
+		);
 	});
 
 	it("a:hover に見た目の変化がある", () => {
@@ -310,6 +318,25 @@ describe("狭い画面で横スクロールが出ない", () => {
 			expect(rulesFor(selector).join("\n")).toContain("max-width: 100%");
 		});
 	}
+
+	/*
+	 * 幅を制限しても、折り返せない文字列は要素を押し広げる。
+	 * コメントと Issue の説明文は自由入力（コメントは 2000 文字）なので、
+	 * スペースを含まない長い URL が貼られることは普通に起きる。
+	 * `white-space: pre-wrap` を持つ本文（.issue-description / .comment-body）は
+	 * 改行では折り返すが、単語の途中では折り返さない。
+	 *
+	 * 実機で試すと、URL を 1 本貼っただけでページ全体に横スクロールが出る。
+	 * max-width では防げない経路（レビューで指摘）
+	 */
+	it("折り返せない長い文字列が要素を押し広げない", () => {
+		const bodyRules = rulesFor("body");
+		expect(bodyRules.length, "body の定義が無い").toBeGreaterThan(0);
+		expect(
+			bodyRules.join("\n"),
+			"長い URL の折り返し指定が無い（横スクロールが出る）",
+		).toMatch(/overflow-wrap\s*:\s*(anywhere|break-word)/);
+	});
 
 	/*
 	 * 起票フォームの `.field-narrow` は 12rem 固定だが max-width で
