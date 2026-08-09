@@ -78,6 +78,50 @@ body {
 	padding: 2rem;
 }
 
+/*
+ * リンク（Issue #93）。
+ *
+ * `a` の指定が 1 つも無く、ブラウザ既定の紫（訪問済みは青紫）のままだった。
+ * トップページはリンクが主要な導線なので、緑（--accent）を主役に据えた
+ * トークンと噛み合わず、画面のほぼ全体が紫で埋まっていた。
+ *
+ * ここだけは要素セレクタで書いている。他の指定（入力欄・ボタン）が
+ * `.issue-form` やクラスに閉じているのは、Clerk のモーダルの入力や
+ * サインインボタンが「主要でも補助でもない第三の見た目」になるのを
+ * 避けるためだった。リンクは事情が違い、モーダル内のリンク（「登録はこちら」
+ * など）も本文のリンクと同じ色で構わない。むしろクラスに閉じると、
+ * クラスを付け忘れたリンクだけが紫で残る形になり、いま直している症状が
+ * 部分的に再発する。
+ */
+a {
+	color: var(--accent);
+	/* 色だけに頼らない。色覚特性のある人にもリンクだと分かる必要がある */
+	text-decoration: underline;
+}
+
+/*
+ * 訪問済みを指定しないと、そこだけブラウザ既定の青紫で残る。
+ * 一覧から Issue を数件開いた時点で、リンクの色が 2 種類に割れる。
+ * どこを読んだかより、緑で揃っていることを優先する
+ */
+a:visited {
+	color: var(--accent);
+}
+
+a:hover {
+	/* 下地を薄い緑にして、押せる場所であることを面で示す */
+	background: var(--accent-soft);
+}
+
+/*
+ * キーボードで辿れるようにする。入力欄とボタンには既に outline があるが
+ * リンクには無く、Tab で移動すると現在位置が分からなくなっていた
+ */
+a:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
 h1 {
 	font-size: var(--text-heading-page);
 	margin-bottom: var(--space-2);
@@ -191,6 +235,12 @@ main p {
 .issue-form input[type="text"],
 .issue-form textarea {
 	width: 100%;
+	/*
+	 * `width: 100%` でも、textarea は既定の `cols` 由来の最小幅を持つため
+	 * 狭い画面では親をはみ出してページ全体に横スクロールが出る（#93）。
+	 * 上の `box-sizing: border-box` と合わせて、親の幅で頭打ちにする
+	 */
+	max-width: 100%;
 }
 
 .issue-form textarea {
@@ -505,11 +555,24 @@ main p {
 	max-width: 40rem;
 }
 
-/* ヘッダ。左にサービス名、右に操作を置く */
+/*
+ * ヘッダ。左にサービス名、右に操作を置く。
+ *
+ * `flex-wrap` が無かったため、狭い画面（幅 360px 相当）で各項目が
+ * 縮められるだけ縮められ、「World Issue Tracker」が 3 行、
+ * 「Issue を起票」が 3 行に割れてヘッダだけで画面の 1/4 を占めていた（#93）。
+ *
+ * 折り返しを許すだけでは足りない。flex アイテムは既定で
+ * `min-width: auto` より小さくは縮まないが、内容が単語区切りで折り返せる
+ * 日本語では「Issue を / 起票」のように行内で割れてしまう。項目そのものに
+ * `white-space: nowrap` を与えて、割れるなら項目の単位で折り返させる。
+ */
 .site-header {
 	display: flex;
+	flex-wrap: wrap;
 	justify-content: space-between;
 	align-items: center;
+	gap: var(--space-2) var(--space-4);
 	padding: var(--space-4);
 	border-bottom: 1px solid var(--line);
 }
@@ -517,12 +580,24 @@ main p {
 .site-header-title {
 	margin: 0;
 	font-size: var(--text-heading-site);
+	white-space: nowrap;
 }
 
 .site-header-nav {
 	display: flex;
-	gap: var(--space-4);
+	flex-wrap: wrap;
+	/* 折り返した行同士がくっつかないよう、行間にも余白を取る */
+	gap: var(--space-2) var(--space-4);
 	align-items: center;
+}
+
+/*
+ * ナビの各項目を割れない単位として扱う。子を直接指しているのは、
+ * 中身（リンク・ボタン・Clerk の UserButton）が何であっても
+ * 「項目の途中で折り返さない」を成立させたいため
+ */
+.site-header-nav > * {
+	white-space: nowrap;
 }
 
 /* 詳細ページの説明文。改行を残して読ませる */
@@ -542,8 +617,17 @@ main p {
  */
 .locale-switcher {
 	display: flex;
+	/* ヘッダと同じ理由で折り返しを許す（#93）。ここも `flex-wrap` が無く、
+	   「言語: 日本語 / English」が単語の途中で割れていた */
+	flex-wrap: wrap;
 	gap: var(--space-1);
 	font-size: var(--text-sm);
+	align-items: center;
+}
+
+/* ラベルと言語名を割れない単位にする */
+.locale-switcher > * {
+	white-space: nowrap;
 }
 
 .locale-switcher-label {
@@ -573,4 +657,45 @@ main p {
 .issue-photo {
 	max-width: 100%;
 	height: auto;
+}
+
+/*
+ * 狭い画面への対応（Issue #93）。
+ *
+ * これまで `@media` が 1 つも無く、`body` は `max-width: 800px` と
+ * `padding: 2rem` の固定だった。幅 360px の実機では左右 2rem（合計 64px）が
+ * そのまま食われ、本文に使える幅が 300px を切っていた。
+ *
+ * 分岐は 480px に置いている。上の値は「ここより下では余白より内容の幅を
+ * 優先する」という判断で、特定の端末の実寸に合わせたものではない
+ * （どの見た目を目指すかは #94 / #95 で決まる。ここは破綻を止める範囲）。
+ */
+@media (max-width: 480px) {
+	body {
+		padding: var(--space-4);
+	}
+
+	/* ヘッダも同じだけ詰める。ここだけ 1rem のままだと段差ができる */
+	.site-header {
+		padding: var(--space-3) var(--space-4);
+	}
+
+	/*
+	 * 枠を持つまとまりは左右の内側の余白を削る。枠の中の文字が
+	 * 画面幅の半分近くまで押し込まれるのを防ぐ
+	 */
+	.issue-card,
+	.comment-card,
+	.location {
+		padding-left: var(--space-3);
+		padding-right: var(--space-3);
+	}
+
+	/*
+	 * 起票フォームのページは自前で余白を持っている。body 側を詰めても
+	 * こちらが 1rem のままだと二重に効いて内容が細くなる
+	 */
+	.narrow-page {
+		padding: var(--space-3);
+	}
 }
