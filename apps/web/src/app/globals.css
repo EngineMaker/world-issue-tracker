@@ -536,6 +536,25 @@ main p {
 }
 
 /*
+ * 表示言語の切り替え（#82）。ヘッダの他の項目より小さく、
+ * 言語名を横に並べる。区切りの「/」は本文より薄くして、
+ * 言語名そのものが読み取りの手がかりになるようにする
+ */
+.locale-switcher {
+	display: flex;
+	gap: var(--space-1);
+	font-size: var(--text-sm);
+}
+
+.locale-switcher-label {
+	color: var(--ink-soft);
+}
+
+.locale-switcher-separator {
+	color: var(--ink-faint);
+}
+
+/*
  * 起票フォームで選んだ写真のプレビュー（#65）。
  * 縦横比は写真ごとに違うので、最大の幅と高さだけを決めて
  * 比率は画像に従わせる

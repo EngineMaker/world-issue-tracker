@@ -1,3 +1,8 @@
+import {
+	DEFAULT_LOCALE,
+	getUiMessages,
+	type Locale,
+} from "@world-issue-tracker/shared";
 import Link from "next/link";
 import { buildIssuesHref, type IssueFilters } from "../../lib/issues";
 
@@ -18,12 +23,16 @@ export function IssuePagination({
 	total,
 	limit,
 	offset,
+	locale = DEFAULT_LOCALE,
 }: {
 	filters: IssueFilters;
 	total: number;
 	limit: number;
 	offset: number;
+	locale?: Locale;
 }) {
+	const messages = getUiMessages(locale);
+
 	// 1 ページに収まるなら何も出さない。押せないボタンだけが並ぶより、
 	// ページ送りという概念自体を見せない方が読みやすい
 	if (total <= limit) {
@@ -42,27 +51,25 @@ export function IssuePagination({
 	const hasNext = nextOffset < total;
 
 	return (
-		<nav aria-label="ページ送り" className="issue-pagination">
+		<nav aria-label={messages.pagination.label} className="issue-pagination">
 			<p>
 				{hasPrevious ? (
 					<Link href={buildIssuesHref({ ...filters, offset: previousOffset })}>
-						前のページ
+						{messages.pagination.previous}
 					</Link>
 				) : (
 					// リンクにしないことで「これ以上戻れない」ことを見せる
-					<span className="text-faint">前のページ</span>
+					<span className="text-faint">{messages.pagination.previous}</span>
 				)}
 				{" / "}
-				<span>
-					{currentPage} / {totalPages} ページ
-				</span>
+				<span>{messages.pagination.position(currentPage, totalPages)}</span>
 				{" / "}
 				{hasNext ? (
 					<Link href={buildIssuesHref({ ...filters, offset: nextOffset })}>
-						次のページ
+						{messages.pagination.next}
 					</Link>
 				) : (
-					<span className="text-faint">次のページ</span>
+					<span className="text-faint">{messages.pagination.next}</span>
 				)}
 			</p>
 		</nav>

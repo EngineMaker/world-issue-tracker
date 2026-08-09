@@ -11,6 +11,9 @@
  *     （地図が読めない状況で位置情報を失わせないため — Issue のコメント参照）
  */
 
+// 表示言語を Cookie から読むため（Issue #82）、Server Component を直接呼ぶ
+// このテストにはリクエストスコープが要る。テスト対象より先に評価させる
+import "./helpers/mock-cookies";
 import { afterEach, describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { IssueMap } from "../src/app/components/IssueMap";

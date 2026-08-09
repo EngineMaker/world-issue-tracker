@@ -1,3 +1,6 @@
+// 表示言語を Cookie から読むため（Issue #82）、Server Component を直接呼ぶ
+// このテストにはリクエストスコープが要る。テスト対象より先に評価させる
+import "./helpers/mock-cookies";
 import { describe, expect, it } from "bun:test";
 import {
 	DEFAULT_LOCALE,
