@@ -48,15 +48,7 @@ export function formatCreatedAt(createdAt: string): string {
  */
 export function IssueCard({ issue }: { issue: PublicIssue }) {
 	return (
-		<li
-			style={{
-				border: "1px solid #eee",
-				borderRadius: "6px",
-				padding: "0.75rem 1rem",
-				marginBottom: "0.75rem",
-				listStyle: "none",
-			}}
-		>
+		<li className="issue-card">
 			{/*
 			  タイトルを詳細ページ (`/issues/[id]`) への入口にする。
 			  コメント欄はその画面にあるため、ここに導線が無いと
@@ -65,11 +57,11 @@ export function IssueCard({ issue }: { issue: PublicIssue }) {
 			  カード全体ではなくタイトルをリンクにする。カード全体を <a> で
 			  包むと、読み上げ時に説明文まで一続きのリンク名として読まれる
 			*/}
-			<h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem" }}>
+			<h3 className="issue-card-title">
 				<Link href={`/issues/${issue.id}`}>{issue.title}</Link>
 			</h3>
-			<p style={{ margin: "0 0 0.5rem", color: "#444" }}>{issue.description}</p>
-			<p style={{ margin: 0, fontSize: "0.85rem", color: "#666" }}>
+			<p className="issue-card-description">{issue.description}</p>
+			<p className="issue-meta">
 				<span>{scopeLabels[issue.scope].label}</span>
 				{" / "}
 				<span>{statusLabels[issue.status]}</span>
@@ -97,18 +89,18 @@ export function IssueCard({ issue }: { issue: PublicIssue }) {
 export function IssueList({ result }: { result: FetchIssuesResult }) {
 	if (!result.ok) {
 		return (
-			<div style={{ color: "#b00", padding: "0.5rem 0" }}>
-				<p style={{ margin: "0 0 0.25rem" }}>
+			<div className="error-block">
+				<p className="block-message">
 					Issue を取得できませんでした。時間をおいて再度お試しください。
 				</p>
-				<p style={{ margin: 0, fontSize: "0.85rem" }}>{result.error}</p>
+				<p className="block-detail">{result.error}</p>
 			</div>
 		);
 	}
 
 	if (result.issues.length === 0) {
 		return (
-			<p style={{ color: "#666" }}>
+			<p className="text-soft">
 				まだ Issue がありません。最初の 1 件を起票してみてください。
 			</p>
 		);
@@ -126,12 +118,12 @@ export function IssueList({ result }: { result: FetchIssuesResult }) {
 
 	return (
 		<>
-			<p style={{ color: "#666", fontSize: "0.85rem" }}>
+			<p className="list-summary">
 				{isPaged
 					? `${result.total} 件中 ${from} 〜 ${to} 件目を表示`
 					: `${result.total} 件中 ${result.issues.length} 件を表示`}
 			</p>
-			<ul style={{ padding: 0, margin: 0 }}>
+			<ul className="issue-cards">
 				{result.issues.map((issue) => (
 					<IssueCard key={issue.id} issue={issue} />
 				))}

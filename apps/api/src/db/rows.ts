@@ -23,7 +23,8 @@ import type { IssueScope, IssueStatus } from "@world-issue-tracker/shared";
  */
 
 /**
- * `issues` テーブルの 1 行（`0001_initial.sql` / `0002_add_user_id.sql`）。
+ * `issues` テーブルの 1 行（`0001_initial.sql` / `0002_add_user_id.sql` /
+ * `0007_add_photo.sql`）。
  *
  * `scope` / `status` は CHECK 制約で値が固定されているため、
  * `packages/shared` の enum をそのまま当てる。制約の値と enum の値が
@@ -32,6 +33,11 @@ import type { IssueScope, IssueStatus } from "@world-issue-tracker/shared";
  *
  * `category` と `user_id` は NULL を許す。`user_id` は Clerk 導入前に
  * 入った行が NULL を持つ（`0002` で後から足したカラムなので DEFAULT も無い）。
+ *
+ * `photo_key` / `photo_content_type` も NULL を許す。写真は任意で、
+ * 両方が揃っているか両方とも NULL かのどちらか（`0007` のコメント参照）。
+ * どちらも内部フィールドで、レスポンスには載せない
+ * （公開する形は `routes/issues.ts` の `PublicIssue` 側で決める）。
  */
 export type IssueRow = {
 	id: string;
@@ -43,6 +49,8 @@ export type IssueRow = {
 	longitude: number;
 	category: string | null;
 	user_id: string | null;
+	photo_key: string | null;
+	photo_content_type: string | null;
 	created_at: string;
 	updated_at: string;
 };

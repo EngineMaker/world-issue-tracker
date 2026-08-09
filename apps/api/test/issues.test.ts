@@ -1997,8 +1997,10 @@ describe("Issues CRUD", () => {
 			const res = await app.request("/issues/mine", {}, env);
 			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
+			// テーブルの公開カラムに加えて、行に無い派生フィールド `has_photo`
+			// （写真の有無、#65）が載る。公開一覧と同じ形であることが要点
 			expect(Object.keys(body.data[0]).sort()).toEqual(
-				[...PUBLIC_ISSUE_COLUMNS_FOR_TEST].sort(),
+				[...PUBLIC_ISSUE_COLUMNS_FOR_TEST, "has_photo"].sort(),
 			);
 		});
 
@@ -2046,6 +2048,9 @@ describe("Issues CRUD", () => {
 			"category",
 			"created_at",
 			"updated_at",
+			// 写真（#65）は有無だけを返す。R2 のキー（`photo_key`）は内部の
+			// 識別子なので載せない。画像そのものは `GET /issues/:id/photo`
+			"has_photo",
 		];
 
 		beforeEach(async () => {
@@ -2351,7 +2356,17 @@ describe("Issues CRUD", () => {
 
 				expect(row).not.toBeNull();
 				expect(row).not.toHaveProperty("user_id");
-				expect(Object.keys(row ?? {}).sort()).toEqual([...PUBLIC_KEYS].sort());
+				// SELECT が取るのは「公開カラム + 写真のカラム」。写真のカラム
+				// （#65）は値を返さないが、`has_photo` を組み立てるために読む
+				// 必要があり、落とすのは DTO 層（`toPublicIssue`）の仕事。
+				// `has_photo` は行に無い派生フィールドなのでここには現れない
+				expect(Object.keys(row ?? {}).sort()).toEqual(
+					[
+						...PUBLIC_KEYS.filter((key) => key !== "has_photo"),
+						"photo_key",
+						"photo_content_type",
+					].sort(),
+				);
 			});
 
 			// 書き込み系も SELECT 層（= RETURNING 句）で絞っていること。

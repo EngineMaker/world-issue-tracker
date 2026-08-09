@@ -43,7 +43,7 @@ export default async function IssuesPage({
 			  条件が付いているときは、条件のせいであることをここで伝える
 			*/}
 			{result.ok && result.issues.length === 0 && hasActiveFilters(filters) ? (
-				<p style={{ color: "#666" }}>
+				<p className="text-soft">
 					条件に合う Issue はありませんでした。 条件をゆるめるか、
 					<Link href="/issues">条件をすべて解除</Link>
 					してみてください。

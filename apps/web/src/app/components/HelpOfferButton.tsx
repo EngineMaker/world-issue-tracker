@@ -35,7 +35,7 @@ export function HelpOfferButton({
 
 	if (!summary) {
 		return (
-			<p style={{ color: "#b45309" }}>
+			<p className="text-warning">
 				手伝いの表明を取得できませんでした。時間をおいて再度お試しください。
 			</p>
 		);
@@ -133,9 +133,7 @@ export function HelpOfferButton({
 				</p>
 			)}
 
-			{error && (
-				<output style={{ display: "block", color: "#b91c1c" }}>{error}</output>
-			)}
+			{error && <output className="notice text-danger">{error}</output>}
 
 			{summary.offers.length > 0 && (
 				<>
