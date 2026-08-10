@@ -250,8 +250,18 @@ main p {
 	outline-offset: 1px;
 }
 
-/* 既定では横幅いっぱい。短い入力は下の .field-narrow で絞る */
+/*
+ * 既定では横幅いっぱい。短い入力は下の .field-narrow で絞る。
+ *
+ * `type="search"` は #96 で足した。一覧の絞り込みフォームに `.issue-form` を
+ * 与えても、幅の指定が `type="text"` と `textarea` にしか無いため、
+ * キーワード欄（`type="search"`）は既定の幅のままだった。**枠は付くが幅は
+ * 広がらない**という中途半端な状態で、docs/visual-check.md に自分で書いた
+ * 確認軸（「入力欄が本文の幅いっぱいに広がる — 一覧の絞り込みを含む 3 箇所」）を
+ * 満たしていなかった（レビュー指摘）。
+ */
 .issue-form input[type="text"],
+.issue-form input[type="search"],
 .issue-form textarea {
 	width: 100%;
 	/*
@@ -259,6 +269,19 @@ main p {
 	 * 狭い画面では親をはみ出してページ全体に横スクロールが出る（#93）。
 	 * 上の `box-sizing: border-box` と合わせて、親の幅で頭打ちにする
 	 */
+	max-width: 100%;
+}
+
+/*
+ * `select` は幅を伸ばさず、はみ出しだけを止める（#96）。
+ *
+ * 絞り込みの 3 つの `select`（スコープ・ステータス・並び順）は、選択肢の
+ * 文字列が長いと親をはみ出して横スクロールを作る。一方で `width: 100%` に
+ * すると起票フォームのスコープ選択も幅いっぱいになり、**破綻を止める範囲を
+ * 超えて見た目を変える**ことになる（どの幅にするかは #95 で決まる）。
+ * ここでは上限だけを与える。
+ */
+.issue-form select {
 	max-width: 100%;
 }
 
@@ -528,6 +551,39 @@ main p {
 	font-size: var(--text-sm);
 }
 
+/*
+ * 一覧の絞り込みフォームとページ送り（Issue #96）。
+ *
+ * どちらも tsx が `className` を出しているのに、globals.css に定義が
+ * 1 行も無かった。既存のテスト 385 件はすべて通っていた —
+ * 直書きの色もインライン style も無く、描画結果にクラス名も出ているので、
+ * 「値が正しいか」を見る検査には引っかかりようがない。
+ * **指定が存在しないことだけが、誰にも見えていなかった。**
+ *
+ * ここは破綻を止める範囲に留めている。まとまりとして認識できる枠と、
+ * 前後との間隔だけを与える（どの見た目を目指すかは #94 / #95 で決まる）。
+ */
+
+.issue-filters {
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: var(--space-3) var(--space-4);
+	margin-bottom: var(--space-4);
+}
+
+/*
+ * 絞り込みの各項目。`.form-field` の 1.25rem は縦に 5 項目並ぶこの
+ * フォームでは間延びするので、絞り込みの中だけ詰める
+ */
+.issue-filters .form-field {
+	margin-bottom: var(--space-3);
+}
+
+/* ページ送りは一覧の末尾に置く。上の最後のカードとくっつかないよう離す */
+.issue-pagination {
+	margin-top: var(--space-4);
+}
+
 /* カードを並べる ul。素の ul はタグを横に並べるスタイルなので打ち消す */
 .issue-cards {
 	display: block;
@@ -705,7 +761,8 @@ main p {
 	 */
 	.issue-card,
 	.comment-card,
-	.location {
+	.location,
+	.issue-filters {
 		padding-left: var(--space-3);
 		padding-right: var(--space-3);
 	}
