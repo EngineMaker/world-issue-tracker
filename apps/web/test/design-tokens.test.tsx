@@ -76,6 +76,10 @@ describe("トークンの定義", () => {
 		"--accent": "#1a7f5a",
 		"--accent-soft": "#e8f5ef",
 		"--accent-line": "#b8ddcb",
+		"--surface-muted": "#f1f5f2",
+		"--surface-accent": "#f3faf6",
+		"--sun": "#f3c76a",
+		"--sun-soft": "#fff4d6",
 		"--danger": "#b91c1c",
 		"--warning": "#b45309",
 		"--success": "#1a7f5a",
@@ -84,12 +88,30 @@ describe("トークンの定義", () => {
 		"--text-base": "1rem",
 		"--text-sm": "0.875rem",
 		"--text-xs": "0.75rem",
+		"--text-heading-page": "2rem",
+		"--text-heading-section": "1.25rem",
+		"--text-heading-site": "1.0625rem",
 		"--space-1": "0.25rem",
 		"--space-2": "0.5rem",
 		"--space-3": "0.75rem",
 		"--space-4": "1rem",
 		"--space-5": "1.25rem",
 		"--space-6": "1.5rem",
+		"--radius-sm": "0.25rem",
+		"--radius-md": "0.5rem",
+		"--radius-lg": "0.75rem",
+		"--radius-pill": "999px",
+		"--shadow-card": "0 8px 24px rgba(28, 36, 32, 0.08)",
+		"--shadow-card-hover": "0 12px 28px rgba(28, 36, 32, 0.12)",
+		"--shadow-button": "0 4px 16px rgba(26, 127, 90, 0.18)",
+		"--shadow-marker": "0 0 0 1px rgba(0, 0, 0, 0.4)",
+		"--leading-tight": "1.2",
+		"--leading-snug": "1.4",
+		"--leading-normal": "1.6",
+		"--tracking-tight": "-0.01em",
+		"--tracking-normal": "0",
+		"--transition-fast": "160ms ease",
+		"--transition-base": "240ms ease",
 	};
 
 	for (const [name, value] of Object.entries(expected)) {
@@ -192,6 +214,60 @@ describe("文字サイズは 5 段階に収まっている", () => {
 			expect(rule?.[1]).toContain(`font-size: ${token}`);
 		});
 	}
+});
+
+describe("見出し・角丸・影・遷移の決定が CSS に反映されている", () => {
+	function ruleBody(selector: string): string {
+		const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const rule = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
+		expect(rule, `${selector} の定義が見つからない`).not.toBeNull();
+		return rule?.[1] ?? "";
+	}
+
+	it("body の行間は --leading-normal を使う", () => {
+		expect(ruleBody("body")).toContain("line-height: var(--leading-normal)");
+	});
+
+	it("h1 / h2 / .site-header-title は見出し用の行間と字送りを使う", () => {
+		expect(ruleBody("h1")).toContain("line-height: var(--leading-tight)");
+		expect(ruleBody("h1")).toContain("letter-spacing: var(--tracking-tight)");
+		expect(ruleBody("h2")).toContain("line-height: var(--leading-snug)");
+		expect(ruleBody(".site-header-title")).toContain(
+			"font-size: var(--text-heading-site)",
+		);
+		expect(ruleBody(".site-header-title")).toContain(
+			"line-height: var(--leading-snug)",
+		);
+	});
+
+	it("主要なカードと大きい面は角丸・影をトークンで決める", () => {
+		for (const selector of [
+			".issue-card",
+			".comment-card",
+			".issue-filters",
+			".location",
+			".issue-map-view",
+		]) {
+			const body = ruleBody(selector);
+			expect(body).toContain("border-radius: var(--radius-md)");
+			expect(body).toContain("box-shadow: var(--shadow-card)");
+		}
+	});
+
+	it("リンクとボタンは遷移トークンを使う", () => {
+		expect(ruleBody("a")).toContain("var(--transition-fast)");
+		expect(ruleBody("a")).toContain("var(--transition-base)");
+		expect(ruleBody(".button-primary")).toContain(
+			"box-shadow: var(--shadow-button)",
+		);
+		expect(ruleBody(".button-primary")).toContain("var(--transition-fast)");
+		expect(ruleBody(".button-secondary")).toContain("var(--transition-fast)");
+	});
+
+	it("border-radius に 4px / 6px を直書きしない", () => {
+		const withoutRoot = css.replace(/:root\s*\{[^}]*\}/g, "");
+		expect(withoutRoot.match(/border-radius:\s*(4px|6px)/g) ?? []).toEqual([]);
+	});
 });
 
 describe("同じ意味の色が同じ値で描かれる", () => {
