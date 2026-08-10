@@ -180,7 +180,6 @@ h1 {
 h2 {
 	font-size: var(--text-heading-section);
 	line-height: var(--leading-snug);
-	letter-spacing: var(--tracking-tight);
 	margin-top: var(--space-6);
 	margin-bottom: var(--space-2);
 }
@@ -372,6 +371,7 @@ main p {
 	opacity: 0.6;
 	transform: none;
 	box-shadow: none;
+	transition: none;
 }
 
 /* 1 項目のまとまり。ラベル・補助テキスト・入力欄の間より、項目間を広く取る */
@@ -723,7 +723,6 @@ main p {
 	margin: 0;
 	font-size: var(--text-heading-site);
 	line-height: var(--leading-snug);
-	letter-spacing: var(--tracking-tight);
 	white-space: nowrap;
 }
 
@@ -1268,10 +1267,6 @@ main p {
 	.comment-card,
 	.location,
 	.issue-filters {
-		box-shadow: var(--shadow-card);
-		transition:
-			box-shadow var(--transition-base),
-			transform var(--transition-fast);
 		padding-left: var(--space-3);
 		padding-right: var(--space-3);
 	}

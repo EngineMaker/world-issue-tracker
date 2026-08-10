@@ -255,8 +255,10 @@ describe("見出し・角丸・影・遷移の決定が CSS に反映されて�
 	});
 
 	it("リンクとボタンは遷移トークンを使う", () => {
-		expect(ruleBody("a")).toContain("var(--transition-fast)");
-		expect(ruleBody("a")).toContain("var(--transition-base)");
+		const linkRule = ruleBody("a");
+		expect(linkRule).toContain("color var(--transition-fast)");
+		expect(linkRule).toContain("background-color var(--transition-fast)");
+		expect(linkRule).toContain("box-shadow var(--transition-base)");
 		expect(ruleBody(".button-primary")).toContain(
 			"box-shadow: var(--shadow-button)",
 		);

@@ -23,10 +23,20 @@ const tokenRows = [
 			"主要操作の押し心地。hover と focus-visible の差を色だけにしない。",
 	},
 	{
-		name: "--radius-sm / --radius-md / --radius-lg",
-		value: "4px / 8px / 12px",
+		name: "--radius-sm",
+		value: "0.25rem",
+		rationale: "入力欄と細い UI の角。現行の 4px を明示的な段階にする。",
+	},
+	{
+		name: "--radius-md",
+		value: "0.5rem",
 		rationale:
-			"入力・ボタン・カードの角を 3 段階に整理。現在の 4px / 6px 混在を解消する。",
+			"カード、地図、フィルタの角。現行の 6px 混在を 8px 段階へ寄せる。",
+	},
+	{
+		name: "--radius-lg",
+		value: "0.75rem",
+		rationale: "ヒーロー、空の状態、大きい面。柔らかさを足すが甘くしすぎない。",
 	},
 	{
 		name: "--surface-muted / --surface-accent / --sun-soft",
@@ -216,7 +226,7 @@ export default function DesignDirectionPage() {
 			<section id="design-mockups" className="design-section">
 				<div className="design-section-heading">
 					<p className="design-kicker">Approved mockups</p>
-					<h2>3 画面以上の見本</h2>
+					<h2>4 画面の見本</h2>
 					<p>
 						トップページ、Issue 一覧、Issue 詳細（写真あり / なし）の 4
 						パターンを残し、 以後の実装はこの方向を正として進める。
@@ -242,7 +252,9 @@ export default function DesignDirectionPage() {
 									個人の一歩から自治体・世界スコープまで、同じ画面で見渡せる。
 								</p>
 								<div className="design-action-row">
-									<span className="design-button-primary">Issue を起票</span>
+									<button type="button" className="design-button-primary">
+										Issue を起票
+									</button>
 									<span className="design-button-secondary">
 										困りごとを見る
 									</span>
@@ -299,7 +311,9 @@ export default function DesignDirectionPage() {
 									条件を狭めすぎています。フィルタを 1 つ外すと近い Issue
 									が見つかる可能性があります。
 								</p>
-								<span className="design-button-secondary">条件をクリア</span>
+								<button type="button" className="design-button-secondary">
+									条件をクリア
+								</button>
 							</div>
 						</div>
 					</article>
@@ -338,7 +352,9 @@ export default function DesignDirectionPage() {
 										写真は横長かつ最大高を持つ面として扱い、その下に説明・状態操作・コメント導線を素直に積む。
 									</p>
 									<div className="design-action-row">
-										<span className="design-button-primary">手伝います</span>
+										<button type="button" className="design-button-primary">
+											手伝います
+										</button>
 										<span className="design-button-secondary">
 											コメントする
 										</span>
@@ -412,14 +428,18 @@ export default function DesignDirectionPage() {
 							最初の 1
 							件が基準になる。場所、写真、カテゴリがそろうと次の投稿がしやすい。
 						</p>
-						<span className="design-button-primary">最初の Issue を起票</span>
+						<button type="button" className="design-button-primary">
+							最初の Issue を起票
+						</button>
 					</div>
 					<div className="design-empty-card design-empty-card-warm">
 						<p className="design-empty-title">検索結果 0 件</p>
 						<p>
 							近いカテゴリ、近いスコープ、期限を広げる、の順で戻れるようにする。
 						</p>
-						<span className="design-button-secondary">条件を広げる</span>
+						<button type="button" className="design-button-secondary">
+							条件を広げる
+						</button>
 					</div>
 					<div className="design-loading-card">
 						<div className="design-skeleton design-skeleton-wide" />
