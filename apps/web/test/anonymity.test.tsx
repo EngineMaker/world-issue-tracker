@@ -13,7 +13,7 @@
  * どの層が抜けても匿名性は守られないので、層ごとに独立して確かめる。
  */
 
-import { describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it } from "bun:test";
 import {
 	getIssueAnonymityLabel,
 	ISSUE_ANONYMITY_LABELS,
@@ -46,7 +46,15 @@ describe("起票フォームの「名前を出す」", () => {
 	// フォームを実際に描画して、チェックボックスの初期状態を見る。
 	// `INITIAL_VALUES` を直接読むと、定数が正しくても入力欄に
 	// 繋がっていない実装（`checked` を渡し忘れる等）を見逃す。
-	const markup = renderToStaticMarkup(<NewIssuePage />);
+	//
+	// ページは Server Component（表示言語を Cookie から読むため #82 で
+	// 非同期になった）なので、呼び出しを await してから描画する
+	// （`my-issues-page.test.tsx` と同じ形）。describe の直下では await
+	// できないため、`beforeAll` で 1 度だけ組み立てて各 it で使い回す。
+	let markup = "";
+	beforeAll(async () => {
+		markup = renderToStaticMarkup(await NewIssuePage());
+	});
 
 	it("チェックボックスが存在する", () => {
 		expect(markup).toContain('id="show-name"');

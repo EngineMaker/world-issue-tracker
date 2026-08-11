@@ -1,5 +1,9 @@
 # Dependencies
-node_modules/
+# 末尾のスラッシュを付けないこと。`node_modules/` はディレクトリにしか
+# 一致しないため、git worktree で node_modules が共有先へのシンボリックリンクに
+# なっている場合にすり抜け、ローカル絶対パスを指すリンクがコミットされる。
+# CI では dangling link になって bun install が壊れる。
+node_modules
 
 # Build outputs
 dist/

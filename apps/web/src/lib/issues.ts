@@ -34,6 +34,15 @@ export type PublicIssue = {
 	created_at: string;
 	updated_at: string;
 	/**
+	 * 写真が添付されているか（#65）。
+	 *
+	 * 画像そのものの URL ではなく有無だけが返る。R2 のオブジェクトキーは
+	 * 内部の識別子で公開されないため、画像は `issuePhotoUrl()` が組み立てる
+	 * `GET /issues/:id/photo` から読む。
+	 */
+	has_photo: boolean;
+
+	/**
 	 * 匿名で起票されたかどうか（#88）。
 	 *
 	 * 真の場合は「匿名の方」として表示する。偽の場合は起票者が名乗ることを
@@ -70,6 +79,7 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 		category,
 		created_at,
 		updated_at,
+		has_photo,
 		is_anonymous,
 	} = value;
 
@@ -85,12 +95,23 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 	if (category !== null && typeof category !== "string") return null;
 	if (typeof created_at !== "string") return null;
 	if (typeof updated_at !== "string") return null;
-	// `is_anonymous` だけ他と扱いが違う（#88）。
+	// `has_photo`（#65）は、他の項目と違って欠けていても弾かない。
 	//
-	// 欠けている場合（undefined）は弾かずに匿名として読む。この値を返さない
-	// 古い API に対して一覧ごと失敗させると、画面から Issue が消えるだけで、
-	// 誰も匿名性の問題に気づけない。一方で「名乗っている」に倒すのは、
-	// 名乗るつもりのなかった投稿を晒すことになり、取り返しが付かない。
+	// Web と API は別 Worker で、デプロイのタイミングがずれる。API が
+	// まだ古いときに一覧ごと「取得できませんでした」にすると、写真という
+	// 付加的な機能のために画面全体が失われる。写真が出ないだけで済ませたい。
+	//
+	// 一方、値が入っているのに真偽値でない（型が変わった）場合は弾く。
+	// 「無い」と「想定と違う形で来た」は別で、後者を握り潰すと API 側の
+	// 変更が画面に静かに影響する。
+	if (has_photo !== undefined && typeof has_photo !== "boolean") return null;
+
+	// `is_anonymous`（#88）も欠けていれば弾かないが、倒す先が逆になる。
+	//
+	// この値を返さない古い API に対して一覧ごと失敗させると、画面から
+	// Issue が消えるだけで、誰も匿名性の問題に気づけない。一方で
+	// 「名乗っている」に倒すのは、名乗るつもりのなかった投稿を晒すことに
+	// なり、取り返しが付かない。だから欠けていれば匿名として読む。
 	//
 	// ただし `0` / `"false"` のような**別の型の値**は弾く。SQLite の 0/1 が
 	// 変換されずに出てきたときに黙って truthy 判定するとちょうど逆の意味
@@ -110,8 +131,23 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 		category,
 		created_at,
 		updated_at,
+		has_photo: has_photo ?? false,
 		is_anonymous: is_anonymous ?? true,
 	};
+}
+
+/**
+ * Issue に添付された写真の URL を組み立てる。
+ *
+ * R2 のバケットは公開しておらず、画像は API の
+ * `GET /issues/:id/photo` からしか読めない（#65）。Worker を必ず通す
+ * ことで、通報された画像の非公開化を後から差し込む余地が残る。
+ *
+ * `has_photo` が false の Issue に対して呼んでも URL は返る（叩けば 404）。
+ * 出し分けは呼び出し側の責務で、この関数は URL の組み立てだけを担う。
+ */
+export function issuePhotoUrl(issueId: string): string {
+	return `${resolveApiBaseUrl()}/issues/${encodeURIComponent(issueId)}/photo`;
 }
 
 /** `GET /issues` のレスポンスを検証する。合わなければ null。 */

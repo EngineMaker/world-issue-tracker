@@ -1,3 +1,8 @@
+import {
+	DEFAULT_LOCALE,
+	getUiMessages,
+	type Locale,
+} from "@world-issue-tracker/shared";
 import Link from "next/link";
 
 /**
@@ -18,13 +23,21 @@ import Link from "next/link";
  * `page.tsx`（Client Component）から切り出しているのは、Clerk の hooks に
  * 依存しない純粋な描画にして、導線をテストから直接確認できるようにするため。
  */
-export function IssueCreated({ id }: { id: string }) {
+export function IssueCreated({
+	id,
+	locale = DEFAULT_LOCALE,
+}: {
+	id: string;
+	locale?: Locale;
+}) {
+	const messages = getUiMessages(locale);
+
 	return (
-		<output style={{ display: "block", color: "#15803d" }}>
-			起票しました（ID: {id}）。{" "}
-			<Link href={`/issues/${id}`}>投稿した Issue を見る</Link>
+		<output className="notice text-success">
+			{messages.issueCreated.created(id)}{" "}
+			<Link href={`/issues/${id}`}>{messages.issueCreated.viewCreated}</Link>
 			{" / "}
-			<Link href="/my-issues">自分が起票した Issue</Link>
+			<Link href="/my-issues">{messages.issueCreated.myIssues}</Link>
 		</output>
 	);
 }

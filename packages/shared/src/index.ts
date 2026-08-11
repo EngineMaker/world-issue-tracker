@@ -74,6 +74,50 @@ export const CreateIssueSchema = z.object({
 });
 export type CreateIssue = z.infer<typeof CreateIssueSchema>;
 
+/**
+ * 添付できる写真の最大バイト数（#65）。
+ *
+ * ブラウザ側は送る前に縮小するので、通常はここに当たらない。それでも
+ * サーバー側で必ず検査する。縮小は迂回できるため防御にはならず、
+ * 上限が無いと Worker が任意サイズのボディを R2 へ書けてしまう。
+ *
+ * 5MB にしているのは、長辺 1600px の JPEG なら余裕をもって収まり、
+ * かつ縮小をすり抜けた原寸の写真も概ね拾えるため。
+ */
+export const ISSUE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * 受け付ける画像の MIME タイプ。
+ *
+ * ブラウザ側は JPEG に変換して送るので通常は `image/jpeg` だけだが、
+ * 変換を経ない経路（curl、将来の別クライアント）も想定して、
+ * ブラウザが確実に描画できる形式を並べている。
+ *
+ * SVG を含めていないのは、SVG がスクリプトを埋め込める文書形式であり、
+ * 同一オリジンで配信すると XSS の経路になるため。配信側
+ * （`GET /issues/:id/photo`）はこの集合に無い値を保存させない前提で
+ * `Content-Type` を組み立てる。
+ */
+export const ISSUE_PHOTO_CONTENT_TYPES = [
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+] as const;
+
+export type IssuePhotoContentType = (typeof ISSUE_PHOTO_CONTENT_TYPES)[number];
+
+/**
+ * 保存してよい画像の MIME タイプかどうか。
+ *
+ * `Content-Type` は `image/jpeg; charset=binary` のようにパラメータが
+ * 付くことがあるため、呼び出し側は `;` より前を取り出してから渡すこと。
+ */
+export function isIssuePhotoContentType(
+	value: string,
+): value is IssuePhotoContentType {
+	return (ISSUE_PHOTO_CONTENT_TYPES as readonly string[]).includes(value);
+}
+
 export const UpdateIssueSchema = z
 	.object({
 		title: z.string().min(1).max(200).optional(),
@@ -279,6 +323,578 @@ export const getIssueSortLabel = (
 ) => ISSUE_SORT_LABELS[locale][sort];
 
 /**
+ * 画面に出す UI 文言の辞書（Issue #82）。
+ *
+ * `ISSUE_SCOPE_LABELS` / `ISSUE_STATUS_LABELS` と同じ `Record<Locale, ...>` の形を
+ * そのまま広げている。スコープとステータスだけが多言語化されていて、周りの文言が
+ * 各コンポーネントに直書きされていた状態を解消するのがこの辞書の役目。
+ *
+ * i18n ライブラリを入れていない理由は、対象が 200 行程度で、複数形・日付書式・
+ * 名前空間分割といったライブラリの機能が要る規模ではないため（Issue #82 で決定済み）。
+ *
+ * **文字列キーの引き当て（`t("some.key")`）にしていない。** キーを文字列にすると、
+ * 打ち間違いも翻訳漏れも実行時まで分からない。ここでは `ja` の辞書から型を導出して
+ * `Record<Locale, UiMessages>` で縛っているので、`en` にキーが足りなければ
+ * `bun run check` がコンパイルエラーとして落とす。
+ *
+ * 件数や ID のように文言へ値を差し込むものは関数にしてある。テンプレート文字列を
+ * 呼び出し側で組み立てると語順の違う言語（`42 件中 1 件` / `Showing 1 of 42`）を
+ * 表現できず、結局そこが直書きに戻るため。
+ */
+const JA_UI_MESSAGES = {
+	/** サイト全体で使う文言 */
+	common: {
+		siteTitle: "World Issue Tracker",
+		siteDescription: "地球のバグを、みんなで可視化して、みんなで直す",
+		/** `<html lang>` に入れる値。ロケールと同じ綴りだが、用途が違うので分けて持つ */
+		htmlLang: "ja",
+		unexpectedError:
+			"予期しないエラーが発生しました。時間をおいて再度お試しください。",
+		signIn: "サインイン",
+		submitting: "送信中…",
+	},
+
+	/** 画面上部のヘッダ */
+	header: {
+		newIssue: "Issue を起票",
+		myIssues: "自分の Issue",
+		/** Clerk のサインインボタン。他の「サインイン」と文言を分けているのは、
+		    既存の表示が英語の "Sign In" で、変えると見た目の変更になるため */
+		signIn: "Sign In",
+	},
+
+	/** 言語切り替え（Issue #82） */
+	localeSwitcher: {
+		label: "言語",
+		/** 各ロケールを、その言語自身の表記で出す。切り替え先が読めないと選べない */
+		names: { ja: "日本語", en: "English" } satisfies Record<Locale, string>,
+	},
+
+	/** トップページ */
+	home: {
+		heading: "地球のバグを、みんなで可視化して、みんなで直す",
+		aboutHeading: "これは何をするサービス？",
+		aboutBody1:
+			"身の回りの困りごとを「Issue」として投稿して、みんなで見えるようにする場所です。近所の壊れた街灯から、国の制度の問題まで、大きさを問わず扱います。",
+		aboutBody2:
+			"投稿された Issue には誰でもコメントでき、「手伝います」と手を挙げることで解決に向けて動き出します。犯人を探すのではなく、直すことが目的です。",
+		actionsLabel: "主な操作",
+		actionsHeading: "まずはここから",
+		viewIssues: "Issue を見る",
+		viewIssuesHint: " — 投稿された困りごとを一覧で読む。ログインは不要です",
+		writeIssue: "Issue を書く",
+		writeIssueHint: " — 困っていることを投稿する。投稿にはログインが必要です",
+		recentHeading: "最近の Issue",
+		viewAll: "すべての Issue を見る",
+		scopesHeading: "Issue の大きさ（スコープ）",
+		scopesBody:
+			"個人の悩みも世界の課題も、地続きにつながっています。Issue は次の5段階のどれかに位置づけて投稿します。",
+		statusesHeading: "Issue が解決するまで",
+		statusesBody: "投稿された Issue は、次の順に状態が変わっていきます。",
+	},
+
+	/** Issue 一覧（`IssueList`） */
+	issueList: {
+		fetchFailed:
+			"Issue を取得できませんでした。時間をおいて再度お試しください。",
+		empty: "まだ Issue がありません。最初の 1 件を起票してみてください。",
+		/** ページ分割されていないときの件数表示 */
+		countSummary: (total: number, shown: number) =>
+			`${total} 件中 ${shown} 件を表示`,
+		/** ページ分割されているときの範囲表示 */
+		rangeSummary: (total: number, from: number, to: number) =>
+			`${total} 件中 ${from} 〜 ${to} 件目を表示`,
+	},
+
+	/** 自分が起票した Issue の一覧（`MyIssueList`） */
+	myIssueList: {
+		signInRequired: "自分が起票した Issue を見るにはサインインが必要です。",
+		signInHint:
+			"画面右上の「Sign In」からサインインすると、ここに表示されます。",
+		empty: "まだ Issue を起票していません。",
+		writeFirst: "最初の 1 件を書いてみる",
+	},
+
+	/** ページ送り（`IssuePagination`） */
+	pagination: {
+		label: "ページ送り",
+		previous: "前のページ",
+		next: "次のページ",
+		/** 「2 / 3 ページ」のような現在位置 */
+		position: (current: number, total: number) =>
+			`${current} / ${total} ページ`,
+	},
+
+	/** 絞り込み・並べ替えフォーム（`IssueFilterForm`） */
+	filterForm: {
+		legend: "絞り込み・並べ替え",
+		keyword: "キーワード",
+		keywordHint: "タイトルと説明から探します。",
+		keywordPlaceholder: "例: 街灯",
+		scope: "スコープ",
+		scopeHint: "どこまで広がる課題かで絞ります。",
+		status: "ステータス",
+		statusHint: "解決の進み具合で絞ります。",
+		category: "カテゴリ",
+		categoryHint: "起票時と同じ表記で完全一致します。候補から選ぶと確実です。",
+		categoryPlaceholder: "例: 道路・交通",
+		sort: "並べ替え",
+		sortHint: "投稿された日時の順に並べます。",
+		all: "すべて",
+		submit: "絞り込む",
+		clear: "条件をすべて解除",
+	},
+
+	/** Issue 一覧ページ（`/issues`） */
+	issuesPage: {
+		heading: "Issue 一覧",
+		noMatch: "条件に合う Issue はありませんでした。条件をゆるめるか、",
+		noMatchSuffix: "してみてください。",
+		writeIssue: "Issue を書く",
+		backToHome: "トップへ戻る",
+	},
+
+	/** 自分の Issue 一覧ページ（`/my-issues`） */
+	myIssuesPage: {
+		heading: "自分が起票した Issue",
+		writeIssue: "Issue を書く",
+		viewAll: "すべての Issue を見る",
+		backToHome: "トップへ戻る",
+	},
+
+	/** Issue 詳細ページ（`/issues/[id]`） */
+	issueDetail: {
+		unavailableHeading: "Issue を表示できませんでした",
+		retryLater: "時間をおいて再度お試しください。",
+		backToList: "Issue 一覧へ戻る",
+		writeIssue: "Issue を書く",
+		descriptionHeading: "説明",
+		photoHeading: "写真",
+		/** 写真の代替テキスト。読み上げで何の写真かが分かるよう題名を添える */
+		photoAlt: (title: string) => `${title} の様子`,
+		detailsHeading: "詳細",
+		scope: "スコープ",
+		status: "ステータス",
+		category: "カテゴリ",
+		categoryUnset: "未設定",
+		/** 起票者（#88）。値は `getIssueAnonymityLabel` が出す */
+		author: "起票者",
+		location: "場所",
+		/** 地図の下に残す座標の数値表示 */
+		coordinates: (latitude: number, longitude: number) =>
+			`緯度 ${latitude} / 経度 ${longitude}`,
+		createdAt: "作成日時",
+		updatedAt: "最終更新",
+	},
+
+	/** ステータスの表示と変更（`StatusControl`） */
+	statusControl: {
+		heading: "ステータス",
+		unavailable:
+			"ステータスを変更できるかどうかを確認できませんでした。この Issue を起票した方は、ページを再読み込みしてください。",
+		current: "現在:",
+		changeTo: "変更先",
+		submit: "ステータスを更新",
+		submitting: "更新中…",
+		/** 更新完了の通知。ラベルは呼び出し側が `ISSUE_STATUS_LABELS` から引いて渡す */
+		updated: (statusLabel: string) =>
+			`ステータスを「${statusLabel}」に更新しました。`,
+	},
+
+	/** 「手伝います」（`HelpOfferButton`） */
+	helpOffer: {
+		heading: "解決に動く人",
+		fetchFailed:
+			"手伝いの表明を取得できませんでした。時間をおいて再度お試しください。",
+		none: "まだ誰も手を挙げていません。",
+		count: (total: number) => `${total} 人が「手伝います」と表明しています。`,
+		offer: "手伝います",
+		withdraw: "表明を取り消す",
+		signInHint: " — 表明するにはサインインが必要です",
+		youOffered: " — あなたはこの Issue に手を挙げています",
+		offerersHeading: "表明した人",
+		you: "あなた",
+		/** Clerk の User ID を短くしたものの前置き */
+		participant: (shortId: string) => `参加者 ${shortId}`,
+	},
+
+	/** コメント欄（`CommentSection`） */
+	comments: {
+		heading: (count: number) => `コメント（${count}）`,
+		guide:
+			"誰かを責めるためではなく、直すために書く場所です。似た経験、現地の状況、使えそうな制度や連絡先など、解決に近づく情報を歓迎します。",
+		fetchFailed:
+			"コメントを取得できませんでした。時間をおいて再度お試しください。",
+		empty: "まだコメントがありません。最初の一言を書いてみてください。",
+		signInRequired: "コメントの投稿にはサインインが必要です。",
+		label: "コメント",
+		lengthHint: (max: number) => `${max} 文字以内。`,
+		placeholder:
+			"例: 同じ場所で先週も転びそうになりました。市の窓口には〇〇という制度があるようです。",
+		submit: "コメントする",
+	},
+
+	/** 起票フォーム（`/issues/new`） */
+	newIssue: {
+		heading: "Issue を起票する",
+		lead: "気づいた「地球のバグ」を登録します。",
+		signInRequired: "投稿にはサインインが必要です。",
+		title: "タイトル",
+		titleHint:
+			"何が起きているかを一文で。場所と、いつから続いているかまで書くと伝わります。",
+		titlePlaceholder: "例: 〇〇公園の街灯が3ヶ月間消えたまま",
+		description: "説明",
+		descriptionHint:
+			"いつから / どこで / 誰が困っているか を書くと、解決に動く人が判断しやすくなります。試したこと（連絡先に問い合わせた等）があれば、それも書いてください。",
+		descriptionPlaceholder:
+			"例: 3ヶ月ほど前から公園南口の街灯が2本消えています。\n夜に子どもの下校路になっていて、保護者から不安の声が出ています。\n市の窓口には一度電話しましたが、その後の連絡はありません。",
+		scope: "スコープ",
+		/** 選択中のスコープの説明を添える。ラベルと説明は呼び出し側が渡す */
+		scopeHint: (label: string, description: string) =>
+			`どこまで広がる課題かを選びます。${label}: ${description}`,
+		category: "カテゴリ（任意）",
+		categoryHint:
+			"入力欄をクリックするか文字を入力すると候補が出ます。当てはまるものが無ければ自由に入力してください。後から同じ種類の Issue を探すときの手がかりになります。",
+		categoryPlaceholder: "例: 道路・交通",
+		photo: "写真（任意）",
+		photoHint:
+			"困りごとが写っている写真を 1 枚まで添付できます。写真は文章より状況が伝わり、手伝う人が判断しやすくなります。大きい写真は送信前に自動で縮小されます。",
+		photoProcessing: "写真を準備しています…",
+		photoPreviewAlt: "選択した写真のプレビュー",
+		photoRemove: "写真を外す",
+		photoTooLarge:
+			"写真のサイズが大きすぎます。別の写真を選ぶか、撮り直してください。",
+		photoUnreadable:
+			"この画像は読み込めませんでした。JPEG・PNG・WebP のいずれかの写真を選んでください。",
+		photoNotReady: "写真を準備しています。完了までお待ちください。",
+		locationLegend: "場所",
+		locationHint:
+			"困りごとが起きている場所の座標です。「現在地から入力」を押すと、ブラウザが位置情報の使用許可を確認します（許可すると緯度経度が自動で入ります）。現地にいないときは、地図サービスで目的の地点を右クリックすると座標を調べられます。",
+		latitude: "緯度",
+		latitudeHint: "-90 〜 90",
+		latitudePlaceholder: "例: 35.681236",
+		longitude: "経度",
+		longitudeHint: "-180 〜 180",
+		longitudePlaceholder: "例: 139.767125",
+		useCurrentPosition: "現在地から入力",
+		locating: "取得中…",
+		geolocationFailed:
+			"位置情報を取得できませんでした。緯度経度を直接入力してください。",
+		/** 名乗るかどうか（#88）。既定は未チェック＝匿名 */
+		showName: "名前を出す",
+		showNameHint:
+			"チェックしないと「匿名の方」として表示されます。困りごとは住んでいる場所が伝わることがあるため、既定では名前を出しません。投稿した後からは変更できないので、ここで決めてください。",
+		validationFailed: "入力内容を確認してください。",
+		submit: "起票する",
+		viewIssues: "Issue 一覧を見る",
+		myIssues: "自分が起票した Issue",
+		backToHome: "トップへ戻る",
+	},
+
+	/** 起票完了の表示（`IssueCreated`） */
+	issueCreated: {
+		created: (id: string) => `起票しました（ID: ${id}）。`,
+		viewCreated: "投稿した Issue を見る",
+		myIssues: "自分が起票した Issue",
+	},
+
+	/** 地図（`IssueMap`） */
+	map: {
+		/** 地図全体の `aria-label`。座標そのものは呼び出し側の dl に残る */
+		label: (title: string, latitude: number, longitude: number) =>
+			`${title} の位置。緯度 ${latitude} / 経度 ${longitude}`,
+	},
+} as const;
+
+/**
+ * リテラル型を緩めつつ、キーの構造と値の種類（文字列か関数か）は保つ。
+ *
+ * `JA_UI_MESSAGES` は `as const` なので、そのままだと各文言が
+ * 「その日本語の文字列そのもの」というリテラル型になり、`en` 側に
+ * 別の文字列を書いた時点で型エラーになってしまう（翻訳できない）。
+ *
+ * かといって `Record<string, string>` まで緩めると、キーの過不足も
+ * 打ち間違いも検出できなくなり、この辞書を型で縛る意味が消える。
+ * ここで緩めるのは値のリテラルだけで、キーの集合はそのまま残す。
+ *
+ * 値を差し込む文言は関数なので、引数と戻り値の型はそのまま保つ。
+ * `ja` が `(total: number) => string` のキーに `en` が文字列を置けば型エラーになる。
+ */
+type Translated<T> = T extends string
+	? string
+	: // biome-ignore lint/suspicious/noExplicitAny: 引数の型を保ったまま関数を通すため
+		T extends (...args: any[]) => string
+		? T
+		: { [K in keyof T]: Translated<T[K]> };
+
+/**
+ * UI 文言の型。`ja` の辞書から導出しているので、`ja` にキーを足すと
+ * `en` 側の不足が型エラーになる（＝翻訳漏れがコンパイル時に分かる）。
+ * 余分なキーも、`en` 側にだけ書けば `excess property check` で落ちる。
+ */
+export type UiMessages = Translated<typeof JA_UI_MESSAGES>;
+
+const EN_UI_MESSAGES: UiMessages = {
+	common: {
+		siteTitle: "World Issue Tracker",
+		siteDescription: "Visualize the bugs of our planet, and fix them together",
+		htmlLang: "en",
+		unexpectedError: "Something went wrong. Please try again later.",
+		signIn: "Sign in",
+		submitting: "Submitting…",
+	},
+
+	header: {
+		newIssue: "New issue",
+		myIssues: "My issues",
+		signIn: "Sign In",
+	},
+
+	localeSwitcher: {
+		label: "Language",
+		names: { ja: "日本語", en: "English" },
+	},
+
+	home: {
+		heading: "Visualize the bugs of our planet, and fix them together",
+		aboutHeading: "What is this service?",
+		aboutBody1:
+			"A place to post the problems around you as “issues” so that everyone can see them. From a broken streetlight nearby to a flaw in national policy — size does not matter here.",
+		aboutBody2:
+			"Anyone can comment on a posted issue, and raising your hand with “I can help” starts moving it toward a fix. The goal is not to find someone to blame, but to fix things.",
+		actionsLabel: "Main actions",
+		actionsHeading: "Start here",
+		viewIssues: "Browse issues",
+		viewIssuesHint: " — read the posted problems. No sign-in required",
+		writeIssue: "Write an issue",
+		writeIssueHint: " — post what troubles you. Posting requires signing in",
+		recentHeading: "Recent issues",
+		viewAll: "See all issues",
+		scopesHeading: "How far an issue reaches (scope)",
+		scopesBody:
+			"Personal worries and global problems are part of the same continuum. Every issue is posted at one of these five levels.",
+		statusesHeading: "How an issue gets resolved",
+		statusesBody: "A posted issue moves through these states in order.",
+	},
+
+	issueList: {
+		fetchFailed: "Could not load issues. Please try again later.",
+		empty: "No issues yet. Be the first to post one.",
+		countSummary: (total: number, shown: number) =>
+			`Showing ${shown} of ${total}`,
+		rangeSummary: (total: number, from: number, to: number) =>
+			`Showing ${from}–${to} of ${total}`,
+	},
+
+	myIssueList: {
+		signInRequired: "Sign in to see the issues you posted.",
+		signInHint: "Sign in from “Sign In” at the top right to see them here.",
+		empty: "You have not posted any issues yet.",
+		writeFirst: "Write your first one",
+	},
+
+	pagination: {
+		label: "Pagination",
+		previous: "Previous",
+		next: "Next",
+		position: (current: number, total: number) => `Page ${current} of ${total}`,
+	},
+
+	filterForm: {
+		legend: "Filter and sort",
+		keyword: "Keyword",
+		keywordHint: "Searches titles and descriptions.",
+		keywordPlaceholder: "e.g. streetlight",
+		scope: "Scope",
+		scopeHint: "Filter by how far the problem reaches.",
+		status: "Status",
+		statusHint: "Filter by how far along the fix is.",
+		category: "Category",
+		categoryHint:
+			"Matches exactly what was typed when posting. Picking from the suggestions is safest.",
+		categoryPlaceholder: "e.g. Roads and transport",
+		sort: "Sort",
+		sortHint: "Orders by the time of posting.",
+		all: "All",
+		submit: "Apply",
+		clear: "Clear all filters",
+	},
+
+	issuesPage: {
+		heading: "Issues",
+		noMatch: "No issues matched your filters. Try loosening them, or ",
+		noMatchSuffix: ".",
+		writeIssue: "Write an issue",
+		backToHome: "Back to home",
+	},
+
+	myIssuesPage: {
+		heading: "Issues you posted",
+		writeIssue: "Write an issue",
+		viewAll: "See all issues",
+		backToHome: "Back to home",
+	},
+
+	issueDetail: {
+		unavailableHeading: "Could not display this issue",
+		retryLater: "Please try again later.",
+		backToList: "Back to the issue list",
+		writeIssue: "Write an issue",
+		descriptionHeading: "Description",
+		photoHeading: "Photo",
+		photoAlt: (title: string) => `Photo of ${title}`,
+		detailsHeading: "Details",
+		scope: "Scope",
+		status: "Status",
+		category: "Category",
+		categoryUnset: "Not set",
+		/** 起票者（#88）。値は `getIssueAnonymityLabel` が出す */
+		author: "Posted by",
+		location: "Location",
+		coordinates: (latitude: number, longitude: number) =>
+			`Latitude ${latitude} / Longitude ${longitude}`,
+		createdAt: "Created",
+		updatedAt: "Last updated",
+	},
+
+	statusControl: {
+		heading: "Status",
+		unavailable:
+			"Could not check whether you may change the status. If you posted this issue, please reload the page.",
+		current: "Current:",
+		changeTo: "Change to",
+		submit: "Update status",
+		submitting: "Updating…",
+		updated: (statusLabel: string) => `Status updated to “${statusLabel}”.`,
+	},
+
+	helpOffer: {
+		heading: "People moving to fix this",
+		fetchFailed: "Could not load help offers. Please try again later.",
+		none: "Nobody has raised their hand yet.",
+		count: (total: number) =>
+			total === 1
+				? "1 person has offered to help."
+				: `${total} people have offered to help.`,
+		offer: "I can help",
+		withdraw: "Withdraw my offer",
+		signInHint: " — sign in to offer help",
+		youOffered: " — you have raised your hand for this issue",
+		offerersHeading: "People who offered",
+		you: "You",
+		participant: (shortId: string) => `Participant ${shortId}`,
+	},
+
+	comments: {
+		heading: (count: number) => `Comments (${count})`,
+		guide:
+			"This is a place to write in order to fix things, not to blame anyone. Similar experiences, conditions on the ground, useful programs or contacts — anything that brings a fix closer is welcome.",
+		fetchFailed: "Could not load comments. Please try again later.",
+		empty: "No comments yet. Be the first to say something.",
+		signInRequired: "Sign in to post a comment.",
+		label: "Comment",
+		lengthHint: (max: number) => `${max} characters or fewer.`,
+		placeholder:
+			"e.g. I nearly tripped at the same spot last week. The city office seems to have a program for this.",
+		submit: "Post comment",
+	},
+
+	newIssue: {
+		heading: "Post an issue",
+		lead: "Register a “bug of our planet” that you noticed.",
+		signInRequired: "Sign in to post.",
+		title: "Title",
+		titleHint:
+			"One sentence on what is happening. Adding where it is and how long it has lasted helps.",
+		titlePlaceholder: "e.g. Streetlight at the park has been out for 3 months",
+		description: "Description",
+		descriptionHint:
+			"Writing since when / where / who is affected helps people decide whether they can act. If you have already tried something (contacting an office, for example), include that too.",
+		descriptionPlaceholder:
+			"e.g. Two streetlights at the south entrance of the park have been out for about three months.\nChildren walk home along this path at night, and parents are worried.\nI called the city office once but have heard nothing since.",
+		scope: "Scope",
+		scopeHint: (label: string, description: string) =>
+			`Choose how far the problem reaches. ${label}: ${description}`,
+		category: "Category (optional)",
+		categoryHint:
+			"Click the field or start typing to see suggestions. If none fit, type your own. It becomes a clue when looking for similar issues later.",
+		categoryPlaceholder: "e.g. Roads and transport",
+		photo: "Photo (optional)",
+		photoHint:
+			"You can attach up to one photo showing the problem. A photo conveys the situation better than text and helps people decide whether they can act. Large photos are resized automatically before sending.",
+		photoProcessing: "Preparing the photo…",
+		photoPreviewAlt: "Preview of the selected photo",
+		photoRemove: "Remove photo",
+		photoTooLarge:
+			"This photo is too large. Choose another photo, or take a new one.",
+		photoUnreadable:
+			"This image could not be read. Choose a JPEG, PNG, or WebP photo.",
+		photoNotReady:
+			"The photo is still being prepared. Please wait until it is done.",
+		locationLegend: "Location",
+		locationHint:
+			"The coordinates of where the problem is. Pressing “Use my location” asks the browser for permission to use your location (allowing it fills in the latitude and longitude). If you are not on site, right-click the spot in a map service to look up its coordinates.",
+		latitude: "Latitude",
+		latitudeHint: "-90 to 90",
+		latitudePlaceholder: "e.g. 35.681236",
+		longitude: "Longitude",
+		longitudeHint: "-180 to 180",
+		longitudePlaceholder: "e.g. 139.767125",
+		useCurrentPosition: "Use my location",
+		locating: "Locating…",
+		geolocationFailed:
+			"Could not get your location. Please enter the coordinates directly.",
+		/** 名乗るかどうか（#88）。既定は未チェック＝匿名 */
+		showName: "Show my name",
+		showNameHint:
+			"If you leave this unchecked, you will be shown as “Anonymous”. Issues can reveal where you live, so names are hidden by default. This cannot be changed after posting, so please decide here.",
+		validationFailed: "Please check what you entered.",
+		submit: "Post issue",
+		viewIssues: "Browse issues",
+		myIssues: "Issues you posted",
+		backToHome: "Back to home",
+	},
+
+	issueCreated: {
+		created: (id: string) => `Posted (ID: ${id}).`,
+		viewCreated: "View the issue you posted",
+		myIssues: "Issues you posted",
+	},
+
+	map: {
+		label: (title: string, latitude: number, longitude: number) =>
+			`Location of ${title}. Latitude ${latitude} / Longitude ${longitude}`,
+	},
+};
+
+/**
+ * UI 文言の辞書。`ja` を基準にして `en` を型で縛っている。
+ *
+ * `Record<Locale, UiMessages>` なので、`Locale` に言語を足したときも
+ * 辞書の不足が型エラーになる。
+ */
+export const UI_MESSAGES: Record<Locale, UiMessages> = {
+	ja: JA_UI_MESSAGES,
+	en: EN_UI_MESSAGES,
+};
+
+/** UI 文言を引く。ロケール省略時は既定ロケール */
+export const getUiMessages = (locale: Locale = DEFAULT_LOCALE): UiMessages =>
+	UI_MESSAGES[locale];
+
+/**
+ * 任意の値をロケールとして読む。既知でなければ既定ロケールに倒す。
+ *
+ * ロケールの出どころは Cookie とクエリ文字列で、どちらも利用者が手で
+ * 書き換えられる。壊れた値で `UI_MESSAGES[locale]` が `undefined` になり
+ * 画面全体が落ちる、という壊れ方をさせない。
+ */
+export const parseLocale = (value: string | null | undefined): Locale => {
+	const parsed = Locale.safeParse(value);
+	return parsed.success ? parsed.data : DEFAULT_LOCALE;
+};
+
+/**
  * キーワード検索語の上限。
  *
  * 認証不要の公開エンドポイントなので、任意長の文字列を LIKE パターンに
@@ -417,3 +1033,52 @@ export const ListIssuesQuerySchema = z
 		path: ["cursor"],
 	});
 export type ListIssuesQuery = z.infer<typeof ListIssuesQuerySchema>;
+
+/**
+ * Clerk のキーが開発用インスタンスのものか（#98）。
+ *
+ * Clerk のキーは接頭辞で種別が分かる。publishable key は `pk_test_` /
+ * `pk_live_`、secret key は `sk_test_` / `sk_live_` で始まり、`test` が
+ * 開発用インスタンス、`live` が本番用インスタンスを指す。
+ *
+ * この判定を置いている理由は、開発用キーが本番に出ても**何も落ちない**から。
+ * ローカルでも CI でも本番でも同じように認証が通り、テストも型検査も
+ * ビルドも全部緑になる。実際 #98 は、本番サイトを人が操作していて
+ * ブラウザのコンソールに出た Clerk 自身の警告で見つかっている。
+ *
+ * 開発用インスタンスには Clerk 側の利用者数上限があり、上限に達すると
+ * サインインできなくなる。つまり「人が増えたら止まる」種類の不備で、
+ * 出てから気付くのでは遅い。ビルド時に落とすための判定材料にする。
+ *
+ * 接頭辞で見ているのは、キーの本体（base64 のインスタンス識別子）を
+ * 復号しなくても種別が確定するため。Clerk がこの接頭辞を変えた場合は
+ * 判定が効かなくなるが、そのときは `null`（判定不能）を返して
+ * 呼び出し側に委ねる。誤って「本番用」と断定して素通りさせるより、
+ * 判定できないことが分かるほうが安全。
+ */
+export type ClerkKeyKind = "development" | "production";
+
+export function clerkKeyKind(key: string | undefined): ClerkKeyKind | null {
+	if (!key) {
+		return null;
+	}
+	// `pk_test_` / `sk_test_` / `pk_live_` / `sk_live_` のいずれか。
+	// 接頭辞だけを見て、本体の中身は問わない。
+	const match = /^(?:pk|sk)_(test|live)_/.exec(key);
+	if (!match) {
+		return null;
+	}
+	return match[1] === "live" ? "production" : "development";
+}
+
+/**
+ * 本番デプロイで使ってはいけないキーか（#98）。
+ *
+ * 判定不能（`null`）を「使ってよい」に倒していないことに注意。キーの形式が
+ * 想定と違うなら、それは Clerk の仕様変更か設定ミスのどちらかで、
+ * どちらも本番に黙って出してよい状態ではない。空文字・未設定も同様に弾く
+ * （認証が丸ごと動かないビルドを本番へ出すことになるため）。
+ */
+export function isUnsafeForProduction(key: string | undefined): boolean {
+	return clerkKeyKind(key) !== "production";
+}

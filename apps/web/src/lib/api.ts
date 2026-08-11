@@ -198,16 +198,65 @@ function messageFromErrorBody(body: unknown, status: number): string {
 }
 
 /**
- * Issue を起票する。
+ * 起票リクエストのボディとヘッダを組み立てる。
+ *
+ * 写真（#65）があるときだけ `multipart/form-data` にする。写真の無い
+ * 投稿まで multipart に寄せると、送るバイト数が増えるうえに、
+ * API 側で数値項目を文字列から復元する経路を通ることになる。
+ * 送る側が形を選べるので、必要なときだけ切り替える。
+ *
+ * multipart のとき `Content-Type` を指定しないのは、境界文字列
+ * （boundary）を `fetch` が付ける必要があるため。手で
+ * `multipart/form-data` とだけ書くと境界が欠けてサーバー側で解析できない。
+ */
+function buildCreateIssueRequest(
+	input: CreateIssue,
+	photo: File | null,
+	token: string,
+): { headers: Record<string, string>; body: BodyInit } {
+	const headers: Record<string, string> = {
+		Authorization: `Bearer ${token}`,
+	};
+
+	if (!photo) {
+		return {
+			headers: { ...headers, "Content-Type": "application/json" },
+			body: JSON.stringify(input),
+		};
+	}
+
+	const form = new FormData();
+	form.set("title", input.title);
+	form.set("description", input.description);
+	form.set("scope", input.scope);
+	form.set("latitude", String(input.latitude));
+	form.set("longitude", String(input.longitude));
+	// 任意項目。未入力なら送らない（空文字を送ると `min(1)` に当たる）
+	if (input.category !== undefined) {
+		form.set("category", input.category);
+	}
+	form.set("photo", photo);
+
+	return { headers, body: form };
+}
+
+/**
+ * Issue を起票する。写真（#65）は任意で、あれば multipart で一緒に送る。
  *
  * Web と API は別オリジンなので、Clerk のセッション Cookie は API へ送られない。
  * `useAuth().getToken()` で取ったセッショントークンを `Authorization: Bearer` で
  * 明示的に渡す必要がある（API 側もこの経路を想定しており、Bearer があれば
  * Origin 検証を免除する — `apps/api/src/middleware/origin.ts`）。
+ *
+ * 写真は送る前にブラウザ側で縮小してある前提（`lib/photo.ts`）。
+ * ここでサイズを検査していないのは、縮小しても上限を超えた場合に
+ * 「フォームで止めて理由を出す」方が、送信してから 400 を見せるより
+ * 早く伝わるため。サーバー側の上限チェックは別途必ず効いている。
  */
 export async function createIssue(
 	input: CreateIssue,
 	token: string | null,
+	photo: File | null = null,
 ): Promise<{ id: string }> {
 	if (!token) {
 		throw new CreateIssueError(
@@ -216,15 +265,14 @@ export async function createIssue(
 		);
 	}
 
+	const { headers, body } = buildCreateIssueRequest(input, photo, token);
+
 	let response: Response;
 	try {
 		response = await fetch(`${API_BASE_URL}/issues`, {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${token}`,
-			},
-			body: JSON.stringify(input),
+			headers,
+			body,
 		});
 	} catch {
 		// fetch が reject するのは通信そのものが成立しなかった場合

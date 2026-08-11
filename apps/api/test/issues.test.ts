@@ -12,6 +12,7 @@ vi.mock("@clerk/backend", async () => {
 	return clerkBackendMockFactory();
 });
 
+import type { IssueRow } from "../src/db/rows";
 import { createApp } from "../src/index";
 import {
 	PUBLIC_ISSUE_COLUMNS as PUBLIC_ISSUE_COLUMNS_FOR_TEST,
@@ -2138,8 +2139,10 @@ describe("Issues CRUD", () => {
 			const res = await app.request("/issues/mine", {}, env);
 			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
+			// テーブルの公開カラムに加えて、行に無い派生フィールド `has_photo`
+			// （写真の有無、#65）が載る。公開一覧と同じ形であることが要点
 			expect(Object.keys(body.data[0]).sort()).toEqual(
-				[...PUBLIC_ISSUE_COLUMNS_FOR_TEST].sort(),
+				[...PUBLIC_ISSUE_COLUMNS_FOR_TEST, "has_photo"].sort(),
 			);
 		});
 
@@ -2187,6 +2190,9 @@ describe("Issues CRUD", () => {
 			"category",
 			"created_at",
 			"updated_at",
+			// 写真（#65）は有無だけを返す。R2 のキー（`photo_key`）は内部の
+			// 識別子なので載せない。画像そのものは `GET /issues/:id/photo`
+			"has_photo",
 			// 匿名で起票されたかどうか（#88）。真偽値だけで、起票者は載らない。
 			"is_anonymous",
 		];
@@ -2494,7 +2500,17 @@ describe("Issues CRUD", () => {
 
 				expect(row).not.toBeNull();
 				expect(row).not.toHaveProperty("user_id");
-				expect(Object.keys(row ?? {}).sort()).toEqual([...PUBLIC_KEYS].sort());
+				// SELECT が取るのは「公開カラム + 写真のカラム」。写真のカラム
+				// （#65）は値を返さないが、`has_photo` を組み立てるために読む
+				// 必要があり、落とすのは DTO 層（`toPublicIssue`）の仕事。
+				// `has_photo` は行に無い派生フィールドなのでここには現れない
+				expect(Object.keys(row ?? {}).sort()).toEqual(
+					[
+						...PUBLIC_KEYS.filter((key) => key !== "has_photo"),
+						"photo_key",
+						"photo_content_type",
+					].sort(),
+				);
 			});
 
 			// 書き込み系も SELECT 層（= RETURNING 句）で絞っていること。
@@ -2533,13 +2549,18 @@ describe("Issues CRUD", () => {
 				// 実際に SELECT * で取った行を GET と同じ整形にかけて確かめる。
 				await createIssue();
 
+				// `SELECT *` が返すのは内部フィールドまで含んだ行なので `IssueRow` で受ける
+				// （公開してよい形の `PublicIssue` ではない）。
 				const rawQuery = env.DB.prepare("SELECT * FROM issues LIMIT 1");
-				const raw = await rawQuery.first<Record<string, unknown>>();
+				const raw = await rawQuery.first<IssueRow>();
 
 				// 前提: 生の行には user_id が含まれている
 				expect(raw).toHaveProperty("user_id", "user_2abcSECRETclerkid");
+				if (!raw) {
+					throw new Error("SELECT * が行を返さなかった");
+				}
 
-				const shaped = toPublicIssueForTest(raw ?? {});
+				const shaped = toPublicIssueForTest(raw);
 				expect(shaped).not.toHaveProperty("user_id");
 				expect(Object.keys(shaped).sort()).toEqual([...PUBLIC_KEYS].sort());
 			});

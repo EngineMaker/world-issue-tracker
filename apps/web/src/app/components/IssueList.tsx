@@ -1,8 +1,10 @@
 import {
 	DEFAULT_LOCALE,
 	getIssueAnonymityLabel,
+	getUiMessages,
 	ISSUE_SCOPE_LABELS,
 	ISSUE_STATUS_LABELS,
+	type Locale,
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import type { FetchIssuesResult, PublicIssue } from "../../lib/issues";
@@ -18,6 +20,9 @@ import type { FetchIssuesResult, PublicIssue } from "../../lib/issues";
  *
  * export しているのはテストのため。ラベルを写した実装でも描画結果は同じになるため、
  * 描画からは二重管理を見分けられない。shared の辞書と同一かをテストが直接見る。
+ *
+ * ロケール別に引けるようにしたのは Issue #82。既定ロケールの分は
+ * これまでの名前のまま残してある（既存のテストと呼び出し側が参照している）。
  */
 export const scopeLabels = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
 export const statusLabels = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
@@ -31,6 +36,8 @@ export const statusLabels = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
  *
  * 表示は UTC 固定にしている。サーバーとブラウザでタイムゾーンが違うと
  * ハイドレーション時に文言が食い違うため、Server Component 側で決め切る。
+ *
+ * 日付の書式のロケール対応は Issue #82 の範囲外（別途判断）。
  */
 export function formatCreatedAt(createdAt: string): string {
 	const date = new Date(`${createdAt.replace(" ", "T")}Z`);
@@ -47,17 +54,18 @@ export function formatCreatedAt(createdAt: string): string {
  * 公開一覧と自分の一覧（`MyIssueList`）で同じ見た目を使う。
  * 一覧ごとに書き分けると、表示項目を足したときに片方だけ取り残される。
  */
-export function IssueCard({ issue }: { issue: PublicIssue }) {
+export function IssueCard({
+	issue,
+	locale = DEFAULT_LOCALE,
+}: {
+	issue: PublicIssue;
+	locale?: Locale;
+}) {
+	const scopes = ISSUE_SCOPE_LABELS[locale];
+	const statuses = ISSUE_STATUS_LABELS[locale];
+
 	return (
-		<li
-			style={{
-				border: "1px solid #eee",
-				borderRadius: "6px",
-				padding: "0.75rem 1rem",
-				marginBottom: "0.75rem",
-				listStyle: "none",
-			}}
-		>
+		<li className="issue-card">
 			{/*
 			  タイトルを詳細ページ (`/issues/[id]`) への入口にする。
 			  コメント欄はその画面にあるため、ここに導線が無いと
@@ -66,14 +74,18 @@ export function IssueCard({ issue }: { issue: PublicIssue }) {
 			  カード全体ではなくタイトルをリンクにする。カード全体を <a> で
 			  包むと、読み上げ時に説明文まで一続きのリンク名として読まれる
 			*/}
-			<h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem" }}>
+			<h3 className="issue-card-title">
 				<Link href={`/issues/${issue.id}`}>{issue.title}</Link>
 			</h3>
-			<p style={{ margin: "0 0 0.5rem", color: "#444" }}>{issue.description}</p>
-			<p style={{ margin: 0, fontSize: "0.85rem", color: "#666" }}>
-				<span>{scopeLabels[issue.scope].label}</span>
+			{/*
+			  タイトルと説明は利用者が投稿した文章なので、そのまま出す。
+			  投稿本文の翻訳は Issue #66（LLM 翻訳）の担当
+			*/}
+			<p className="issue-card-description">{issue.description}</p>
+			<p className="issue-meta">
+				<span>{scopes[issue.scope].label}</span>
 				{" / "}
-				<span>{statusLabels[issue.status]}</span>
+				<span>{statuses[issue.status]}</span>
 				{issue.category ? (
 					<>
 						{" / "}
@@ -91,7 +103,7 @@ export function IssueCard({ issue }: { issue: PublicIssue }) {
 				  どちらの世界なのかが画面から読み取れない
 				*/}
 				{" / "}
-				<span>{getIssueAnonymityLabel(issue.is_anonymous)}</span>
+				<span>{getIssueAnonymityLabel(issue.is_anonymous, locale)}</span>
 			</p>
 		</li>
 	);
@@ -103,24 +115,30 @@ export function IssueCard({ issue }: { issue: PublicIssue }) {
  * 取得結果を props で受け取り、成功・0 件・失敗の 3 状態をすべて描き分ける。
  * 取得そのものは呼び出し側（`page.tsx`）が行う。
  */
-export function IssueList({ result }: { result: FetchIssuesResult }) {
+export function IssueList({
+	result,
+	locale = DEFAULT_LOCALE,
+}: {
+	result: FetchIssuesResult;
+	locale?: Locale;
+}) {
+	const messages = getUiMessages(locale);
+
 	if (!result.ok) {
 		return (
-			<div style={{ color: "#b00", padding: "0.5rem 0" }}>
-				<p style={{ margin: "0 0 0.25rem" }}>
-					Issue を取得できませんでした。時間をおいて再度お試しください。
-				</p>
-				<p style={{ margin: 0, fontSize: "0.85rem" }}>{result.error}</p>
+			<div className="error-block">
+				<p className="block-message">{messages.issueList.fetchFailed}</p>
+				{/*
+				  API が返したエラーの文言は翻訳していない（Issue #82 の範囲外）。
+				  上の一文で何が起きたかは伝わるので、詳細は原文のまま出す
+				*/}
+				<p className="block-detail">{result.error}</p>
 			</div>
 		);
 	}
 
 	if (result.issues.length === 0) {
-		return (
-			<p style={{ color: "#666" }}>
-				まだ Issue がありません。最初の 1 件を起票してみてください。
-			</p>
-		);
+		return <p className="text-soft">{messages.issueList.empty}</p>;
 	}
 
 	// 複数ページに分かれているときは「N 件中 M 件」だけではどこを見ているのか
@@ -135,14 +153,14 @@ export function IssueList({ result }: { result: FetchIssuesResult }) {
 
 	return (
 		<>
-			<p style={{ color: "#666", fontSize: "0.85rem" }}>
+			<p className="list-summary">
 				{isPaged
-					? `${result.total} 件中 ${from} 〜 ${to} 件目を表示`
-					: `${result.total} 件中 ${result.issues.length} 件を表示`}
+					? messages.issueList.rangeSummary(result.total, from, to)
+					: messages.issueList.countSummary(result.total, result.issues.length)}
 			</p>
-			<ul style={{ padding: 0, margin: 0 }}>
+			<ul className="issue-cards">
 				{result.issues.map((issue) => (
-					<IssueCard key={issue.id} issue={issue} />
+					<IssueCard key={issue.id} issue={issue} locale={locale} />
 				))}
 			</ul>
 		</>

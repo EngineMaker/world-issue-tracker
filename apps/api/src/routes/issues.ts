@@ -1,13 +1,18 @@
 import { getAuth } from "@hono/clerk-auth";
+import type { IssuePhotoContentType } from "@world-issue-tracker/shared";
 import {
 	buildIssueCursor,
 	CreateIssueSchema,
 	escapeLikePattern,
+	ISSUE_PHOTO_CONTENT_TYPES,
+	ISSUE_PHOTO_MAX_BYTES,
+	isIssuePhotoContentType,
 	ListIssuesQuerySchema,
 	parseIssueCursor,
 	UpdateIssueSchema,
 } from "@world-issue-tracker/shared";
 import { type Context, Hono } from "hono";
+import type { IssueRow } from "../db/rows";
 import type { Bindings } from "../index";
 import { requireAuth, viewerUserId } from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
@@ -54,7 +59,21 @@ export const PUBLIC_ISSUE_COLUMNS = [
 	"is_anonymous",
 ] as const;
 
-type PublicIssue = Record<(typeof PUBLIC_ISSUE_COLUMNS)[number], unknown>;
+/**
+ * SELECT には要るが、レスポンスには載せないカラム。
+ *
+ * `photo_key` は R2 のオブジェクトキーで、当てれば画像そのものが取れる
+ * 内部の識別子。公開すると `GET /issues/:id/photo` を経由しない読み方が
+ * 生まれ、将来の非公開化（通報対応）が効かない経路になる。
+ * 画像の有無は `has_photo` という派生フィールドに畳んで返す。
+ *
+ * `photo_content_type` も同じ理由で載せない。画像の形式は配信側の
+ * `Content-Type` が伝えるもので、Issue の行の属性として見せる意味が無い。
+ */
+const INTERNAL_PHOTO_COLUMNS = [
+	"photo_key",
+	"photo_content_type",
+] as const satisfies readonly (keyof IssueRow)[];
 
 /**
  * JSON で真偽値として返すカラム。
@@ -67,35 +86,95 @@ type PublicIssue = Record<(typeof PUBLIC_ISSUE_COLUMNS)[number], unknown>;
 const BOOLEAN_ISSUE_COLUMNS: ReadonlySet<string> = new Set(["is_anonymous"]);
 
 /**
- * 一覧の SELECT が返す行のうち、カーソル組み立てに使う分だけを型付けしたもの。
- * 残りのカラムは `toPublicIssue` が拾うため、ここでは列挙しない。
+ * レスポンスに載る Issue。`IssueRow` から公開カラムだけを取り出し、
+ * 写真の有無を表す派生フィールドを足したもの。
+ *
+ * 素の列は `PUBLIC_ISSUE_COLUMNS` から導いているので、あの配列に無いキー
+ * （`user_id` など）はこの型にも現れない。逆に配列へカラムを足すと、
+ * `IssueRow` に無い名前ならここで型エラーになる。
+ *
+ * ただし型が捕まえるのは「テーブルに存在しないカラム名」までで、
+ * **`user_id` を配列に足す変更は型では止まらない**（実在するカラムなので
+ * `Pick` の制約を満たしてしまう）。何を公開してよいかは人が決める判断であり、
+ * 型で表現できない。そこを守っているのは `test/issues.test.ts` の
+ * `Defence layers` で、実際に足すとあのテストが落ちる。
+ * このリストを触るときは「型が通ったから安全」と判断しないこと。
  */
-type CursorRow = Record<string, unknown> & { created_at: string; id: string };
+type PublicIssue = Omit<
+	Pick<IssueRow, (typeof PUBLIC_ISSUE_COLUMNS)[number]>,
+	"is_anonymous"
+> & {
+	/**
+	 * この Issue に写真が添付されているか。
+	 *
+	 * 画面は写真があればそれを、無ければ地図（#63）を出す。その分岐に
+	 * 必要なのは有無だけで、キーの中身は要らない。
+	 */
+	has_photo: boolean;
+
+	/**
+	 * 匿名で起票されたか（#88）。
+	 *
+	 * `IssueRow` 側は SQLite の生の姿である `number`（0/1）だが、
+	 * レスポンスでは真偽値として返す（`toPublicIssue` が変換する）。
+	 * ここで `Omit` して上書きしているのはそのため。素の `Pick` のままだと
+	 * 型が `number` になり、実際に返る値と食い違う。
+	 */
+	is_anonymous: boolean;
+};
+
+/**
+ * `toPublicIssue` が受け取れる行。
+ *
+ * 二段構えの 2 段目は「SELECT が内部フィールドまで拾ってしまった行」を
+ * 落とすためのものなので、`IssueRow` そのもの（= `SELECT *` 相当）も
+ * 公開カラムだけに絞った行も受けられる必要がある。公開カラムだけを必須にし、
+ * 残りは任意として扱う。
+ *
+ * 必須の側を `PublicIssue` ではなく `Pick` で書いているのは、
+ * `PublicIssue` が派生フィールド（`has_photo`）を持つため。あれは
+ * この関数が組み立てるものであって、入力の行には無い。
+ */
+type IssueRowLike = Pick<IssueRow, (typeof PUBLIC_ISSUE_COLUMNS)[number]> &
+	Partial<IssueRow>;
 
 /**
  * レスポンスに載せるカラムだけを並べた SELECT / RETURNING 句。
  * `SELECT *`・`RETURNING *` にすると、カラムを追加した瞬間にそれが公開されてしまう。
+ *
+ * `photo_key` はここに含める。値そのものは返さないが、`has_photo` を
+ * 組み立てるために読む必要があるため（`toPublicIssue` が落とす）。
  */
-export const PUBLIC_SELECT = PUBLIC_ISSUE_COLUMNS.join(", ");
+export const PUBLIC_SELECT = [
+	...PUBLIC_ISSUE_COLUMNS,
+	...INTERNAL_PHOTO_COLUMNS,
+].join(", ");
 
 /**
  * DB の行から公開してよいカラムだけを取り出す。
  *
  * SELECT / RETURNING でカラムを絞ったうえで、返す直前にもここを通す二段構えに
  * している。句の書き漏れがあっても、内部フィールドはここで落ちる。
+ *
+ * `photo_key` は明示的に列挙から外し、有無だけを `has_photo` に畳む。
+ * 空文字が入ることは無い想定だが、`Boolean()` ではなく null 比較にすると
+ * 「キーはあるが空」を写真ありと誤って扱うため、真値判定に寄せている。
  */
-export function toPublicIssue(row: Record<string, unknown>): PublicIssue {
-	return Object.fromEntries(
-		PUBLIC_ISSUE_COLUMNS.map((column) => [
-			column,
-			// 真偽値のカラムだけ 0/1 を boolean に直す。NULL は「値が無い」
-			// ではなく「匿名でない」に倒さないよう、Boolean() ではなく
-			// 明示的に 0 との比較で判定する（NOT NULL なので通常は来ない）。
-			BOOLEAN_ISSUE_COLUMNS.has(column)
-				? row[column] !== 0 && row[column] !== false
-				: row[column],
-		]),
-	) as PublicIssue;
+export function toPublicIssue(row: IssueRowLike): PublicIssue {
+	return {
+		...(Object.fromEntries(
+			PUBLIC_ISSUE_COLUMNS.map((column) => [
+				column,
+				// 真偽値のカラムだけ 0/1 を boolean に直す。NULL は「値が無い」
+				// ではなく「匿名でない」に倒さないよう、Boolean() ではなく
+				// 明示的に 0 との比較で判定する（NOT NULL なので通常は来ない）。
+				BOOLEAN_ISSUE_COLUMNS.has(column) ? row[column] !== 0 : row[column],
+			]),
+			// 真偽値へ直したカラムがあるので、`IssueRow` そのままの形にはならない。
+			// 変換後の形（＝レスポンスの形）で受ける
+		) as Omit<PublicIssue, "has_photo">),
+		has_photo: Boolean(row.photo_key),
+	};
 }
 
 /**
@@ -183,12 +262,202 @@ issues.onError((err, c) => {
 	throw err;
 });
 
+/**
+ * 起票リクエストのボディを読む。JSON と multipart/form-data の両方を受ける。
+ *
+ * 写真（#65）は multipart でしか送れないが、写真を付けない経路まで
+ * multipart に寄せると、既存のクライアントと API を叩くだけの利用者に
+ * 破壊的変更を強いる。Content-Type で分けて両方を受ける。
+ *
+ * multipart のときは全フィールドが文字列で届くため、数値項目
+ * （latitude / longitude）はここで数値に直してからスキーマへ渡す。
+ * `Number("")` が 0 になるのを避けるため、空文字は undefined に倒して
+ * 「未入力」としてスキーマの required エラーに落とす（web 側の
+ * `toNumber` と同じ考え方）。
+ *
+ * 写真そのものは `photo` パートから取り出し、スキーマの検証対象には
+ * しない（Zod は File を検証する用途に向かず、サイズと MIME の検査は
+ * この後で個別に行う）。
+ */
+async function readCreateIssueBody(
+	c: Context<IssuesEnv>,
+): Promise<{ fields: unknown; photo: UploadedPhoto | null }> {
+	const contentType = c.req.header("Content-Type") ?? "";
+
+	if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
+		return { fields: await c.req.json(), photo: null };
+	}
+
+	const form = await c.req.formData();
+
+	const text = (name: string): string | undefined => {
+		const value = form.get(name);
+		if (typeof value !== "string") {
+			return undefined;
+		}
+		return value;
+	};
+	const numeric = (name: string): number | undefined => {
+		const value = text(name);
+		// 空文字は「未入力」。0 に化けさせない
+		return value === undefined || value.trim() === ""
+			? undefined
+			: Number(value);
+	};
+
+	const photo = toPhotoFile(form.get("photo"));
+
+	return {
+		fields: {
+			title: text("title"),
+			description: text("description"),
+			scope: text("scope"),
+			latitude: numeric("latitude"),
+			longitude: numeric("longitude"),
+			// カテゴリは任意。パート自体が無い場合と空文字の場合の両方を
+			// 「未指定」として扱う（空文字のままだと `min(1)` に当たる）
+			category: text("category")?.trim() || undefined,
+		},
+		photo,
+	};
+}
+
+/**
+ * アップロードされた画像として扱うのに必要な最小限の形。
+ *
+ * `File` 型を使っていないのは、`@cloudflare/workers-types` の
+ * `FormData.get()` が `string | null` としか宣言されておらず、実行時に
+ * 返る `File` を型で表現できないため（`File` は値としても存在しないので
+ * `instanceof` も書けない）。ここで使うのはサイズ・MIME・バイト列の
+ * 3 つだけなので、その形だけを要求する。
+ */
+type UploadedPhoto = {
+	size: number;
+	type: string;
+	arrayBuffer(): Promise<ArrayBuffer>;
+};
+
+/**
+ * `photo` パートを画像として取り出す。画像でなければ null。
+ *
+ * サイズ 0 を除いているのは、ファイルを選ばずに送信したときブラウザが
+ * 空のファイルパート（filename="" / size 0）を付けることがあるため。
+ * 「写真なし」として扱わないと、中身の無い画像を保存してしまう。
+ *
+ * 文字列のパート（フォームのテキスト項目）は画像ではないので null。
+ * 上の型が示すとおり、判別は宣言された型ではなく実際の値の形で行う。
+ */
+function toPhotoFile(value: unknown): UploadedPhoto | null {
+	if (value === null || typeof value !== "object") {
+		return null;
+	}
+	const candidate = value as Partial<UploadedPhoto>;
+	if (
+		typeof candidate.size !== "number" ||
+		typeof candidate.type !== "string" ||
+		typeof candidate.arrayBuffer !== "function"
+	) {
+		return null;
+	}
+	return candidate.size > 0 ? (candidate as UploadedPhoto) : null;
+}
+
+/**
+ * 添付された写真を検証する。問題があればエラーレスポンスを返す。
+ *
+ * ブラウザ側でも縮小と形式変換をしているが、それは利用者の失敗を
+ * 減らすためのもので、防御にはならない（curl でも叩ける）。
+ * サイズと MIME はここで必ず見る。
+ *
+ * MIME はクライアントが名乗る値でしかなく、中身が本当に画像である保証は
+ * 無い。ここで担保しているのは「配信時に `Content-Type` として返して
+ * 安全な値だけを保存する」ことで、SVG（スクリプトを埋め込める）や
+ * `text/html` が同一オリジンで配信されるのを防ぐのが目的。
+ * 中身の検査（マジックバイト、実際のデコード）は #65 の範囲外。
+ */
+function validatePhoto(
+	photo: UploadedPhoto,
+):
+	| { ok: true; contentType: IssuePhotoContentType }
+	| { ok: false; error: string } {
+	if (photo.size > ISSUE_PHOTO_MAX_BYTES) {
+		return {
+			ok: false,
+			error: `Photo must be ${ISSUE_PHOTO_MAX_BYTES} bytes or smaller`,
+		};
+	}
+
+	// `image/jpeg; charset=binary` のようにパラメータが付くことがあるため、
+	// `;` より前だけを見る。大小の揺れ（`IMAGE/JPEG`）も正規化する
+	const contentType = (photo.type.split(";")[0] ?? "").trim().toLowerCase();
+	if (!isIssuePhotoContentType(contentType)) {
+		return {
+			ok: false,
+			error: `Photo must be one of: ${ISSUE_PHOTO_CONTENT_TYPES.join(", ")}`,
+		};
+	}
+
+	return { ok: true, contentType };
+}
+
+/**
+ * R2 に置く写真のオブジェクトキーを組み立てる。
+ *
+ * Issue 1 件につき写真は 1 枚（#65 の決定）なので `issues/<id>` で
+ * 一意に定まる。拡張子は付けない。配信時の `Content-Type` は DB の
+ * `photo_content_type` から取るため、キーから形式を復元する必要が無い。
+ *
+ * Issue の ID は `lower(hex(randomblob(16)))` の 16 進 32 文字なので、
+ * キーに使えない文字が混ざる余地は無い。
+ */
+export function photoObjectKey(issueId: string): string {
+	return `issues/${issueId}`;
+}
+
+/**
+ * 起票の途中で失敗したときに、作りかけの行を取り消す。
+ *
+ * 呼ばれるのは写真の保存に失敗した経路だけで、この時点の行はまだ
+ * レスポンスを返しておらず、誰にも ID を知らせていない。よって
+ * 参照している他のレコード（コメント、表明）も存在しない。
+ *
+ * 後始末そのものが失敗しても呼び出し側は 500 を返すため、ここでは
+ * ログに残すだけにする。投げ直すと、利用者に伝わるエラーが
+ * 「写真の保存に失敗」から後始末の失敗にすり替わってしまう。
+ */
+async function deleteIssueRow(
+	c: Context<IssuesEnv>,
+	issueId: string,
+): Promise<void> {
+	try {
+		await c.env.DB.prepare("DELETE FROM issues WHERE id = ?")
+			.bind(issueId)
+			.run();
+	} catch (error) {
+		console.error("Failed to roll back issue after photo failure", error);
+	}
+}
+
 // POST /issues — Create (auth required)
+//
+// JSON と multipart/form-data の両方を受ける。写真（#65）を付けるときは
+// multipart で、`photo` パートに画像を入れる。
 issues.post("/", clerkAuth(), requireAuth, async (c) => {
-	const body = await c.req.json();
-	const parsed = CreateIssueSchema.safeParse(body);
+	const { fields, photo } = await readCreateIssueBody(c);
+	const parsed = CreateIssueSchema.safeParse(fields);
 	if (!parsed.success) {
 		return c.json({ error: parsed.error.flatten() }, 400);
+	}
+
+	// 写真の検査は本文の検証を通ってから。順序に強い理由は無いが、
+	// 「必須項目が埋まっていない」の方が利用者にとって直したい情報として先に来る
+	let photoContentType: IssuePhotoContentType | null = null;
+	if (photo) {
+		const validated = validatePhoto(photo);
+		if (!validated.ok) {
+			return c.json({ error: validated.error }, 400);
+		}
+		photoContentType = validated.contentType;
 	}
 
 	const {
@@ -224,7 +493,7 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 			// スキーマの `.default(true)` が効いているので undefined は来ない。
 			isAnonymous ? 1 : 0,
 		)
-		.first();
+		.first<IssueRowLike>();
 
 	// INSERT が成功すれば RETURNING は必ず 1 行返すため、ここは実際には通らない。
 	// `first()` の戻り値が null を含む型であることに対する処理で、
@@ -232,7 +501,63 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 	if (!result) {
 		return c.json({ error: "Failed to create issue" }, 500);
 	}
-	return c.json(toPublicIssue(result), 201);
+
+	if (!photo || !photoContentType) {
+		return c.json(toPublicIssue(result), 201);
+	}
+
+	/*
+	 * 写真がある場合の書き込み順序について。
+	 *
+	 * R2 のキーには Issue の ID が要る（`photoObjectKey`）ので、行を作るのが先。
+	 * そのうえで R2 に置き、成功したら `photo_key` を書き戻す。
+	 *
+	 * D1 と R2 にまたがる更新なので、途中で失敗すると片方だけが進む。
+	 * どちらに倒すかを次のように決めた:
+	 *
+	 * - R2 への PUT が失敗 → 作った行を消して 500。
+	 *   写真を付けて投稿したのに写真の無い Issue が残ると、利用者は
+	 *   「付けたつもり」でいるのに説得力を欠いた Issue が公開される。
+	 *   それより起票ごと失敗して、やり直せる方がよい。
+	 * - 書き戻しの UPDATE が失敗 → 置いた画像を消して 500。同じ理由に加え、
+	 *   どの行からも参照されない画像を R2 に残さないため。
+	 *
+	 * 後始末そのものが失敗する可能性は残る（その場合は孤児ファイルか
+	 * 写真の無い行が残る）。分散トランザクションは持てないので、
+	 * ここは「よくある失敗を綺麗に畳む」までで、完全性は保証しない。
+	 * 後始末の失敗はログにだけ残す（利用者への応答はどちらにせよ 500）。
+	 */
+	const issueId = String(result.id);
+	const key = photoObjectKey(issueId);
+
+	try {
+		await c.env.PHOTOS.put(key, await photo.arrayBuffer(), {
+			httpMetadata: { contentType: photoContentType },
+		});
+	} catch (error) {
+		console.error("Failed to store photo", error);
+		await deleteIssueRow(c, issueId);
+		return c.json({ error: "Failed to store photo" }, 500);
+	}
+
+	const updated = await c.env.DB.prepare(
+		`UPDATE issues SET photo_key = ?, photo_content_type = ? WHERE id = ? RETURNING ${PUBLIC_SELECT}`,
+	)
+		.bind(key, photoContentType, issueId)
+		.first<IssueRowLike>();
+
+	if (!updated) {
+		console.error("Failed to attach photo to issue", issueId);
+		await c.env.PHOTOS.delete(key).catch((error: unknown) => {
+			console.error("Failed to clean up orphaned photo", error);
+		});
+		await deleteIssueRow(c, issueId);
+		return c.json({ error: "Failed to store photo" }, 500);
+	}
+
+	// `updated_at` は動かさない。作成と同時の添付であって、
+	// 利用者から見た「最終更新」は起票した時刻のままが正しい
+	return c.json(toPublicIssue(updated), 201);
 });
 
 /**
@@ -417,7 +742,7 @@ async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 		`SELECT ${PUBLIC_SELECT} FROM issues ${where} ORDER BY created_at ${direction}, id ${direction} LIMIT ? OFFSET ?`,
 	)
 		.bind(...binds, limit + 1, offset)
-		.all<CursorRow>();
+		.all<IssueRowLike>();
 
 	const hasMore = rows.results.length > limit;
 	const page = hasMore ? rows.results.slice(0, limit) : rows.results;
@@ -513,7 +838,7 @@ issues.get("/:id/viewer", clerkAuth(), async (c) => {
 	const id = c.req.param("id");
 	const row = await c.env.DB.prepare("SELECT user_id FROM issues WHERE id = ?")
 		.bind(id)
-		.first<{ user_id: string | null }>();
+		.first<Pick<IssueRow, "user_id">>();
 
 	if (!row) {
 		return c.json({ error: "Issue not found" }, 404);
@@ -527,6 +852,67 @@ issues.get("/:id/viewer", clerkAuth(), async (c) => {
 	});
 });
 
+/**
+ * GET /issues/:id/photo — 添付された写真そのものを返す (public)
+ *
+ * R2 のバケットは公開していないので、画像はこの経路からしか読めない。
+ * Worker を必ず通すことで、通報された画像の非公開化（#65 の範囲外だが、
+ * 決定事項として通報の仕組みは入る）を後から差し込む余地を残している。
+ *
+ * Issue 本体が公開なので、こちらも認証は要らない。
+ *
+ * `Content-Type` は DB の `photo_content_type` から返す。保存時に
+ * `isIssuePhotoContentType` を通した値しか入らないため、ここから
+ * `image/svg+xml` や `text/html` が出ることはない（同一オリジンで
+ * 配信される以上、ここが XSS の入口にならないことは保存側で担保する）。
+ *
+ * `Content-Disposition: inline` を明示しているのは、万一想定外の
+ * MIME が入っていた場合でもブラウザに文書として開かせないため…ではなく、
+ * 逆に `attachment` の既定に倒れて毎回ダウンロードされるのを避けるため。
+ * `<img>` から読む用途なので inline が正しい。
+ */
+issues.get("/:id/photo", async (c) => {
+	const id = c.req.param("id");
+	const row = await c.env.DB.prepare(
+		"SELECT photo_key, photo_content_type FROM issues WHERE id = ?",
+	)
+		.bind(id)
+		.first<{ photo_key: string | null; photo_content_type: string | null }>();
+
+	// Issue が無い場合と、Issue はあるが写真が無い場合。どちらも
+	// 「その URL に画像は無い」で、区別して伝える意味が無いので同じ 404 にする
+	if (!row?.photo_key) {
+		return c.json({ error: "Photo not found" }, 404);
+	}
+
+	const object = await c.env.PHOTOS.get(row.photo_key);
+	// 行はあるのに R2 に実体が無い状態。起票時のロールバックが途中で
+	// 失敗したか、バケット側で消されたときに起きる。利用者から見れば
+	// 画像が無いことに変わりないので 404 だが、原因を追えるようログに残す
+	if (!object) {
+		console.error("Photo object missing in R2", row.photo_key);
+		return c.json({ error: "Photo not found" }, 404);
+	}
+
+	// 保存時に検証済みの MIME を使う。行に入っていない（NULL の）ときは
+	// 名乗らずにバイト列だけ返す。推測して間違った型を名乗るより安全側
+	const headers = new Headers();
+	if (row.photo_content_type) {
+		headers.set("Content-Type", row.photo_content_type);
+	}
+	headers.set("Content-Disposition", "inline");
+	// 画像は差し替えられない（#65 の範囲外）ので、キーが同じなら中身も同じ。
+	// 詳細ページを開くたびに R2 から読み直さずに済むよう長めに持たせる。
+	// 通報による削除が入ったときは 404 に変わるが、それがキャッシュに
+	// 反映されるまでの遅れは許容する（`private` にはしない ＝ 公開画像なので）
+	headers.set("Cache-Control", "public, max-age=31536000, immutable");
+	// R2 が返す ETag をそのまま通す。条件付きリクエストで 304 を返す
+	// 実装はまだ無いが、中間のキャッシュが使える
+	headers.set("ETag", object.httpEtag);
+
+	return new Response(object.body, { headers });
+});
+
 // GET /issues/:id — Get by ID (public)
 issues.get("/:id", async (c) => {
 	const id = c.req.param("id");
@@ -534,7 +920,7 @@ issues.get("/:id", async (c) => {
 		`SELECT ${PUBLIC_SELECT} FROM issues WHERE id = ?`,
 	)
 		.bind(id)
-		.first();
+		.first<IssueRowLike>();
 
 	if (!row) {
 		return c.json({ error: "Issue not found" }, 404);
@@ -556,7 +942,7 @@ async function checkOwnership(
 ): Promise<Response | null> {
 	const row = await c.env.DB.prepare("SELECT user_id FROM issues WHERE id = ?")
 		.bind(id)
-		.first<{ user_id: string | null }>();
+		.first<Pick<IssueRow, "user_id">>();
 
 	if (!row) {
 		return c.json({ error: "Issue not found" }, 404);
@@ -604,7 +990,7 @@ issues.patch("/:id", clerkAuth(), requireAuth, async (c) => {
 		`UPDATE issues SET ${setClauses.join(", ")} WHERE id = ? AND user_id = ? RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(...binds, id, auth?.userId)
-		.first();
+		.first<IssueRowLike>();
 
 	if (!result) {
 		return c.json({ error: "Issue not found" }, 404);
@@ -636,10 +1022,30 @@ issues.delete("/:id", clerkAuth(), requireAuth, async (c) => {
 		`DELETE FROM issues WHERE id = ? AND user_id = ? RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(id, auth?.userId)
-		.first();
+		.first<IssueRowLike>();
 
 	if (!result) {
 		return c.json({ error: "Issue not found" }, 404);
 	}
+
+	// 行が消えた以上、その写真はどこからも参照されない。残すと R2 に
+	// 孤児ファイルが積み上がる（署名URLを採らなかった理由と同じ話が、
+	// 削除の側にもある）。
+	//
+	// 消すのは行の削除が確定してから。先に消すと、DELETE が 404 や 403 だった
+	// ときに実在する Issue の画像を落としてしまう。
+	//
+	// R2 の削除に失敗しても DELETE そのものは成功として返す。利用者の要求
+	// （Issue を消す）は果たされており、参照の切れた画像が残ることを理由に
+	// 「削除できませんでした」と伝えるのは実態と合わない。掃除が要る状態に
+	// なったことはログで追えるようにする。
+	if (result.photo_key) {
+		await c.env.PHOTOS.delete(String(result.photo_key)).catch(
+			(error: unknown) => {
+				console.error("Failed to delete photo for removed issue", error);
+			},
+		);
+	}
+
 	return c.json(toPublicIssue(result));
 });

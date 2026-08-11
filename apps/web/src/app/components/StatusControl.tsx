@@ -3,9 +3,11 @@
 import { useAuth } from "@clerk/nextjs";
 import {
 	DEFAULT_LOCALE,
+	getUiMessages,
 	ISSUE_STATUS_LABELS,
 	IssueStatus,
 	type IssueStatus as IssueStatusType,
+	type Locale,
 } from "@world-issue-tracker/shared";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -13,8 +15,6 @@ import {
 	IssueStatusError,
 	updateIssueStatus,
 } from "../../lib/issue-status";
-
-const STATUS_LABELS = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
 
 /**
  * ステータス欄。起票者かどうかを自分で確かめてから `StatusControl` を出す。
@@ -34,9 +34,11 @@ const STATUS_LABELS = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
 export function IssueStatusSection({
 	issueId,
 	status,
+	locale = DEFAULT_LOCALE,
 }: {
 	issueId: string;
 	status: IssueStatusType;
+	locale?: Locale;
 }) {
 	const { isLoaded, isSignedIn, getToken } = useAuth();
 	const [relation, setRelation] = useState<
@@ -88,7 +90,7 @@ export function IssueStatusSection({
 	}, [issueId, isLoaded, isSignedIn]);
 
 	if (relation.state === "failed") {
-		return <StatusUnavailable status={status} />;
+		return <StatusUnavailable status={status} locale={locale} />;
 	}
 
 	return (
@@ -99,6 +101,7 @@ export function IssueStatusSection({
 			// `loading` を owner 扱いに倒すと、起票者以外の画面にも
 			// ボタンが一瞬出て消える
 			viewerIsOwner={relation.state === "ready" && relation.isOwner}
+			locale={locale}
 		/>
 	);
 }
@@ -113,15 +116,20 @@ export function IssueStatusSection({
  * `IssueStatusSection` から切り出しているのは、この分岐が
  * `useEffect` の結果でしか到達できず、そのままでは描画して確かめられないため。
  */
-export function StatusUnavailable({ status }: { status: IssueStatusType }) {
+export function StatusUnavailable({
+	status,
+	locale = DEFAULT_LOCALE,
+}: {
+	status: IssueStatusType;
+	locale?: Locale;
+}) {
+	const messages = getUiMessages(locale);
+
 	return (
 		<section aria-labelledby="issue-status-heading">
-			<h2 id="issue-status-heading">ステータス</h2>
-			<p>{STATUS_LABELS[status]}</p>
-			<p style={{ color: "#b45309" }}>
-				ステータスを変更できるかどうかを確認できませんでした。 この Issue
-				を起票した方は、ページを再読み込みしてください。
-			</p>
+			<h2 id="issue-status-heading">{messages.statusControl.heading}</h2>
+			<p>{ISSUE_STATUS_LABELS[locale][status]}</p>
+			<p className="text-warning">{messages.statusControl.unavailable}</p>
 		</section>
 	);
 }
@@ -151,12 +159,16 @@ export function StatusControl({
 	issueId,
 	initialStatus,
 	viewerIsOwner,
+	locale = DEFAULT_LOCALE,
 }: {
 	issueId: string;
 	initialStatus: IssueStatusType;
 	viewerIsOwner: boolean;
+	locale?: Locale;
 }) {
 	const { isLoaded, getToken } = useAuth();
+	const messages = getUiMessages(locale);
+	const statusLabels = ISSUE_STATUS_LABELS[locale];
 
 	const [status, setStatus] = useState(initialStatus);
 	const [selected, setSelected] = useState(initialStatus);
@@ -169,8 +181,8 @@ export function StatusControl({
 	if (!viewerIsOwner) {
 		return (
 			<section aria-labelledby="issue-status-heading">
-				<h2 id="issue-status-heading">ステータス</h2>
-				<p>{STATUS_LABELS[status]}</p>
+				<h2 id="issue-status-heading">{messages.statusControl.heading}</h2>
+				<p>{statusLabels[status]}</p>
 			</section>
 		);
 	}
@@ -195,7 +207,7 @@ export function StatusControl({
 			setError(
 				err instanceof IssueStatusError
 					? err.message
-					: "予期しないエラーが発生しました。時間をおいて再度お試しください。",
+					: messages.common.unexpectedError,
 			);
 		} finally {
 			setIsSubmitting(false);
@@ -204,14 +216,16 @@ export function StatusControl({
 
 	return (
 		<section aria-labelledby="issue-status-heading">
-			<h2 id="issue-status-heading">ステータス</h2>
+			<h2 id="issue-status-heading">{messages.statusControl.heading}</h2>
 
 			<p>
-				現在: <strong>{STATUS_LABELS[status]}</strong>
+				{messages.statusControl.current} <strong>{statusLabels[status]}</strong>
 			</p>
 
 			<p>
-				<label htmlFor="issue-status-select">変更先</label>{" "}
+				<label htmlFor="issue-status-select">
+					{messages.statusControl.changeTo}
+				</label>{" "}
 				<select
 					id="issue-status-select"
 					value={selected}
@@ -226,7 +240,7 @@ export function StatusControl({
 					*/}
 					{IssueStatus.options.map((option) => (
 						<option key={option} value={option}>
-							{STATUS_LABELS[option]}
+							{statusLabels[option]}
 						</option>
 					))}
 				</select>{" "}
@@ -237,19 +251,19 @@ export function StatusControl({
 					// 同じ値への更新は `updated_at` だけが動く無意味な往復になる
 					disabled={isSubmitting || !isLoaded || selected === status}
 				>
-					{isSubmitting ? "更新中…" : "ステータスを更新"}
+					{isSubmitting
+						? messages.statusControl.submitting
+						: messages.statusControl.submit}
 				</button>
 			</p>
 
 			{updated && (
-				<output style={{ display: "block", color: "#15803d" }}>
-					ステータスを「{STATUS_LABELS[status]}」に更新しました。
+				<output className="notice text-success">
+					{messages.statusControl.updated(statusLabels[status])}
 				</output>
 			)}
 
-			{error && (
-				<output style={{ display: "block", color: "#b91c1c" }}>{error}</output>
-			)}
+			{error && <output className="notice text-danger">{error}</output>}
 		</section>
 	);
 }

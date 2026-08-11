@@ -92,6 +92,11 @@ describe("Machine tokens must not pass requireAuth", () => {
 	// このファイルのテストが本番と別物のスキーマに対して緑になる
 	// （`schema.test.ts` が同じ理由で手書き定数を廃した）。
 	beforeAll(async () => {
+		// スキーマは実マイグレーションから作る。以前はここに手書きの
+		// `CREATE TABLE` を置いていたが、`migrations/` と同期する仕組みが
+		// 無いため、カラムを足すとこのファイルだけが古いスキーマのまま
+		// 落ちる（#65 の `photo_key` で実際に落ちた）。理由の詳細は
+		// `helpers/migrate.ts`。
 		await applyMigrations();
 	});
 

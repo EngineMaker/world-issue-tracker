@@ -1,11 +1,14 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { clerkKeyKindWarning } from "./middleware/clerk";
 import { requireAllowedOrigin } from "./middleware/origin";
 import { health } from "./routes/health";
 import { issues } from "./routes/issues";
 
 export type Bindings = {
 	DB: D1Database;
+	/** Issue に添付する写真の置き場（#65）。設定は wrangler.jsonc の `r2_buckets` */
+	PHOTOS: R2Bucket;
 	CLERK_SECRET_KEY: string;
 	CLERK_PUBLISHABLE_KEY: string;
 };
@@ -43,6 +46,12 @@ export function createApp() {
 	// Clerk はここで全ルートに適用しない。認証を要求するルート側で個別に差す
 	// （src/middleware/clerk.ts）。公開エンドポイントを Clerk の設定・可用性から
 	// 切り離すため。
+	//
+	// 例外は「開発用インスタンスのキーで動いていないか」の警告（#98）だけ。
+	// これは env の文字列を見るだけで Clerk に問い合わせないため、公開経路の
+	// 可用性に影響しない。認証を要求するルートにだけ差すと、閲覧者しか来ない
+	// 期間は警告が一度も出ず、一番知りたい状況が一番ログに出なくなる。
+	app.use(clerkKeyKindWarning());
 
 	app.get("/", (c) => {
 		return c.json({ name: "World Issue Tracker API", status: "ok" });

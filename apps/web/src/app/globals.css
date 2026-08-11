@@ -1,3 +1,66 @@
+/*
+ * デザイントークン（Issue #86）。
+ *
+ * 色・文字サイズ・余白の値をここに集約する。以前は各コンポーネントが
+ * その都度値を書いていたため、同じ意味の色に別々の値が使われていた
+ * （「取得に失敗した」を示す赤が、書いた人ごとに 2 種類あった）。
+ * 値を 1 箇所に置くことで、見た目の変更がここだけで済むようにする。
+ * 上の 2 種類は --danger に統一した。
+ *
+ * すべて `:root` に置いている。後から
+ * `@media (prefers-color-scheme: dark)` で値だけを差し替えられるように
+ * するためで、コンポーネント側が直接色を書いているとそれができない
+ * （ダークモード対応そのものは #86 の範囲外）。
+ */
+:root {
+	/* 基本の色 */
+	--ink: #1c2420;
+	--ink-soft: #55605a;
+	--ink-faint: #8b958f;
+	--ground: #f7f9f7;
+	--surface: #ffffff;
+	--line: #e2e8e4;
+	--accent: #1a7f5a;
+	--accent-soft: #e8f5ef;
+	--accent-line: #b8ddcb;
+
+	/* 状態を表す色。主役（--accent）とは別系統として扱う */
+	--danger: #b91c1c;
+	--warning: #b45309;
+	--success: #1a7f5a;
+
+	/*
+	 * 文字サイズは 5 段階に絞る。以前は 0.8rem / 0.85rem / 0.875rem /
+	 * 0.9rem / 0.9375rem が混在していて、どれを使うかの基準が無かった。
+	 * 段階が多いと使い分けの理由が失われる
+	 */
+	--text-xl: 1.75rem;
+	--text-lg: 1.0625rem;
+	--text-base: 1rem;
+	--text-sm: 0.875rem;
+	--text-xs: 0.75rem;
+
+	/*
+	 * ページ全体の見出し（h1 / h2）だけは 5 段階の外に置いている。
+	 * h1 は現在 2rem、h2 は 1.25rem で、最も近い段階（--text-xl / --text-lg）へ
+	 * 寄せると見出しが目に見えて小さくなる。#86 は「見た目を変えないこと」を
+	 * 最優先としているため、実寸は据え置いたまま値だけをここへ集約した。
+	 * 5 段階へ畳むかどうかはデザインを適用する後続の Issue で決める
+	 */
+	--text-heading-page: 2rem;
+	--text-heading-section: 1.25rem;
+	/* ヘッダのサービス名。h1 だが本文中の見出しではないので別に持つ */
+	--text-heading-site: 1.2rem;
+
+	/* 余白は 0.25rem 刻み */
+	--space-1: 0.25rem;
+	--space-2: 0.5rem;
+	--space-3: 0.75rem;
+	--space-4: 1rem;
+	--space-5: 1.25rem;
+	--space-6: 1.5rem;
+}
+
 *,
 *::before,
 *::after {
@@ -9,39 +72,103 @@
 body {
 	font-family: system-ui, -apple-system, sans-serif;
 	line-height: 1.6;
-	color: #1a1a1a;
+	color: var(--ink);
 	max-width: 800px;
 	margin: 0 auto;
 	padding: 2rem;
+	/*
+	 * 折り返せない長い文字列を、どうしても入らないときだけ途中で割る（#93）。
+	 * コメントは 2000 文字の自由入力で、URL の貼り付けは普通に起きる。
+	 * 幅の制限（max-width）では防げない経路で、URL を 1 本貼っただけで
+	 * ページ全体に横スクロールが出ていた。
+	 *
+	 * `break-word` ではなく `anywhere` にしているのは、flex や grid の
+	 * アイテムの最小幅の計算にも反映されるため（`break-word` は
+	 * 計算上は割れない扱いのままで、親を押し広げる場合がある）
+	 */
+	overflow-wrap: anywhere;
+}
+
+/*
+ * リンク（Issue #93）。
+ *
+ * `a` の指定が 1 つも無く、ブラウザ既定の紫（訪問済みは青紫）のままだった。
+ * トップページはリンクが主要な導線なので、緑（--accent）を主役に据えた
+ * トークンと噛み合わず、画面のほぼ全体が紫で埋まっていた。
+ *
+ * ここだけは要素セレクタで書いている。他の指定（入力欄・ボタン）が
+ * `.issue-form` やクラスに閉じているのは、Clerk のモーダルの入力や
+ * サインインボタンが「主要でも補助でもない第三の見た目」になるのを
+ * 避けるためだった。リンクは事情が違い、モーダル内のリンク（「登録はこちら」
+ * など）も本文のリンクと同じ色で構わない。むしろクラスに閉じると、
+ * クラスを付け忘れたリンクだけが紫で残る形になり、いま直している症状が
+ * 部分的に再発する。
+ */
+a {
+	color: var(--accent);
+	/* 色だけに頼らない。色覚特性のある人にもリンクだと分かる必要がある */
+	text-decoration: underline;
+}
+
+/*
+ * 訪問済みを指定しないと、そこだけブラウザ既定の青紫で残る。
+ * 一覧から Issue を数件開いた時点で、リンクの色が 2 種類に割れる。
+ * どこを読んだかより、緑で揃っていることを優先する
+ */
+a:visited {
+	color: var(--accent);
+}
+
+/*
+ * 下地を薄い緑にして、押せる場所であることを面で示す。
+ *
+ * `@media (hover: hover)` で括っているのは、タッチ端末で hover が
+ * 貼り付いたままになるため。Issue #93 の症状が出ている実機は
+ * Android / Chrome で、タップしたリンクだけ背景が残り続ける
+ */
+@media (hover: hover) {
+	a:hover {
+		background: var(--accent-soft);
+	}
+}
+
+/*
+ * キーボードで辿れるようにする。入力欄とボタンには既に outline があるが
+ * リンクには無く、Tab で移動すると現在位置が分からなくなっていた
+ */
+a:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
 }
 
 h1 {
-	font-size: 2rem;
-	margin-bottom: 0.5rem;
+	font-size: var(--text-heading-page);
+	margin-bottom: var(--space-2);
 }
 
 h2 {
-	font-size: 1.25rem;
-	margin-top: 1.5rem;
-	margin-bottom: 0.5rem;
+	font-size: var(--text-heading-section);
+	margin-top: var(--space-6);
+	margin-bottom: var(--space-2);
 }
 
 ul {
 	list-style: none;
 	display: flex;
-	gap: 0.5rem;
+	gap: var(--space-2);
 	flex-wrap: wrap;
 }
 
 li {
-	background: #f0f0f0;
-	padding: 0.25rem 0.75rem;
+	/* タグの下地。元は無彩色の #f0f0f0 で、色味の無い --ground が最も近い */
+	background: var(--ground);
+	padding: var(--space-1) var(--space-3);
 	border-radius: 4px;
-	font-size: 0.875rem;
+	font-size: var(--text-sm);
 }
 
 main p {
-	margin-bottom: 0.75rem;
+	margin-bottom: var(--space-3);
 }
 
 /*
@@ -58,12 +185,12 @@ main p {
 .scopes li {
 	background: none;
 	padding: 0;
-	font-size: 1rem;
-	margin-bottom: 0.5rem;
+	font-size: var(--text-base);
+	margin-bottom: var(--space-2);
 }
 
 .actions li {
-	font-size: 1.05rem;
+	font-size: var(--text-lg);
 }
 
 /* ステータスは順序のある流れなので、矢印で繋いだタグとして見せる */
@@ -71,7 +198,7 @@ main p {
 	list-style: none;
 	display: flex;
 	flex-wrap: wrap;
-	gap: 0.5rem;
+	gap: var(--space-2);
 	align-items: center;
 }
 
@@ -87,7 +214,7 @@ main p {
 	right: -1rem;
 	width: 1rem;
 	text-align: center;
-	color: #888;
+	color: var(--ink-faint);
 }
 
 /*
@@ -108,10 +235,10 @@ main p {
 .issue-form select {
 	font: inherit;
 	color: inherit;
-	padding: 0.375rem 0.5rem;
-	border: 1px solid #c7c7c7;
+	padding: 0.375rem var(--space-2);
+	border: 1px solid var(--line);
 	border-radius: 4px;
-	background: #fff;
+	background: var(--surface);
 }
 
 .issue-form input:focus-visible,
@@ -119,14 +246,43 @@ main p {
 .issue-form select:focus-visible,
 .button-primary:focus-visible,
 .button-secondary:focus-visible {
-	outline: 2px solid #2563eb;
+	outline: 2px solid var(--accent);
 	outline-offset: 1px;
 }
 
-/* 既定では横幅いっぱい。短い入力は下の .field-narrow で絞る */
+/*
+ * 既定では横幅いっぱい。短い入力は下の .field-narrow で絞る。
+ *
+ * `type="search"` は #96 で足した。一覧の絞り込みフォームに `.issue-form` を
+ * 与えても、幅の指定が `type="text"` と `textarea` にしか無いため、
+ * キーワード欄（`type="search"`）は既定の幅のままだった。**枠は付くが幅は
+ * 広がらない**という中途半端な状態で、docs/visual-check.md に自分で書いた
+ * 確認軸（「入力欄が本文の幅いっぱいに広がる — 一覧の絞り込みを含む 3 箇所」）を
+ * 満たしていなかった（レビュー指摘）。
+ */
 .issue-form input[type="text"],
+.issue-form input[type="search"],
 .issue-form textarea {
 	width: 100%;
+	/*
+	 * `width: 100%` でも、textarea は既定の `cols` 由来の最小幅を持つため
+	 * 狭い画面では親をはみ出してページ全体に横スクロールが出る（#93）。
+	 * 上の `box-sizing: border-box` と合わせて、親の幅で頭打ちにする
+	 */
+	max-width: 100%;
+}
+
+/*
+ * `select` は幅を伸ばさず、はみ出しだけを止める（#96）。
+ *
+ * 絞り込みの 3 つの `select`（スコープ・ステータス・並び順）は、選択肢の
+ * 文字列が長いと親をはみ出して横スクロールを作る。一方で `width: 100%` に
+ * すると起票フォームのスコープ選択も幅いっぱいになり、**破綻を止める範囲を
+ * 超えて見た目を変える**ことになる（どの幅にするかは #95 で決まる）。
+ * ここでは上限だけを与える。
+ */
+.issue-form select {
+	max-width: 100%;
 }
 
 .issue-form textarea {
@@ -147,10 +303,10 @@ main p {
 	font: inherit;
 	cursor: pointer;
 	border-radius: 4px;
-	background: #1d4ed8;
-	color: #fff;
-	border: 1px solid #1d4ed8;
-	padding: 0.5rem 1.25rem;
+	background: var(--accent);
+	color: var(--surface);
+	border: 1px solid var(--accent);
+	padding: var(--space-2) var(--space-5);
 	font-weight: 600;
 }
 
@@ -159,9 +315,9 @@ main p {
 	font: inherit;
 	cursor: pointer;
 	border-radius: 4px;
-	background: #fff;
-	color: #1d4ed8;
-	border: 1px solid #c7c7c7;
+	background: var(--surface);
+	color: var(--accent);
+	border: 1px solid var(--line);
 	padding: 0.375rem 0.875rem;
 }
 
@@ -173,7 +329,7 @@ main p {
 
 /* 1 項目のまとまり。ラベル・補助テキスト・入力欄の間より、項目間を広く取る */
 .form-field {
-	margin-bottom: 1.25rem;
+	margin-bottom: var(--space-5);
 }
 
 .form-field label {
@@ -187,9 +343,9 @@ main p {
  */
 .field-hint {
 	display: block;
-	font-size: 0.875rem;
-	color: #555;
-	margin-bottom: 0.25rem;
+	font-size: var(--text-sm);
+	color: var(--ink-soft);
+	margin-bottom: var(--space-1);
 }
 
 /* 緯度・経度のように桁数の決まった入力は短く見せる */
@@ -200,21 +356,21 @@ main p {
 
 /* 場所に関する項目のまとまり。狭い画面では緯度・経度を縦に積む */
 .location {
-	border: 1px solid #e0e0e0;
+	border: 1px solid var(--line);
 	border-radius: 4px;
-	padding: 0.75rem 1rem;
-	margin-bottom: 1.25rem;
+	padding: var(--space-3) var(--space-4);
+	margin-bottom: var(--space-5);
 }
 
 .location legend {
 	font-weight: 600;
-	padding: 0 0.25rem;
+	padding: 0 var(--space-1);
 }
 
 .coordinates {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 0 1rem;
+	gap: 0 var(--space-4);
 }
 
 /*
@@ -224,16 +380,16 @@ main p {
  * `overflow: hidden` で切り落とすため、コンテナに位置指定が要る。
  */
 .issue-map {
-	margin: 0 0 0.5rem;
+	margin: 0 0 var(--space-2);
 }
 
 .issue-map-view {
 	position: relative;
 	overflow: hidden;
-	border: 1px solid #e0e0e0;
+	border: 1px solid var(--line);
 	border-radius: 4px;
 	/* タイルが読み込めないときに、枠だけが残って中身が抜けて見えないように */
-	background-color: #eee;
+	background-color: var(--line);
 	max-width: 100%;
 }
 
@@ -270,15 +426,352 @@ main p {
 	width: 14px;
 	height: 14px;
 	margin: -7px 0 0 -7px;
-	border: 2px solid #fff;
+	border: 2px solid var(--surface);
 	border-radius: 50%;
-	background-color: #b00;
+	/*
+	 * 地点を指す印。エラーではないが「ここだ」と一点を強く示す用途なので、
+	 * 状態色の --danger を借りる。以前の赤と揃える形で #86 が
+	 * 統一先に指定している値
+	 */
+	background-color: var(--danger);
 	box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
 }
 
 /* 帰属表示は隠さないことがタイル配信元の利用条件に含まれる */
 .issue-map-attribution {
-	font-size: 0.75rem;
-	color: #555;
-	margin-top: 0.25rem;
+	font-size: var(--text-xs);
+	color: var(--ink-soft);
+	margin-top: var(--space-1);
+}
+
+/*
+ * ここから下は、コンポーネントに散っていたインライン style の置き換え先
+ * （Issue #86）。
+ *
+ * 以前は各コンポーネントが `style` 属性に色や寸法を直接書いていた。
+ * 同じ意味の表示に別々の値が使われ、変更すると全ファイルに波及する
+ * 状態だったのを、意味の単位でクラスに畳んでここへ集約する。
+ *
+ * すべてクラスセレクタに閉じている。素の要素セレクタは globals.css が
+ * 全ページに効くため、Clerk のモーダル（同じ document に描画される）にも
+ * 当たってしまう（上の .issue-form のコメントと同じ理由）。
+ */
+
+/* 文字の強さ。「弱い文字」に #666 / #444 / #999 が混在していたのを 2 段階に畳む */
+.text-soft {
+	color: var(--ink-soft);
+}
+
+.text-faint {
+	color: var(--ink-faint);
+}
+
+/* 状態を表す文字。--danger は以前の 2 種類の赤を統一したもの */
+.text-danger {
+	color: var(--danger);
+}
+
+.text-warning {
+	color: var(--warning);
+}
+
+.text-success {
+	color: var(--success);
+}
+
+/*
+ * `<output>` は既定で inline のため、単独の行として出したいときに
+ * display を上書きしている箇所が繰り返し現れていた
+ */
+.notice {
+	display: block;
+}
+
+/*
+ * 取得や送信に失敗したことを伝えるまとまり。一覧・自分の一覧・詳細・
+ * コメント欄の 4 箇所が、同じ構造を別々のインライン style で書いていた
+ */
+.error-block {
+	color: var(--danger);
+	padding: var(--space-2) 0;
+}
+
+/*
+ * まとまりの見出し文と、その下に添える詳細の文。
+ * .error-block（赤い失敗）と .notice-block（赤くない案内）の
+ * どちらの中でも使うので、色は持たせず配置と文字サイズだけを決める
+ */
+.block-message {
+	margin: 0 0 var(--space-1);
+}
+
+.block-detail {
+	margin: 0;
+	font-size: var(--text-sm);
+}
+
+/*
+ * サインインしていないために見られないことを伝えるまとまり。
+ * 失敗（.error-block）と構造は同じだが、利用者が自分で解消できる点が違うので
+ * 赤にしない（MyIssueList のコメント参照）
+ */
+.notice-block {
+	padding: var(--space-2) 0;
+}
+
+/* Issue 1 件のカード。公開一覧と自分の一覧が同じ見た目を使う */
+.issue-card {
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: var(--space-3) var(--space-4);
+	margin-bottom: var(--space-3);
+	list-style: none;
+}
+
+.issue-card-title {
+	margin: 0 0 var(--space-1);
+	font-size: var(--text-base);
+}
+
+.issue-card-description {
+	margin: 0 0 var(--space-2);
+	color: var(--ink-soft);
+}
+
+/* スコープ・ステータス・カテゴリ・日時を 1 行に並べた補助情報 */
+.issue-meta {
+	margin: 0;
+	font-size: var(--text-sm);
+	color: var(--ink-soft);
+}
+
+/* 一覧の「N 件中 M 件を表示」 */
+.list-summary {
+	color: var(--ink-soft);
+	font-size: var(--text-sm);
+}
+
+/*
+ * 一覧の絞り込みフォームとページ送り（Issue #96）。
+ *
+ * どちらも tsx が `className` を出しているのに、globals.css に定義が
+ * 1 行も無かった。既存のテスト 385 件はすべて通っていた —
+ * 直書きの色もインライン style も無く、描画結果にクラス名も出ているので、
+ * 「値が正しいか」を見る検査には引っかかりようがない。
+ * **指定が存在しないことだけが、誰にも見えていなかった。**
+ *
+ * ここは破綻を止める範囲に留めている。まとまりとして認識できる枠と、
+ * 前後との間隔だけを与える（どの見た目を目指すかは #94 / #95 で決まる）。
+ */
+
+.issue-filters {
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: var(--space-3) var(--space-4);
+	margin-bottom: var(--space-4);
+}
+
+/*
+ * 絞り込みの各項目。`.form-field` の 1.25rem は縦に 5 項目並ぶこの
+ * フォームでは間延びするので、絞り込みの中だけ詰める
+ */
+.issue-filters .form-field {
+	margin-bottom: var(--space-3);
+}
+
+/* ページ送りは一覧の末尾に置く。上の最後のカードとくっつかないよう離す */
+.issue-pagination {
+	margin-top: var(--space-4);
+}
+
+/* カードを並べる ul。素の ul はタグを横に並べるスタイルなので打ち消す */
+.issue-cards {
+	display: block;
+	padding: 0;
+	margin: 0;
+}
+
+/* コメント 1 件。カードと似た枠だが、下の余白と本文の扱いが違う */
+.comment-card {
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: var(--space-3) var(--space-4);
+	margin-bottom: var(--space-2);
+	list-style: none;
+}
+
+.comment-body {
+	margin: 0 0 var(--space-2);
+	/* 投稿は textarea への入力なので改行が意味を持つ */
+	white-space: pre-wrap;
+}
+
+.comment-date {
+	margin: 0;
+	font-size: var(--text-xs);
+	color: var(--ink-soft);
+}
+
+.comment-cards {
+	display: block;
+	padding: 0;
+	margin: 0 0 var(--space-4);
+}
+
+/* コメント欄の冒頭に置く、何を書く場所かの説明 */
+.section-lead {
+	color: var(--ink-soft);
+	font-size: var(--text-sm);
+}
+
+/* 起票フォームのように、内容の幅を絞って読みやすくするページ */
+.narrow-page {
+	padding: var(--space-4);
+	max-width: 40rem;
+}
+
+/*
+ * ヘッダ。左にサービス名、右に操作を置く。
+ *
+ * `flex-wrap` が無かったため、狭い画面（幅 360px 相当）で各項目が
+ * 縮められるだけ縮められ、「World Issue Tracker」が 3 行、
+ * 「Issue を起票」が 3 行に割れてヘッダだけで画面の 1/4 を占めていた（#93）。
+ *
+ * 折り返しを許すだけでは足りない。flex アイテムは既定で
+ * `min-width: auto` より小さくは縮まないが、内容が単語区切りで折り返せる
+ * 日本語では「Issue を / 起票」のように行内で割れてしまう。項目そのものに
+ * `white-space: nowrap` を与えて、割れるなら項目の単位で折り返させる。
+ */
+.site-header {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	align-items: center;
+	gap: var(--space-2) var(--space-4);
+	padding: var(--space-4);
+	border-bottom: 1px solid var(--line);
+}
+
+.site-header-title {
+	margin: 0;
+	font-size: var(--text-heading-site);
+	white-space: nowrap;
+}
+
+.site-header-nav {
+	display: flex;
+	flex-wrap: wrap;
+	/* 折り返した行同士がくっつかないよう、行間にも余白を取る */
+	gap: var(--space-2) var(--space-4);
+	align-items: center;
+}
+
+/*
+ * ナビの各項目を割れない単位として扱う。子を直接指しているのは、
+ * 中身（リンク・ボタン・Clerk の UserButton）が何であっても
+ * 「項目の途中で折り返さない」を成立させたいため
+ */
+.site-header-nav > * {
+	white-space: nowrap;
+}
+
+/* 詳細ページの説明文。改行を残して読ませる */
+.issue-description {
+	white-space: pre-wrap;
+}
+
+/* ラベルを入力欄の上の行に置く */
+.field-label {
+	display: block;
+}
+
+/*
+ * 表示言語の切り替え（#82）。ヘッダの他の項目より小さく、
+ * 言語名を横に並べる。区切りの「/」は本文より薄くして、
+ * 言語名そのものが読み取りの手がかりになるようにする
+ */
+.locale-switcher {
+	display: flex;
+	/* ヘッダと同じ理由で折り返しを許す（#93）。ここも `flex-wrap` が無く、
+	   「言語: 日本語 / English」が単語の途中で割れていた */
+	flex-wrap: wrap;
+	gap: var(--space-1);
+	font-size: var(--text-sm);
+	align-items: center;
+}
+
+/* ラベルと言語名を割れない単位にする */
+.locale-switcher > * {
+	white-space: nowrap;
+}
+
+.locale-switcher-label {
+	color: var(--ink-soft);
+}
+
+.locale-switcher-separator {
+	color: var(--ink-faint);
+}
+
+/*
+ * 起票フォームで選んだ写真のプレビュー（#65）。
+ * 縦横比は写真ごとに違うので、最大の幅と高さだけを決めて
+ * 比率は画像に従わせる
+ */
+.photo-preview {
+	display: block;
+	max-width: 100%;
+	max-height: 16rem;
+	margin: var(--space-2) 0;
+}
+
+/*
+ * 詳細ページに出す写真（#65）。プレビューと違い高さは制限しない
+ * （その写真を見に来た画面なので、大きく見せる）
+ */
+.issue-photo {
+	max-width: 100%;
+	height: auto;
+}
+
+/*
+ * 狭い画面への対応（Issue #93）。
+ *
+ * これまで `@media` が 1 つも無く、`body` は `max-width: 800px` と
+ * `padding: 2rem` の固定だった。幅 360px の実機では左右 2rem（合計 64px）が
+ * そのまま食われ、本文に使える幅が 300px を切っていた。
+ *
+ * 分岐は 480px に置いている。上の値は「ここより下では余白より内容の幅を
+ * 優先する」という判断で、特定の端末の実寸に合わせたものではない
+ * （どの見た目を目指すかは #94 / #95 で決まる。ここは破綻を止める範囲）。
+ */
+@media (max-width: 480px) {
+	body {
+		padding: var(--space-4);
+	}
+
+	/* ヘッダも同じだけ詰める。ここだけ 1rem のままだと段差ができる */
+	.site-header {
+		padding: var(--space-3) var(--space-4);
+	}
+
+	/*
+	 * 枠を持つまとまりは左右の内側の余白を削る。枠の中の文字が
+	 * 画面幅の半分近くまで押し込まれるのを防ぐ
+	 */
+	.issue-card,
+	.comment-card,
+	.location,
+	.issue-filters {
+		padding-left: var(--space-3);
+		padding-right: var(--space-3);
+	}
+
+	/*
+	 * 起票フォームのページは自前で余白を持っている。body 側を詰めても
+	 * こちらが 1rem のままだと二重に効いて内容が細くなる
+	 */
+	.narrow-page {
+		padding: var(--space-3);
+	}
 }

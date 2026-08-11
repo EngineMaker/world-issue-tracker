@@ -64,7 +64,10 @@ describe("Test database schema", () => {
 			"created_at",
 			"updated_at",
 			"user_id",
-			// 0007_add_is_anonymous.sql
+			// 0007_add_photo.sql — 写真の置き場（R2）へのキーと、その MIME
+			"photo_key",
+			"photo_content_type",
+			// 0008_add_is_anonymous.sql
 			"is_anonymous",
 		]);
 	});
@@ -127,7 +130,16 @@ describe("Test database schema", () => {
 	// 側に入れれば緑になる）。狙いは、公開判断が必ず diff に現れてレビューに乗ること。
 	it("classifies every column as either public or explicitly internal", async () => {
 		/** 公開してはいけないカラム。追加したら意図的にここへ足す。 */
-		const INTERNAL_COLUMNS = ["user_id"];
+		const INTERNAL_COLUMNS = [
+			"user_id",
+			// 写真（#65）は R2 のキーも MIME もレスポンスに載せない。
+			// キーを公開すると `GET /issues/:id/photo` を経由しない読み方が
+			// 生まれ、将来の非公開化が効かない経路になる。画面が必要とする
+			// 「写真があるか」は `has_photo` という派生フィールドで返す
+			// （`src/routes/issues.ts` の `INTERNAL_PHOTO_COLUMNS`）。
+			"photo_key",
+			"photo_content_type",
+		];
 
 		expect(await issueColumns()).toEqual(
 			expect.arrayContaining([...PUBLIC_ISSUE_COLUMNS]),

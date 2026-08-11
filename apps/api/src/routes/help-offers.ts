@@ -1,5 +1,6 @@
 import { getAuth } from "@hono/clerk-auth";
 import { type Context, Hono } from "hono";
+import type { HelpOfferRow, IssueRow } from "../db/rows";
 import type { Bindings } from "../index";
 import {
 	viewerUserId as getViewerUserId,
@@ -51,10 +52,25 @@ export const PUBLIC_HELP_OFFER_COLUMNS = [
 	"created_at",
 ] as const;
 
-type PublicHelpOffer = Record<
-	(typeof PUBLIC_HELP_OFFER_COLUMNS)[number],
-	unknown
+/**
+ * レスポンスに載る表明。`HelpOfferRow` から公開カラムだけを取り出したもの
+ * （`issues.ts` の `PublicIssue` と同じ導き方）。
+ *
+ * ここには `user_id` が含まれる。上のコメントのとおり、この機能では
+ * 意図して公開している値であり、`issues` 側の除外方針と矛盾しない。
+ * 一方 `issue_id` は URL から自明なので載せていない。
+ */
+type PublicHelpOffer = Pick<
+	HelpOfferRow,
+	(typeof PUBLIC_HELP_OFFER_COLUMNS)[number]
 >;
+
+/**
+ * `toPublicHelpOffer` が受け取れる行。
+ * 二段構えの 2 段目なので、`SELECT *` 相当の行も受けられるようにする
+ * （`issues.ts` の `IssueRowLike` と同じ）。
+ */
+type HelpOfferRowLike = PublicHelpOffer & Partial<HelpOfferRow>;
 
 /**
  * レスポンスに載せるカラムだけを並べた SELECT / RETURNING 句。
@@ -65,7 +81,7 @@ const PUBLIC_SELECT = PUBLIC_HELP_OFFER_COLUMNS.join(", ");
 /** `issues.ts` の `NOW_SQL` と同じ理由でミリ秒精度を明示的に入れる。 */
 const NOW_SQL = "strftime('%Y-%m-%d %H:%M:%f', 'now')";
 
-function toPublicHelpOffer(row: Record<string, unknown>): PublicHelpOffer {
+function toPublicHelpOffer(row: HelpOfferRowLike): PublicHelpOffer {
 	return Object.fromEntries(
 		PUBLIC_HELP_OFFER_COLUMNS.map((column) => [column, row[column]]),
 	) as PublicHelpOffer;
@@ -85,7 +101,7 @@ async function requireIssue(
 ): Promise<Response | null> {
 	const row = await c.env.DB.prepare("SELECT id FROM issues WHERE id = ?")
 		.bind(issueId)
-		.first<{ id: string }>();
+		.first<Pick<IssueRow, "id">>();
 
 	if (!row) {
 		return c.json({ error: "Issue not found" }, 404);
@@ -117,7 +133,7 @@ helpOffers.get("/", clerkAuth(), async (c) => {
 		`SELECT ${PUBLIC_SELECT} FROM help_offers WHERE issue_id = ? ORDER BY created_at ASC, id ASC`,
 	)
 		.bind(issueId)
-		.all<Record<string, unknown>>();
+		.all<PublicHelpOffer>();
 
 	const data = rows.results.map(toPublicHelpOffer);
 
@@ -181,7 +197,7 @@ helpOffers.post("/", clerkAuth(), requireAuth, async (c) => {
      RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(issueId, userId)
-		.first();
+		.first<PublicHelpOffer>();
 
 	// INSERT / DO UPDATE のいずれでも RETURNING は 1 行返すため、ここは通らない。
 	// `first()` が null を含む型であることへの処理で、握り潰して空の表明を

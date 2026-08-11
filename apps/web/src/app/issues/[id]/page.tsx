@@ -1,13 +1,14 @@
 import {
-	DEFAULT_LOCALE,
 	getIssueAnonymityLabel,
+	getUiMessages,
 	ISSUE_SCOPE_LABELS,
 	ISSUE_STATUS_LABELS,
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchHelpOffers } from "../../../lib/help-offers";
-import { fetchComments, fetchIssue } from "../../../lib/issues";
+import { fetchComments, fetchIssue, issuePhotoUrl } from "../../../lib/issues";
+import { getLocale } from "../../../lib/locale";
 import {
 	resolveTileAttribution,
 	resolveTileUrlTemplate,
@@ -17,9 +18,6 @@ import { HelpOfferButton } from "../../components/HelpOfferButton";
 import { formatCreatedAt } from "../../components/IssueList";
 import { IssueMap } from "../../components/IssueMap";
 import { IssueStatusSection } from "../../components/StatusControl";
-
-const SCOPE_LABELS = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
-const STATUS_LABELS = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
 
 /**
  * Issue 詳細ページ。
@@ -35,6 +33,10 @@ const STATUS_LABELS = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
  * （Clerk のセッションは Cookie で、別オリジンの API には届かない）。
  * 「自分が表明済みか」はブラウザ側で `HelpOfferButton` が取り直す。
  * 件数と表明者だけは JS の実行前から読めるようにするため、ここで取る。
+ *
+ * 配下の Client Component にはロケールを props で渡す（Issue #82）。
+ * Cookie は `next/headers` の `cookies()` からしか読めず、それは
+ * Server Component 側の API なので、境界を跨ぐときは値として渡す。
  */
 export default async function IssueDetailPage({
 	params,
@@ -43,6 +45,11 @@ export default async function IssueDetailPage({
 	params: Promise<{ id: string }>;
 }) {
 	const { id } = await params;
+	const locale = await getLocale();
+	const messages = getUiMessages(locale);
+	const scopeLabels = ISSUE_SCOPE_LABELS[locale];
+	const statusLabels = ISSUE_STATUS_LABELS[locale];
+
 	const [result, commentsResult, offers] = await Promise.all([
 		fetchIssue(id),
 		fetchComments(id),
@@ -58,22 +65,20 @@ export default async function IssueDetailPage({
 	if (!result.ok) {
 		return (
 			<main>
-				<h1>Issue を表示できませんでした</h1>
-				<div style={{ color: "#b00", padding: "0.5rem 0" }}>
-					<p style={{ margin: "0 0 0.25rem" }}>
-						時間をおいて再度お試しください。
-					</p>
-					<p style={{ margin: 0, fontSize: "0.85rem" }}>{result.error}</p>
+				<h1>{messages.issueDetail.unavailableHeading}</h1>
+				<div className="error-block">
+					<p className="block-message">{messages.issueDetail.retryLater}</p>
+					<p className="block-detail">{result.error}</p>
 				</div>
 				<p>
-					<Link href="/issues">Issue 一覧へ戻る</Link>
+					<Link href="/issues">{messages.issueDetail.backToList}</Link>
 				</p>
 			</main>
 		);
 	}
 
 	const { issue } = result;
-	const scope = SCOPE_LABELS[issue.scope];
+	const scope = scopeLabels[issue.scope];
 
 	return (
 		<main>
@@ -83,10 +88,10 @@ export default async function IssueDetailPage({
 			  スコープとステータスは enum の生値（`community` / `open`）のままだと
 			  読み手に伝わらない。ラベルは packages/shared に一本化している
 			*/}
-			<p style={{ color: "#666", fontSize: "0.9rem" }}>
+			<p className="issue-meta">
 				<span>{scope.label}</span>
 				{" / "}
-				<span>{STATUS_LABELS[issue.status]}</span>
+				<span>{statusLabels[issue.status]}</span>
 				{issue.category ? (
 					<>
 						{" / "}
@@ -98,22 +103,43 @@ export default async function IssueDetailPage({
 					{formatCreatedAt(issue.created_at)}
 				</time>
 				{" / "}
-				<span>{getIssueAnonymityLabel(issue.is_anonymous)}</span>
+				<span>{getIssueAnonymityLabel(issue.is_anonymous, locale)}</span>
 			</p>
 
+			{/*
+			  写真（#65）。説明より前に置く。「壊れた街灯」「伸びた草」の
+			  ような物理世界の困りごとは、写真 1 枚が文章 10 行より状況を
+			  伝える。読み手が最初に見る位置が写真であるべき。
+
+			  写真が無い Issue では何も出さない。場所は下の「詳細」に
+			  地図（#63）があり、そちらが代役を務める
+			*/}
+			{issue.has_photo && (
+				<section>
+					<h2>{messages.issueDetail.photoHeading}</h2>
+					{/* biome-ignore lint/performance/noImgElement: 配信元（API Worker）は環境変数で差し替わるため next/image の remotePatterns に列挙できず、Workers 上での変換コストに見合う利得も無い（理由は IssueMap と同じ）。寸法を属性で固定しないのは、写真の縦横比が投稿ごとに違うため — CSS で最大幅だけ決め、比率は画像に従わせる */}
+					<img
+						className="issue-photo"
+						src={issuePhotoUrl(issue.id)}
+						alt={messages.issueDetail.photoAlt(issue.title)}
+					/>
+				</section>
+			)}
+
 			<section>
-				<h2>説明</h2>
+				<h2>{messages.issueDetail.descriptionHeading}</h2>
 				{/*
 				  投稿は textarea への入力なので改行が意味を持つ。
-				  既定の `white-space` だと改行が潰れて 1 段落に見える
+				  既定の `white-space` だと改行が潰れて 1 段落に見える。
+				  本文そのものは投稿された言語のまま出す（翻訳は #66）
 				*/}
-				<p style={{ whiteSpace: "pre-wrap" }}>{issue.description}</p>
+				<p className="issue-description">{issue.description}</p>
 			</section>
 
 			<section>
-				<h2>詳細</h2>
+				<h2>{messages.issueDetail.detailsHeading}</h2>
 				<dl>
-					<dt>スコープ</dt>
+					<dt>{messages.issueDetail.scope}</dt>
 					<dd>
 						{scope.label} — {scope.description}
 					</dd>
@@ -123,11 +149,11 @@ export default async function IssueDetailPage({
 					  変更の操作 UI は後段の `IssueStatusSection`（Client Component）で、
 					  起票者かどうかを確かめてから出す
 					*/}
-					<dt>ステータス</dt>
-					<dd>{STATUS_LABELS[issue.status]}</dd>
+					<dt>{messages.issueDetail.status}</dt>
+					<dd>{statusLabels[issue.status]}</dd>
 
-					<dt>カテゴリ</dt>
-					<dd>{issue.category ?? "未設定"}</dd>
+					<dt>{messages.issueDetail.category}</dt>
+					<dd>{issue.category ?? messages.issueDetail.categoryUnset}</dd>
 
 					{/*
 					  起票者（#88）。今は「名乗っているかどうか」しか出せない。
@@ -135,10 +161,10 @@ export default async function IssueDetailPage({
 					  それは #67 の範囲。ここが「投稿者あり」のまま名前が
 					  出ないのは未完成なのではなく、意図した段階
 					*/}
-					<dt>起票者</dt>
-					<dd>{getIssueAnonymityLabel(issue.is_anonymous)}</dd>
+					<dt>{messages.issueDetail.author}</dt>
+					<dd>{getIssueAnonymityLabel(issue.is_anonymous, locale)}</dd>
 
-					<dt>場所</dt>
+					<dt>{messages.issueDetail.location}</dt>
 					{/*
 					  地図を出しても座標の数値は消さない（#63）。タイル配信元が
 					  落ちていたり未設定だったりすると地図は出ないが、そのときに
@@ -152,18 +178,19 @@ export default async function IssueDetailPage({
 							title={issue.title}
 							tileUrlTemplate={resolveTileUrlTemplate()}
 							attribution={resolveTileAttribution()}
+							locale={locale}
 						/>
-						緯度 {issue.latitude} / 経度 {issue.longitude}
+						{messages.issueDetail.coordinates(issue.latitude, issue.longitude)}
 					</dd>
 
-					<dt>作成日時</dt>
+					<dt>{messages.issueDetail.createdAt}</dt>
 					<dd>
 						<time dateTime={issue.created_at}>
 							{formatCreatedAt(issue.created_at)}
 						</time>
 					</dd>
 
-					<dt>最終更新</dt>
+					<dt>{messages.issueDetail.updatedAt}</dt>
 					<dd>
 						<time dateTime={issue.updated_at}>
 							{formatCreatedAt(issue.updated_at)}
@@ -179,7 +206,11 @@ export default async function IssueDetailPage({
 			  「手伝います」より前に置いているのは、状態を進めるのが起票者本人の
 			  操作で、Issue 本文を読み終えた直後に続く流れになるため
 			*/}
-			<IssueStatusSection issueId={issue.id} status={issue.status} />
+			<IssueStatusSection
+				issueId={issue.id}
+				status={issue.status}
+				locale={locale}
+			/>
 
 			{/*
 			  「手伝います」はコメントより前に置く。読み終えた直後が一番
@@ -188,15 +219,20 @@ export default async function IssueDetailPage({
 			<HelpOfferButton
 				issueId={issue.id}
 				initialSummary={offers.ok ? offers.summary : null}
+				locale={locale}
 			/>
 
-			<CommentSection issueId={issue.id} initialResult={commentsResult} />
+			<CommentSection
+				issueId={issue.id}
+				initialResult={commentsResult}
+				locale={locale}
+			/>
 
 			{/* 読み終えたときに行き止まりにしない */}
 			<p>
-				<Link href="/issues">Issue 一覧へ戻る</Link>
+				<Link href="/issues">{messages.issueDetail.backToList}</Link>
 				{" / "}
-				<Link href="/issues/new">Issue を書く</Link>
+				<Link href="/issues/new">{messages.issueDetail.writeIssue}</Link>
 			</p>
 		</main>
 	);
