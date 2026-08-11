@@ -103,9 +103,19 @@ API は `http://localhost:8787`、Web は `http://localhost:3000` で起動し�
 
 - **Web**: `bun run deploy` が `apps/web/scripts/check-clerk-keys.ts` を先に実行し、
   `pk_live_` / `sk_live_` でなければビルドへ進まずに失敗します
-- **API**: キーは Workers Secrets にありビルド時には読めないため、止められません。
-  代わりに開発用キーで動いていると警告をログへ出します（Worker インスタンスごとに 1 回）。
-  Cloudflare の Observability / `wrangler tail` で確認できます
+- **API**: キーは Workers Secrets にあり、値は書き込み専用で読み出せないため
+  （`wrangler secret list` が返すのは名前と型だけ）、ビルド前には止められません。
+  代わりに**デプロイの直後に、出したばかりの API 自身へ種別を聞きます**
+  （`apps/api/scripts/verify-clerk-instance.ts` が `GET /health/auth` を叩く）。
+  開発用インスタンスならワークフローが失敗します。
+  併せて実行時にも開発用キーで動いていると警告をログへ出します
+  （Worker インスタンスごとに 1 回。Observability / `wrangler tail` で確認できます）
+
+`GET /health/auth` が返すのは**種別だけ**（`production` / `development` / `unset`）で、
+キーの値も断片も返しません。判定は接頭辞しか見ないので種別以上の情報は不要です。
+
+`deploy-web` は `deploy-api` の完了を待ちます（`needs: deploy-api`）。並走させると、
+片方だけ本番用インスタンスに切り替わった状態で本番が動く時間帯ができてしまうためです。
 
 検査は接頭辞が `pk_live_` / `sk_live_` であることだけを見ます。**判定できない値
 （未設定、空、想定外の接頭辞）は「本番用ではない」として扱い、デプロイを止めます。**
