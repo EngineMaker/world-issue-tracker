@@ -223,7 +223,7 @@ describe("HelpOfferButton", () => {
 	});
 
 	describe("未ログイン", () => {
-		it("ボタンは見せるが、サインインが必要だと伝える", () => {
+		it("ボタンは見せるが、ログインが必要だと伝える", () => {
 			// 何ができる場所か分からないままログインを求めない、という
 			// 起票フォームと同じ方針
 			const text = visibleText(
@@ -231,7 +231,7 @@ describe("HelpOfferButton", () => {
 			);
 
 			expect(text).toContain("手伝います");
-			expect(text).toContain("サインインが必要です");
+			expect(text).toContain("ログインが必要です");
 		});
 	});
 

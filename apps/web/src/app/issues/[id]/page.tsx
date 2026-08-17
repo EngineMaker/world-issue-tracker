@@ -5,6 +5,11 @@ import {
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import {
+	formatCreatedAt,
+	toDateTimeTooltip,
+	toIsoDateTime,
+} from "../../../lib/datetime";
 import { fetchHelpOffers } from "../../../lib/help-offers";
 import { fetchComments, fetchIssue, issuePhotoUrl } from "../../../lib/issues";
 import { getLocale } from "../../../lib/locale";
@@ -14,7 +19,6 @@ import {
 } from "../../../lib/map";
 import { CommentSection } from "../../components/CommentSection";
 import { HelpOfferButton } from "../../components/HelpOfferButton";
-import { formatCreatedAt } from "../../components/IssueList";
 import { IssueMap } from "../../components/IssueMap";
 import { IssueStatusSection } from "../../components/StatusControl";
 import { StatusPill } from "../../components/StatusPill";
@@ -97,8 +101,12 @@ export default async function IssueDetailPage({
 				{issue.category ? (
 					<span className="issue-meta-item">{issue.category}</span>
 				) : null}
-				<time className="issue-meta-item" dateTime={issue.created_at}>
-					{formatCreatedAt(issue.created_at)}
+				<time
+					className="issue-meta-item"
+					dateTime={toIsoDateTime(issue.created_at)}
+					title={toDateTimeTooltip(issue.created_at, locale)}
+				>
+					{formatCreatedAt(issue.created_at, locale)}
 				</time>
 				{" / "}
 				<span>{getIssueAnonymityLabel(issue.is_anonymous, locale)}</span>
@@ -190,15 +198,21 @@ export default async function IssueDetailPage({
 
 					<dt>{messages.issueDetail.createdAt}</dt>
 					<dd>
-						<time dateTime={issue.created_at}>
-							{formatCreatedAt(issue.created_at)}
+						<time
+							dateTime={toIsoDateTime(issue.created_at)}
+							title={toDateTimeTooltip(issue.created_at, locale)}
+						>
+							{formatCreatedAt(issue.created_at, locale)}
 						</time>
 					</dd>
 
 					<dt>{messages.issueDetail.updatedAt}</dt>
 					<dd>
-						<time dateTime={issue.updated_at}>
-							{formatCreatedAt(issue.updated_at)}
+						<time
+							dateTime={toIsoDateTime(issue.updated_at)}
+							title={toDateTimeTooltip(issue.updated_at, locale)}
+						>
+							{formatCreatedAt(issue.updated_at, locale)}
 						</time>
 					</dd>
 				</dl>

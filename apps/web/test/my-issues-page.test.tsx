@@ -99,7 +99,7 @@ describe("/my-issues ページ", () => {
 		expect(html).toContain('href="/issues/new"');
 	});
 
-	it("未サインインなら API を呼ばずにサインインを促す", async () => {
+	it("未ログインなら API を呼ばずにログインを促す", async () => {
 		mockToken = null;
 
 		const { html, calls } = await renderMyIssues(
@@ -107,16 +107,16 @@ describe("/my-issues ページ", () => {
 		);
 
 		expect(calls).toHaveLength(0);
-		expect(html).toContain("サインイン");
+		expect(html).toContain("ログイン");
 		expect(html).not.toContain("まだ Issue を起票していません");
 	});
 
-	it("トークンが期限切れ（API が 401）ならサインインを促す", async () => {
+	it("トークンが期限切れ（API が 401）ならログインを促す", async () => {
 		const { html } = await renderMyIssues(
 			Response.json({ error: "Unauthorized" }, { status: 401 }),
 		);
 
-		expect(html).toContain("サインイン");
+		expect(html).toContain("ログイン");
 		expect(html).not.toContain("まだ Issue を起票していません");
 	});
 

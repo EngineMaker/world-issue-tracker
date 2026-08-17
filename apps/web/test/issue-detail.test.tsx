@@ -19,6 +19,7 @@ import {
 import { renderToStaticMarkup } from "react-dom/server";
 import { IssueList } from "../src/app/components/IssueList";
 import IssueDetailPage from "../src/app/issues/[id]/page";
+import { formatCreatedAt, toIsoDateTime } from "../src/lib/datetime";
 import { fetchIssue } from "../src/lib/issues";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
@@ -238,7 +239,6 @@ describe("詳細ページ", () => {
 	it.each([
 		["説明", "夜道が暗くて危ない"],
 		["カテゴリ", "infrastructure"],
-		["作成日時", "2026-08-01 12:00 UTC"],
 		["緯度", "35.68"],
 		["経度", "139.76"],
 	])("%s を表示する", async (_label, expected) => {
@@ -267,17 +267,38 @@ describe("詳細ページ", () => {
 		expect(text).not.toContain("community");
 	});
 
-	// 日時の整形を独自に書くと 9 時間ずれる（理由は IssueList.tsx）。
-	// 一覧と同じ関数を通っていることを、値として確かめる
-	it("作成日時を UTC として表示する（ローカル時刻でずらさない）", async () => {
+	// 日時の整形を独自に書くと 9 時間ずれる（理由は lib/datetime.ts）。
+	// 一覧と同じ関数を通っていることを、値として確かめる。
+	//
+	// 期待値は `formatCreatedAt` から引く（A5）。表示は相対表記になったので、
+	// 文字列を直書きすると実行日によって落ちる
+	it("作成日時を一覧と同じ整形で表示する", async () => {
 		const { html } = await renderDetail(
 			sampleIssue.id,
 			Response.json(sampleIssue),
 		);
 		const text = html.replace(/<[^>]*>/g, "");
 
-		expect(text).toContain("2026-08-01 12:00 UTC");
-		expect(text).not.toContain("2026-08-01 21:00");
+		expect(text).toContain(
+			formatCreatedAt(sampleIssue.created_at, DEFAULT_LOCALE),
+		);
+		// UTC の生表記に戻っていないこと
+		expect(text).not.toContain("2026-08-01 12:00 UTC");
+	});
+
+	// 表示が相対表記になったぶん、正確な時刻は `<time datetime>` だけが持つ（A5）。
+	// API の生の値は ISO 8601 ではないので、そのまま入れていないことを見る
+	it("正確な時刻を dateTime 属性に ISO 8601 で残す", async () => {
+		const { html } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+		);
+
+		expect(html).toContain(
+			`dateTime="${toIsoDateTime(sampleIssue.created_at)}"`,
+		);
+		// 空白区切りの生の値（ISO 8601 として無効）が属性に残っていないこと
+		expect(html).not.toContain(`dateTime="${sampleIssue.created_at}"`);
 	});
 
 	// Issue #62: 6 状態を説明しておきながら画面から変える手段が無く、

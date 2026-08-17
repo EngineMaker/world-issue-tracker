@@ -13,7 +13,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { IssueCreated } from "../src/app/components/IssueCreated";
 import { IssueFilterForm } from "../src/app/components/IssueFilterForm";
 import {
-	formatCreatedAt,
 	IssueList,
 	scopeLabels,
 	statusLabels,
@@ -22,6 +21,11 @@ import { IssuePagination } from "../src/app/components/IssuePagination";
 import { MyIssueList } from "../src/app/components/MyIssueList";
 import IssuesPage from "../src/app/issues/page";
 import Home from "../src/app/page";
+import {
+	formatCreatedAt,
+	toDateTimeTooltip,
+	toIsoDateTime,
+} from "../src/lib/datetime";
 import {
 	DEFAULT_ISSUE_FILTERS,
 	type FetchIssuesResult,
@@ -81,9 +85,18 @@ describe("IssueList", () => {
 		// enum の生値がそのまま出ていないこと
 		expect(html).not.toContain(">community<");
 		// `dateTime` 属性ではなく、画面に見えるテキストとして日時が出ていること。
-		// 属性値だけを見ると、表示から日時が消えても気付けない
+		// 属性値だけを見ると、表示から日時が消えても気付けない。
+		//
+		// 期待値は `formatCreatedAt` から引く（A5）。表示が相対表記になったので、
+		// 文字列を直書きすると「9日前」が実行日によって変わって落ちる
 		const visibleText = html.replace(/<[^>]*>/g, "");
-		expect(visibleText).toContain("2026-08-01 12:00 UTC");
+		expect(visibleText).toContain(
+			formatCreatedAt(sampleIssue.created_at, DEFAULT_LOCALE),
+		);
+		// 正確な時刻は `dateTime` 属性が ISO 8601 で持つ
+		expect(html).toContain(
+			`dateTime="${toIsoDateTime(sampleIssue.created_at)}"`,
+		);
 	});
 
 	it("スコープ・ステータスの enum の生の値を画面に出さない", () => {
@@ -246,20 +259,154 @@ describe("IssueList", () => {
 	});
 });
 
+/**
+ * 日時の表示（A5）。
+ *
+ * 基準時刻（`now`）を引数で渡してテストする。既定は「今」なので、
+ * 固定しないと「9 日前」の期待値が明日には 10 日前になって落ちる。
+ */
 describe("formatCreatedAt", () => {
-	it("API の値を UTC として読む（実行環境のタイムゾーンでずらさない）", () => {
-		// JST として解釈されると 2026-08-01 03:00 になってしまう
-		expect(formatCreatedAt("2026-08-01 12:00:00.000")).toBe(
-			"2026-08-01 12:00 UTC",
+	/** 2026-08-10 03:00 UTC = JST 12:00。JST の昼を基準にする */
+	const now = new Date("2026-08-10T03:00:00.000Z");
+
+	it("1 分未満は「たった今」", () => {
+		expect(formatCreatedAt("2026-08-10 02:59:30.000", "ja", now)).toBe(
+			"たった今",
+		);
+	});
+
+	it("1 時間未満は分で出す", () => {
+		expect(formatCreatedAt("2026-08-10 02:30:00.000", "ja", now)).toBe(
+			"30分前",
+		);
+	});
+
+	it("同じ日のうちは時間で出す", () => {
+		expect(formatCreatedAt("2026-08-10 00:00:00.000", "ja", now)).toBe(
+			"3時間前",
+		);
+	});
+
+	it("前日は「昨日」", () => {
+		// JST の 8/9 23:00（= UTC 8/9 14:00）。経過は 13 時間だが暦日は 1 日前
+		expect(formatCreatedAt("2026-08-09 14:00:00.000", "ja", now)).toBe("昨日");
+	});
+
+	it("30 日以内は日数で出す", () => {
+		expect(formatCreatedAt("2026-08-01 03:00:00.000", "ja", now)).toBe("9日前");
+		// 境界のすぐ内側（30 日前）も相対表記のまま
+		expect(formatCreatedAt("2026-07-11 03:00:00.000", "ja", now)).toBe(
+			"30日前",
+		);
+	});
+
+	it("30 日を超えたら日付で出す", () => {
+		// 境界のすぐ外側（31 日前）。ここから日付表記に切り替わる
+		expect(formatCreatedAt("2026-07-10 03:00:00.000", "ja", now)).toBe(
+			"7月10日",
+		);
+	});
+
+	it("年をまたいだものには年を付ける", () => {
+		expect(formatCreatedAt("2025-12-31 03:00:00.000", "ja", now)).toBe(
+			"2025年12月31日",
+		);
+	});
+
+	it("JST の暦日で判定する（UTC の日付でずらさない）", () => {
+		// UTC では 6/30 だが JST では 7/1 の朝 8 時。日付表記は JST 側に従う
+		expect(formatCreatedAt("2026-06-30 23:00:00.000", "ja", now)).toBe(
+			"7月1日",
+		);
+	});
+
+	it("英語ロケールでは英語で出す", () => {
+		expect(formatCreatedAt("2026-08-01 03:00:00.000", "en", now)).toBe(
+			"9 days ago",
+		);
+		expect(formatCreatedAt("2026-07-01 03:00:00.000", "en", now)).toBe(
+			"July 1",
 		);
 	});
 
 	it("秒精度の値（DEFAULT で入った古い行）も読める", () => {
-		expect(formatCreatedAt("2026-08-01 12:00:00")).toBe("2026-08-01 12:00 UTC");
+		expect(formatCreatedAt("2026-07-01 03:00:00", "ja", now)).toBe("7月1日");
 	});
 
 	it("想定外の書式なら Invalid Date ではなく元の値を返す", () => {
-		expect(formatCreatedAt("not a date")).toBe("not a date");
+		expect(formatCreatedAt("not a date", "ja", now)).toBe("not a date");
+	});
+});
+
+/**
+ * `<time datetime>` に入れる値（A5）。
+ *
+ * 表示は相対表記になったので、正確な時刻はこの属性だけが持つ。
+ * API の生の値は ISO 8601 ではないため、そのまま入れてはいけない。
+ */
+describe("toIsoDateTime", () => {
+	it("API の値を ISO 8601 に直す", () => {
+		expect(toIsoDateTime("2026-08-01 12:00:00.000")).toBe(
+			"2026-08-01T12:00:00.000Z",
+		);
+	});
+
+	it("UTC として読む（実行環境のタイムゾーンでずらさない）", () => {
+		// JST として解釈されると 03:00Z になってしまう
+		expect(toIsoDateTime("2026-08-01 12:00:00")).toBe(
+			"2026-08-01T12:00:00.000Z",
+		);
+	});
+
+	it("解釈できない値では属性を出さない", () => {
+		expect(toIsoDateTime("not a date")).toBeUndefined();
+	});
+});
+
+/**
+ * ツールチップに出す正確な日時（`title` 属性）。
+ *
+ * 表示が相対表記になったので、「9日前」が何月何日なのかを確かめる先が要る。
+ * `datetime` は機械可読な値で、マウスを乗せても読めない。
+ */
+describe("toDateTimeTooltip", () => {
+	it("JST の日時を年まで含めて出す", () => {
+		// UTC 12:00 は JST 21:00。日付は跨がない
+		expect(toDateTimeTooltip("2026-08-01 12:00:00.000", "ja")).toBe(
+			"2026年8月1日 21:00（JST）",
+		);
+	});
+
+	// 本文が今年の年を省くので、確かめる先であるここでは省いてはいけない
+	it("今年の日付にも年を付ける", () => {
+		expect(toDateTimeTooltip("2026-08-01 12:00:00.000", "ja")).toContain(
+			"2026年",
+		);
+	});
+
+	// UTC の日付のまま出すと、深夜の投稿が前日に見える
+	it("JST に直してから出す（UTC の日付のまま出さない）", () => {
+		// UTC では 7/31 23:00 だが、JST では 8/1 の朝 8 時
+		expect(toDateTimeTooltip("2026-07-31 23:00:00.000", "ja")).toBe(
+			"2026年8月1日 08:00（JST）",
+		);
+	});
+
+	it("時刻を 2 桁に揃える", () => {
+		// JST 09:05。「9:5」だと読めない
+		expect(toDateTimeTooltip("2026-08-01 00:05:00.000", "ja")).toContain(
+			"09:05",
+		);
+	});
+
+	it("英語ロケールでは英語で出す", () => {
+		expect(toDateTimeTooltip("2026-08-01 12:00:00.000", "en")).toBe(
+			"August 1, 2026 21:00 (JST)",
+		);
+	});
+
+	it("解釈できない値では属性を出さない", () => {
+		expect(toDateTimeTooltip("not a date", "ja")).toBeUndefined();
 	});
 });
 
@@ -288,22 +435,22 @@ describe("MyIssueList", () => {
 		expect(html).toContain("/issues/new");
 	});
 
-	it("未サインインならサインインを促し、取得失敗とは別の文言を出す", () => {
+	it("未ログインならログインを促し、取得失敗とは別の文言を出す", () => {
 		const html = renderMine({
 			ok: false,
-			error: "サインインが必要です",
+			error: "ログインが必要です",
 			unauthorized: true,
 		});
 
-		expect(html).toContain("サインイン");
+		expect(html).toContain("ログイン");
 		// 「時間をおいて再度お試しください」はサインインでは直らない案内なので出さない
 		expect(html).not.toContain("時間をおいて");
 	});
 
-	it("未サインインを「まだ起票していません」と混同しない", () => {
+	it("未ログインを「まだ起票していません」と混同しない", () => {
 		const html = renderMine({
 			ok: false,
-			error: "サインインが必要です",
+			error: "ログインが必要です",
 			unauthorized: true,
 		});
 

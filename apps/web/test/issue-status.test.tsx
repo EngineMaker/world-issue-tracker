@@ -248,7 +248,7 @@ describe("updateIssueStatus", () => {
 		expect((caught as IssueStatusError).message).toContain("起票した人だけ");
 	});
 
-	it("401 はサインインし直しを促す", async () => {
+	it("401 はログインし直しを促す", async () => {
 		const { fetch } = stubFetch(
 			Response.json({ error: "Unauthorized" }, { status: 401 }),
 		);
@@ -263,7 +263,7 @@ describe("updateIssueStatus", () => {
 		}
 
 		expect((caught as IssueStatusError).status).toBe(401);
-		expect((caught as IssueStatusError).message).toContain("サインイン");
+		expect((caught as IssueStatusError).message).toContain("ログイン");
 	});
 
 	// 200 が返ったのに中身が想定と違う場合、成功として扱うと

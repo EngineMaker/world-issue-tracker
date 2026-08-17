@@ -226,7 +226,7 @@ describe("postComment", () => {
 			postComment("i1", "本文", "tok_123", fetchImpl),
 		).rejects.toMatchObject({
 			status: 401,
-			message: expect.stringContaining("サインイン"),
+			message: expect.stringContaining("ログイン"),
 		});
 	});
 

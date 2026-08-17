@@ -189,7 +189,7 @@ function messageFromErrorBody(body: unknown, status: number): string {
 	}
 
 	if (status === 401) {
-		return "ログインが必要です。サインインし直してから送信してください。";
+		return "ログインが必要です。ログインし直してから送信してください。";
 	}
 	if (status === 403) {
 		return "この操作は許可されていません。";
@@ -260,7 +260,7 @@ export async function createIssue(
 ): Promise<{ id: string }> {
 	if (!token) {
 		throw new CreateIssueError(
-			"ログインが必要です。サインインしてから送信してください。",
+			"ログインが必要です。ログインしてから送信してください。",
 			401,
 		);
 	}
