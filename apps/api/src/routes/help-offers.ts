@@ -2,6 +2,7 @@ import { getAuth } from "@hono/clerk-auth";
 import { type Context, Hono } from "hono";
 import type { HelpOfferRow, IssueRow } from "../db/rows";
 import type { Bindings } from "../index";
+import { fetchDisplayNames } from "../lib/display-names";
 import {
 	viewerUserId as getViewerUserId,
 	requireAuth,
@@ -41,10 +42,9 @@ export const helpOffers = new Hono<HelpOffersEnv>();
  * 守るためで、こちらは逆に本人が自分の意思で名乗り出る行為なので、
  * 秘匿すべき対象が違う。
  *
- * ただし出せるのは Clerk の内部 ID までで、表示名やアバターは持っていない
- * （取得するには Clerk Backend API への追加の問い合わせが要る）。
- * 現状の画面は ID をそのまま並べるのではなく「自分が表明済みか」と件数の
- * 表示に使っている。表示名を出すのは別途対応が要る。
+ * 表示名は DB に無いので、ここには含まれない。一覧を返す直前に Clerk へ
+ * 問い合わせて `display_name` として重ねる（`PublicHelpOfferWithName`）。
+ * 増やしているのは表示名だけで、他の内部情報を公開範囲に足してはいない。
  */
 export const PUBLIC_HELP_OFFER_COLUMNS = [
 	"id",
@@ -71,6 +71,23 @@ type PublicHelpOffer = Pick<
  * （`issues.ts` の `IssueRowLike` と同じ）。
  */
 type HelpOfferRowLike = PublicHelpOffer & Partial<HelpOfferRow>;
+
+/**
+ * 一覧に載る表明。DB の公開カラムに Clerk から引いた表示名を重ねたもの（#108）。
+ *
+ * `display_name` は DB のカラムではないので `PUBLIC_HELP_OFFER_COLUMNS` には
+ * 入れず、ここで足している（あちらは SELECT 句の生成にも使うため）。
+ *
+ * `null` は「Clerk に表示名が設定されていない」と「Clerk へ問い合わせられなかった」
+ * の両方を表す。画面はどちらも同じ文言（`helpOffer.unnamedOfferer`）で出す。
+ * 内訳を返しても利用者にできることが無く、障害の有無を外へ漏らす必要も無い。
+ *
+ * 表明を作る POST のレスポンスには足していない。作成直後の 1 件は画面上
+ * 「あなた」と表示され、名前を引く必要が無いため（一覧の取り直しで揃う）。
+ */
+type PublicHelpOfferWithName = PublicHelpOffer & {
+	display_name: string | null;
+};
 
 /**
  * レスポンスに載せるカラムだけを並べた SELECT / RETURNING 句。
@@ -135,7 +152,26 @@ helpOffers.get("/", clerkAuth(), async (c) => {
 		.bind(issueId)
 		.all<PublicHelpOffer>();
 
-	const data = rows.results.map(toPublicHelpOffer);
+	const offers = rows.results.map(toPublicHelpOffer);
+
+	// 表明者の表示名を Clerk からまとめて引く（#108）。
+	//
+	// 1 人ずつではなく、一覧に出る ID を一度に渡す（`fetchDisplayNames` が
+	// 100 件ずつに分割する）。表明の一覧はページングが無く全件返すため、
+	// 人数分の往復にするとレート制限にすぐ触れる。
+	//
+	// ここは失敗しても throw しない。引けなかった人は `display_name` が null に
+	// なるだけで、一覧そのものは必ず返る。表示名は「あると嬉しい」情報であって、
+	// Clerk が落ちていることで困りごとの画面が見えなくなってはいけない。
+	const displayNames = await fetchDisplayNames(
+		c.env.CLERK_SECRET_KEY,
+		offers.map((offer) => offer.user_id),
+	);
+
+	const data: PublicHelpOfferWithName[] = offers.map((offer) => ({
+		...offer,
+		display_name: displayNames.get(offer.user_id) ?? null,
+	}));
 
 	// 閲覧者自身が表明済みかどうかと、その閲覧者の User ID。
 	//

@@ -3,13 +3,20 @@ import { resolveApiBaseUrl } from "./issues";
 /**
  * 「手伝います」の表明 1 件。
  *
- * API 側の `PUBLIC_HELP_OFFER_COLUMNS`（`apps/api/src/routes/help-offers.ts`）に対応する。
- * `user_id` は Clerk の内部 ID で、表示名ではない（表示名は API が持っていない）。
+ * API 側の `PublicHelpOfferWithName`（`apps/api/src/routes/help-offers.ts`）に対応する。
+ * `user_id` は Clerk の内部 ID で、表示名ではない。
  */
 export type HelpOffer = {
 	id: string;
 	user_id: string;
 	created_at: string;
+	/**
+	 * Clerk から引いた表示名（#108）。
+	 *
+	 * null は「Clerk に表示名が設定されていない」か「API が Clerk へ
+	 * 問い合わせられなかった」のどちらか。画面はどちらも同じ文言で出す。
+	 */
+	display_name: string | null;
 };
 
 /** `GET /issues/:id/help-offers` のレスポンス。 */
@@ -40,13 +47,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function parseHelpOffer(value: unknown): HelpOffer | null {
 	if (!isRecord(value)) return null;
 
-	const { id, user_id, created_at } = value;
+	const { id, user_id, created_at, display_name } = value;
 
 	if (typeof id !== "string") return null;
 	if (typeof user_id !== "string") return null;
 	if (typeof created_at !== "string") return null;
 
-	return { id, user_id, created_at };
+	// `display_name` だけは、形が違っても表明そのものは捨てない（#108）。
+	//
+	// 他のフィールドと扱いを変えているのは、これが無くても一覧の意味が
+	// 成立するため。ここで全体を失敗にすると、API 側の不調や版のずれで
+	// 「解決に動く人」の一覧ごと消える。表示名は「あると嬉しい」情報であって、
+	// それを厳しく検証して本体を巻き添えにするのは順序が逆になる。
+	const displayName =
+		typeof display_name === "string" && display_name !== ""
+			? display_name
+			: null;
+
+	return { id, user_id, created_at, display_name: displayName };
 }
 
 /** `GET /issues/:id/help-offers` のレスポンスを検証する。合わなければ null。 */

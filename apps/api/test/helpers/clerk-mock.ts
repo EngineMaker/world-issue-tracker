@@ -85,6 +85,54 @@ export function getLastAuthSource(): AuthSource {
 	return lastAuthSource;
 }
 
+/**
+ * 表示名の取得（#108）で使う Clerk のユーザー像。
+ *
+ * 実物の `User` はプロパティが数十個あるが、`toDisplayName` が読むのは
+ * この 4 つだけなので、モックもそこに絞る。
+ */
+export type MockClerkUser = {
+	id: string;
+	firstName: string | null;
+	lastName: string | null;
+	username: string | null;
+};
+
+/** Clerk 側に存在することにするユーザー。テストから `setMockClerkUsers()` で入れる。 */
+let mockClerkUsers: MockClerkUser[] = [];
+
+/** `getUserList` が投げる例外。null なら正常に応答する。 */
+let mockUserListError: Error | null = null;
+
+/**
+ * `getUserList` が実際に呼ばれたときの引数の記録。
+ *
+ * 「1 人ずつ問い合わせていないか」「100 件ずつに分割しているか」を
+ * テストから確かめるために残す。回数と、各回に渡した ID の数の両方が要る
+ * （まとめ方の退行は、結果だけを見ていても現れない）。
+ */
+let userListCalls: string[][] = [];
+
+export function setMockClerkUsers(users: MockClerkUser[]): void {
+	mockClerkUsers = users;
+}
+
+/** `getUserList` を必ず失敗させる。Clerk 障害時の挙動を見るために使う。 */
+export function setMockUserListError(error: Error | null): void {
+	mockUserListError = error;
+}
+
+export function getUserListCalls(): string[][] {
+	return userListCalls;
+}
+
+/** 表示名まわりのモック状態をすべて初期化する。テストの `beforeEach` から呼ぶ。 */
+export function resetMockClerkUsers(): void {
+	mockClerkUsers = [];
+	mockUserListError = null;
+	userListCalls = [];
+}
+
 /** 実物と同じ優先順位で、リクエストがどの経路の資格情報を持つかを判定する。 */
 function detectAuthSource(request: Request): AuthSource {
 	const authorization = request.headers.get("Authorization");
@@ -196,6 +244,25 @@ export async function clerkBackendMockFactory(): Promise<
 	return {
 		...actual,
 		createClerkClient: () => ({
+			// 表示名の取得（#108）。実物と同じく `userId` の配列でまとめて引く。
+			//
+			// 渡された ID を記録してから、`mockClerkUsers` のうち該当するものだけを
+			// 返す。存在しない ID を黙って埋めないのは実物と同じ挙動
+			// （Clerk は知らないユーザーを返さない）。
+			users: {
+				getUserList: async ({ userId }: { userId: string[] }) => {
+					userListCalls.push([...userId]);
+
+					if (mockUserListError) {
+						throw mockUserListError;
+					}
+
+					const requested = new Set(userId);
+					return {
+						data: mockClerkUsers.filter((user) => requested.has(user.id)),
+					};
+				},
+			},
 			// 実物と同じく Request を受け取る。中身を見ずに握り潰すと、
 			// リクエストの内容で認証結果が変わる退行を一切検出できなくなる。
 			authenticateRequest: async (

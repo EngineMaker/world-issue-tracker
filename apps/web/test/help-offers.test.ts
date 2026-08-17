@@ -25,6 +25,7 @@ const sampleOffer = {
 	id: "3c1f9a52a1a94e6ab0d0b6f8f8a7c123",
 	user_id: "user_2abcdefghijklmnop",
 	created_at: "2026-08-01 12:00:00.000",
+	display_name: "山田 花子",
 };
 
 const ISSUE_ID = "ebbcf9d7680ad57cedeeb513a90d461f";
@@ -66,6 +67,42 @@ describe("parseHelpOffer", () => {
 		expect(parseHelpOffer({ ...sampleOffer, user_id: 123 })).toBeNull();
 		expect(parseHelpOffer(null)).toBeNull();
 		expect(parseHelpOffer("offer")).toBeNull();
+	});
+
+	// 表示名だけは扱いが違う（#108）。これが無くても一覧の意味は成立するので、
+	// 形が違っても表明そのものは捨てず null に倒す。ここを他のフィールドと
+	// 同じ厳しさにすると、API の版のずれで「解決に動く人」の一覧ごと消える。
+	describe("display_name", () => {
+		it("欠けていても表明は通し、null にする", () => {
+			const withoutName = { ...sampleOffer } as Record<string, unknown>;
+			delete withoutName.display_name;
+
+			expect(parseHelpOffer(withoutName)).toEqual({
+				...sampleOffer,
+				display_name: null,
+			});
+		});
+
+		it("null をそのまま通す", () => {
+			expect(parseHelpOffer({ ...sampleOffer, display_name: null })).toEqual({
+				...sampleOffer,
+				display_name: null,
+			});
+		});
+
+		it("文字列でない値は null に倒す（表明は捨てない）", () => {
+			expect(parseHelpOffer({ ...sampleOffer, display_name: 42 })).toEqual({
+				...sampleOffer,
+				display_name: null,
+			});
+		});
+
+		it("空文字は null に倒す（名前の無い行が空欄にならないように）", () => {
+			expect(parseHelpOffer({ ...sampleOffer, display_name: "" })).toEqual({
+				...sampleOffer,
+				display_name: null,
+			});
+		});
 	});
 });
 

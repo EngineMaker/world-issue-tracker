@@ -150,18 +150,19 @@ export function HelpOfferButton({
 				<>
 					<h3>{messages.helpOffer.offerersHeading}</h3>
 					{/*
-					  API が持っているのは Clerk の内部 ID までで、表示名は無い。
-					  ID をそのまま並べても読み手には意味が無く、かといって誰が
-					  手を挙げたか分からないと起票者は次の一手を決められない。
-					  暫定として ID の一部だけを出し、自分の分は「あなた」と示す。
-					  表示名を出すには Clerk Backend API への問い合わせが要る（別途対応）。
+					  表明者は Clerk の表示名で出す（#108）。API が一覧を返す際に
+					  Clerk Backend API へまとめて問い合わせている。
+					  名前が取れなかった人（Clerk に未設定、または問い合わせ自体が
+					  失敗）は専用の文言にする。起票者が「匿名を選んだ人」と
+					  取り違えないよう、Issue 本体の「匿名の方」とは別の言葉。
+					  自分の分は誰から見ても分かるよう「あなた」のまま。
 					*/}
 					<ul>
 						{summary.offers.map((offer) => (
 							<li key={offer.id}>
 								{offer.user_id === summary.viewerUserId
 									? messages.helpOffer.you
-									: shortUserId(offer.user_id, locale)}
+									: (offer.display_name ?? messages.helpOffer.unnamedOfferer)}
 							</li>
 						))}
 					</ul>
@@ -169,18 +170,4 @@ export function HelpOfferButton({
 			)}
 		</section>
 	);
-}
-
-/**
- * Clerk User ID を短く表示する。
- *
- * `user_2abc...` の形なので、接頭辞を落として先頭 8 文字だけを出す。
- * 個人を特定する情報ではないが、同じ人が複数回出ていないことは確認できる。
- */
-export function shortUserId(
-	userId: string,
-	locale: Locale = DEFAULT_LOCALE,
-): string {
-	const withoutPrefix = userId.replace(/^user_/, "");
-	return getUiMessages(locale).helpOffer.participant(withoutPrefix.slice(0, 8));
 }
