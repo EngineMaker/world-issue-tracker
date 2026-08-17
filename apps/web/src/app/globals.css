@@ -43,6 +43,14 @@
 	--text-base: 1rem;
 	--text-sm: 0.875rem;
 	--text-xs: 0.75rem;
+	/*
+	 * 一覧の Issue タイトル（B4）。19px。
+	 *
+	 * --text-lg（17px）とは別に持つ。あちらは詳細ページの小見出しなど
+	 * 「本文より少し強い」用途で、こちらは罫線だけの一覧で 1 件の
+	 * 始まりを示す役。枠が無いぶん、大きさが区切りの手がかりになる
+	 */
+	--text-list-title: 1.1875rem;
 
 	/*
 	 * 見出しの段階（#94 の結論）。
@@ -58,9 +66,40 @@
 	 * **#94 が認めた既存値の変更はこの 1 つだけ。**
 	 */
 	--text-heading-page: 2rem;
-	--text-heading-section: 1.25rem;
+	/*
+	 * 節の見出し（B1）。1.25rem では本文（1rem）との差が小さく、
+	 * 節の変わり目が読み取りにくかった。画面幅に応じて 26px〜34px。
+	 */
+	--text-heading-section: clamp(1.625rem, 3vw, 2.125rem);
 	/* ヘッダのサービス名。h1 だが本文中の見出しではないので別に持つ */
 	--text-heading-site: 1.0625rem;
+	/*
+	 * トップページのヒーローの見出し（B1）。40px〜70px。
+	 *
+	 * `--text-heading-page`（2rem）とは別に持つ。あちらは詳細ページの
+	 * h1 でも使われていて、そこに入るのは**利用者が書いた Issue の
+	 * タイトル**（最大 200 文字）。長さが読めないものを 70px にすると、
+	 * 長いタイトルの Issue を開いた瞬間に画面が埋まる。
+	 *
+	 * 大きくしてよいのは、文言をこちらで決められるヒーローだけ。
+	 *
+	 * 可変部が `vw` ではなく `cqi`（コンテナの幅）なのは、ヒーローが
+	 * 広い画面で 2 列になるため。`vw` は画面全体の幅を見るので、
+	 * 実際には半分しかない左の列に対して倍の字を置くことになり、
+	 * 1280px で「地球のバ / グを、」と語中で割れていた。
+	 * `cqi` なら文字が実際に置かれる幅から算出される。
+	 *
+	 * 係数の基準が画面幅ではなく列の幅であることに注意。`vw` の値を
+	 * そのまま `cqi` に読み替えると小さくなりすぎて、下限に張り付く。
+	 *
+	 * 上限は指示書どおりの 4.375rem（70px）。B1 の時点では 52px に
+	 * 下げていた。当時はヒーローが 2 列で、文字側が 337px しか使えず、
+	 * 70px にすると「地球のバグ / を、」と語中で折り返したため。
+	 * B2 で絵を消して 1 列にしたことで幅が 694px になり、70px でも
+	 * 2 行に収まるようになったので、本来の値に戻している。
+	 * これで本文（16px）との差が 4 倍以上になる（指示書 B1 の要求）。
+	 */
+	--text-heading-hero: clamp(2.75rem, 9.5cqi, 4.375rem);
 
 	/* 余白は 0.25rem 刻み */
 	--space-1: 0.25rem;
@@ -95,6 +134,26 @@
 	--leading-normal: 1.6;
 	--tracking-tight: -0.01em;
 	--tracking-normal: 0;
+	/*
+	 * 特大の見出し用（B1）。字が大きくなるほど、行間も字間も
+	 * 相対的に広く見える。同じ 1.2 でも 28px と 70px では
+	 * 行の離れ方がまるで違うので、大きい見出しには専用の値を持つ
+	 */
+	--leading-hero: 1.14;
+	--tracking-hero: -0.03em;
+
+	/*
+	 * 濃い面の上に重ねる明るい面（B5）。
+	 *
+	 * 解決の実例の帯は地が濃緑なので、そこに白い面（--surface）を置くと
+	 * 明るすぎて帯の中が 2 つに割れて見える。透過で薄く重ねると、
+	 * 「帯の中の 1 件」であることを保ったまま切り出せる。
+	 *
+	 * 濃緑の実値ではなく透過にしているのは、帯の色を変えても
+	 * 重なりの関係がそのまま保たれるようにするため
+	 */
+	--overlay-soft: rgb(255 255 255 / 0.1);
+	--overlay-strong: rgb(255 255 255 / 0.18);
 
 	/* 遷移（#94） */
 	--transition-fast: 160ms ease;
@@ -257,7 +316,13 @@ h1 {
 
 h2 {
 	font-size: var(--text-heading-section);
-	line-height: var(--leading-snug);
+	/*
+	 * B1 で節の見出しを大きくした（最大 34px）ぶん、行間を 1.4 から詰める。
+	 * 字が大きくなると同じ倍率でも行が離れて見え、2 行に折り返した見出しが
+	 * 1 つのまとまりに見えなくなる
+	 */
+	line-height: var(--leading-tight);
+	letter-spacing: var(--tracking-tight);
 	/*
 	 * 節の見出しの上は「まとまりの区切り」なので --space-section を使う（#95）。
 	 * --space-6 では前の節の本文と近すぎて、どこで話が変わったのか読めなかった
@@ -291,46 +356,102 @@ main p {
 }
 
 /*
- * トップページのヒーロー（Issue #95、見本は #94）。
+ * トップページのヒーロー（Issue #95、見本は #94、B2 で 1 列にした）。
  *
- * 文字を絵の上に重ねず**隣に置く**。重ねると絵ごとに読みやすさが変わり、
- * 差し替えのたびに文字色や影の調整が要る。素材写真を入れる場合も
- * .hero-figure の中身を差し替えるだけで済む形にしてある。
+ * 以前は右にベクター画像（右肩上がりの折れ線＋太陽＋丘）を置いた 2 列
+ * だった。B2 で絵を削除して 1 列にしている。理由は 2 つ。
  *
- * 段組みは grid の auto-fit。日本語と英語で見出しの長さが変わるので、
- * 幅を数値で切る @media ではなく「入る幅があれば 2 列」にしている
+ * 1. 絵が意味を持っていなかった。素材写真が決まるまでの繋ぎとして
+ *    置いたもので、読み上げからも外していた（`aria-hidden`）。
+ * 2. 幅を奪っていた。`main` は最大 736px で、2 列だと文字side が 337px
+ *    しか使えない。B1 で見出しを大きくしようとしたとき、この幅が
+ *    上限を決めていた（70px にすると語中で折り返す）。
+ *
+ * 絵を消すと見出しが 736px を使えるようになり、字を大きくしても
+ * 語が割れなくなる。指示書 B2 の「差し替えではなくまず削除する」に従う。
  */
 .hero {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
-	gap: var(--space-5);
-	align-items: center;
 	background: var(--sun-soft);
 	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
-	padding: var(--space-5);
+	padding: var(--space-6) var(--space-5);
 	margin-bottom: var(--space-section);
 }
 
 /*
- * ヒーローの文字側。絵と横に並ぶが、狭い画面では grid が 1 列に落ちて
- * 縦に積む。そのとき文字が先に来るよう、DOM の順序も文字を先にしてある
+ * ヒーローの文字側。B2 で絵を消して 1 列になったので、
+ * ここがヒーローの幅をそのまま使う。
  */
 .hero-body {
-	/* 絵の側と縦位置を揃える。中身は上から順に積む */
-	display: flex;
-	flex-direction: column;
-	justify-content: center;
+	/*
+	 * 見出しの大きさの基準（B1）。`--text-heading-hero` が `cqi`（この要素の
+	 * 幅）で計算されるので、ここをコンテナとして宣言する。
+	 *
+	 * 1 列になった今でも `cqi` のままにしているのは、基準を「文字が実際に
+	 * 置かれる幅」に置いておきたいため。`vw` に戻すと、将来ヒーローの
+	 * 内側に余白や段組みを足したときに、また画面幅とずれる
+	 */
+	container-type: inline-size;
+	/*
+	 * 読み物としての幅の上限。1 列になったことで見出しは広く使えるように
+	 * なったが、本文（--text-base）まで 736px 幅で流すと 1 行が長すぎて
+	 * 目が次の行の頭に戻れない。見出しはこの制限を受けない
+	 */
+	max-width: 44rem;
 }
 
+/*
+ * ヒーローの見出し（B1）。
+ *
+ * 以前はここだけ h1 の既定より小さくしていた（--text-xl = 28px）。
+ * 理由は「22 文字の見出しが狭い画面で 4 行に折り返す」ことだったが、
+ * それは文言の長さの問題で、字の大きさの問題ではなかった。
+ * 見出しを 14 文字に短くしたうえで、本来の大きさに戻す。
+ *
+ * 本文（16px）との差を 4 倍以上にするのが B1 の狙い。狭い画面でも
+ * 40px を下回らせない（`clamp` の下限）。差が付かないと、
+ * 「最初に読むべき場所」が画面から読み取れない。
+ */
 .hero-heading {
+	font-size: var(--text-heading-hero);
+	/* 字が大きいぶん行間と字間を詰める。既定のままだと 2 行が別々の塊に見える */
+	line-height: var(--leading-hero);
+	letter-spacing: var(--tracking-hero);
+	margin-bottom: var(--space-4);
 	/*
-	 * ヒーローの見出しは h1 の既定より一段抑える。--text-heading-page（2rem）の
-	 * ままだと、日本語の見出し（22 文字）が狭い画面で 4 行に折り返して
-	 * ヒーローだけで画面が埋まる
+	 * ここだけ A1 の `keep-all` を打ち消して、通常の日本語の折り返しに戻す。
+	 *
+	 * `keep-all` は「語の途中で割らない」指定だが、日本語には語の区切りが
+	 * 無いため、事実上**文全体が 1 つの語**として扱われる。すると折り返せる
+	 * 場所が読点・句点の直後しか無くなり、その結果 390px で
+	 * 「地球のバグを / 、/ みんなで直す / 。」と、句読点だけの行ができていた。
+	 * 禁則処理（句読点を行頭に置かない）も `keep-all` の下では働かない。
+	 *
+	 * `normal` に戻すと文字単位で折り返せるようになり、ブラウザ本来の
+	 * 禁則処理が効く。A1 が直したかった「語中で改行される」症状は、
+	 * 短くした今の見出し（14 文字）では起きない。長い見出しを想定した
+	 * 指定が、短い見出しでは逆に害になっている
 	 */
-	font-size: var(--text-xl);
-	margin-bottom: var(--space-3);
+	word-break: normal;
+}
+
+/*
+ * 見出しの上の一行（B1）。h1 の中にあるが、大きさは見出しと分ける。
+ *
+ * `display: block` で改行させているのは、見出しと同じ行に流れると
+ * 1 つの文のように読めてしまうため。意味の上では見出しの前置きで、
+ * 見出しそのものではない
+ */
+.hero-eyebrow {
+	display: block;
+	font-size: var(--text-sm);
+	font-weight: 600;
+	/* 本文の墨より薄くして、見出しより前に出ないようにする */
+	color: var(--accent);
+	/* 小さい字なので、見出しと違って字間は詰めず、むしろ開ける */
+	letter-spacing: 0.08em;
+	line-height: var(--leading-snug);
+	margin-bottom: var(--space-2);
 }
 
 .hero-lead {
@@ -345,44 +466,6 @@ main p {
 	gap: var(--space-3) var(--space-4);
 	/* main p の下余白は要らない。ヒーロー自身が下余白を持っている */
 	margin-bottom: 0;
-}
-
-/*
- * 絵の置き場所。#94 は素材写真をここに置くと決めたが、素材の選定
- * （ライセンス一覧）が済んでいない。写真が入るまでの間も成立するよう、
- * 外部素材に依存しないインライン SVG を置いている
- */
-.hero-figure {
-	display: flex;
-	justify-content: center;
-}
-
-.hero-figure-art {
-	width: 100%;
-	/* 絵が主役になりすぎないよう頭打ちにする。主役は投稿された困りごと */
-	max-width: 16rem;
-	height: auto;
-}
-
-.hero-art-sun {
-	fill: var(--sun);
-	/* 暖色をそのまま面で置くと文字より強くなるので、薄く敷く */
-	opacity: 0.18;
-}
-
-.hero-art-ground {
-	fill: var(--accent-soft);
-}
-
-.hero-art-steps circle {
-	fill: var(--accent);
-}
-
-.hero-art-path {
-	fill: none;
-	stroke: var(--accent);
-	stroke-width: 2;
-	stroke-linecap: round;
 }
 
 /*
@@ -512,15 +595,26 @@ main p {
 }
 
 /*
- * スコープの階段（#94）。5 段階を昇る形で見せる。
- * 個人と世界が同じ物差しの上にあることを、順序と字下げの両方で示す。
+ * スコープのバー（B3。元は #94 の「階段」）。
  *
- * 字下げは `--depth`（0〜4）から算出する。段数は
- * `IssueScope.options` の並びで決まるので、CSS 側に段数を書かない
- * （スコープが増えたときに CSS を直し忘れて階段が途切れるのを防ぐ）
+ * 以前は段が上がるほど `margin-left` で右へ字下げする形だった。
+ * しかしそれだと**スコープが広がるほど行が短くなる**。「世界」は扱う
+ * 範囲がいちばん広いのに、画面ではいちばん細い行になっていて、
+ * 意味と見た目が逆行していた。
+ *
+ * B3 で「個人 → 世界」で幅が広がるバーに変える。扱う範囲の広さが
+ * そのままバーの長さになるので、読み手は説明を読む前に関係を掴める。
+ *
+ * 幅は `--depth`（0 起点の段目）と `--steps`（総段数）から算出する。
+ * どちらも tsx が渡すので、スコープが増えても CSS は直さなくてよい。
+ * 最初の段を 46% から始めるのは、いちばん狭い「個人」でも
+ * ラベルと説明が読める幅が要るため（見本もそのくらいから始めている）。
  */
 .scopes {
 	counter-reset: scope-step;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
 	margin-bottom: var(--space-section);
 }
 
@@ -529,16 +623,41 @@ main p {
 	display: flex;
 	align-items: baseline;
 	gap: var(--space-3);
-	background: var(--surface);
-	border: 1px solid var(--line);
+	background: var(--surface-accent);
+	border: 1px solid var(--accent-line);
 	border-radius: var(--radius-sm);
 	padding: var(--space-2) var(--space-3);
-	margin-bottom: var(--space-2);
 	/*
-	 * 段が上がるほど左に寄せる。狭い画面では字下げの分だけ本文が細くなるので
-	 * min() で頭打ちにする（幅 360px でも 1 段あたり 4px 以下に収まる）
+	 * 46% から 100% まで、段の数で等分して広げる。`--steps` は総段数で、
+	 * 最後の段（--depth が --steps - 1）でちょうど 100% になる。
+	 *
+	 * `max()` の第 1 引数（21rem ＝ 336px）は、いちばん狭い段でも
+	 * ラベルと説明が枠に収まる幅。割合だけで決めると、画面が狭いときに
+	 * 1 段目が 190px ほどになり、文字が枠からはみ出していた（600px 幅で発生）。
+	 * 幅で広さを示すのは「中身が読めること」が前提なので、読めなくなる
+	 * ところでは割合の方を諦める。
+	 *
+	 * `min-content` を下限にする手もあるが、あれは説明文を折り返さない
+	 * 幅なので 700px 近くになり、広い画面でも全段が同じ幅に潰れる
+	 * （＝ B3 の効果そのものが消える）。実寸で切る方が意図に合う
 	 */
-	margin-left: calc(var(--depth, 0) * min(var(--space-3), 2vw));
+	width: max(
+		21rem,
+		calc(46% + (100% - 46%) * var(--depth, 0) / max(var(--steps, 5) - 1, 1))
+	);
+}
+
+/*
+ * いちばん広い段（世界）だけ塗りを反転する。
+ *
+ * バーの長さだけでも順序は分かるが、「ここが端」であることは
+ * 長さの比較でしか読めない。到達点を面で示すと、一覧を眺めた
+ * ときに端がどこかが一目で分かる
+ */
+.scopes li:last-child {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: var(--surface);
 }
 
 /* 何段目かを数字で示す。色に頼らず順序が伝わる手がかり */
@@ -554,6 +673,12 @@ main p {
 	background: var(--accent-soft);
 	border-radius: var(--radius-pill);
 	padding: 0 var(--space-1);
+}
+
+/* 反転した段では、番号も面に合わせて反転する */
+.scopes li:last-child::before {
+	color: var(--accent);
+	background: var(--surface);
 }
 
 .scope-name {
@@ -572,6 +697,167 @@ main p {
 	font-size: var(--text-sm);
 	word-break: keep-all;
 	overflow-wrap: break-word;
+}
+
+/*
+ * 反転した段（世界）の説明文。--ink-soft は薄い墨なので、
+ * 緑の面の上ではほとんど読めない。面に合わせて明るい側へ寄せる。
+ * 白そのものにせず少し落としているのは、ラベル（--surface）より
+ * 説明が前に出ないようにするため
+ */
+.scopes li:last-child .scope-description {
+	color: var(--accent-soft);
+}
+
+/*
+ * 流れから外した状態の補足（B6）。
+ *
+ * `details` のブラウザ既定は、三角の印と字が詰まって出るだけで、
+ * 押せる場所であることが伝わりにくい。開ける手がかりとして
+ * 見出しの側に色と太さを与える。
+ */
+.statuses-more {
+	margin-top: var(--space-4);
+	font-size: var(--text-sm);
+}
+
+.statuses-more summary {
+	cursor: pointer;
+	color: var(--accent);
+	font-weight: 600;
+	/* 既定の三角と字の間が詰まりすぎるので、印の後ろに余白を取る */
+	padding-left: var(--space-1);
+}
+
+.statuses-more summary:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: var(--radius-sm);
+}
+
+.statuses-more p {
+	margin: var(--space-2) 0 0;
+	color: var(--ink-soft);
+	/* 印のぶん字下げして、開いた本文が見出しと揃って見えるようにする */
+	padding-left: var(--space-4);
+}
+
+/*
+ * 解決の実例の帯（B5）。
+ *
+ * ページ全体が同じ明度（--ground）で続いていて、どこも同じ強さに見える。
+ * 濃い面を 1 つだけ入れて、そこが他と違うことを面で示す。
+ *
+ * 指示書は「全幅バンド」と書いているが、body が `max-width: 800px` の
+ * 中央寄せなので、画面いっぱいに広げるには body の外に出す構造変更が要る。
+ * 負のマージン（`margin-inline: calc(50% - 50vw)`）で外へ広げる手もあるが、
+ * スクロールバーのぶん 100vw が画面幅を超えて横スクロールが出る。
+ * B5 の狙いは面のコントラストなので、本文の幅いっぱいの帯に留めた。
+ *
+ * 色は既存の濃い緑（--status-resolved）を使う。指示書が挙げている
+ * #08402B に近く、かつ「解決」を示す色として既に画面で使われている。
+ * 新しい色を足すと、同じ意味の緑が 2 種類になる（#86 が畳んだ問題）
+ */
+.solved-band {
+	background: var(--status-resolved);
+	color: var(--surface);
+	border-radius: var(--radius-md);
+	padding: var(--space-6) var(--space-5);
+	margin-top: var(--space-section);
+	margin-bottom: var(--space-section);
+}
+
+/*
+ * 帯の中の見出しは、地の色が変わったぶん色も変える。
+ * `h2` の既定（--ink）のままだと濃い緑の上でほとんど読めない
+ */
+.solved-band h2 {
+	color: var(--surface);
+	/* 帯の中では最初の要素なので、節どうしの間隔（--space-section）は要らない */
+	margin-top: 0;
+	margin-bottom: var(--space-3);
+}
+
+/*
+ * 「投稿された → 誰かが動いた → 解決した」の 3 ビート。
+ * 事例そのものより前に置いて、これから見るものが何なのかを先に伝える
+ */
+.solved-flow {
+	margin: 0 0 var(--space-4);
+	font-size: var(--text-sm);
+	/* 白のままだと見出しと同じ強さになる。面に馴染む側へ落とす */
+	color: var(--accent-line);
+}
+
+/*
+ * 事例 1 件。詳細への入口なのでリンクにする。
+ *
+ * 一覧の行（.issue-card）と同じ形にはしない。あちらは「並べて眺める」
+ * ためのもので、こちらは 1 件だけを見せる。同じ形にすると、
+ * 帯の中に一覧が紛れ込んだように見える
+ */
+.solved-issue {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-2) var(--space-3);
+	padding: var(--space-4);
+	border-radius: var(--radius-sm);
+	/* 濃い面の上に、さらに一段明るい面を重ねて 1 件を切り出す */
+	background: var(--overlay-soft);
+	color: var(--surface);
+	text-decoration: none;
+	transition: background-color var(--transition-fast);
+}
+
+@media (hover: hover) {
+	.solved-issue:hover {
+		background: var(--overlay-strong);
+	}
+}
+
+.solved-issue:focus-visible {
+	outline: 2px solid var(--surface);
+	outline-offset: 2px;
+}
+
+.solved-issue-title {
+	font-size: var(--text-list-title);
+	font-weight: 600;
+	line-height: var(--leading-snug);
+	word-break: keep-all;
+	overflow-wrap: break-word;
+}
+
+.solved-issue-meta {
+	font-size: var(--text-sm);
+	color: var(--accent-line);
+	white-space: nowrap;
+}
+
+/* 帯の中の導線。空状態の文言もここに入る */
+.solved-actions {
+	margin: var(--space-4) 0 0;
+	font-size: var(--text-sm);
+}
+
+/*
+ * 帯の中のリンクは、地の色が変わったぶん色も変える。
+ * --accent（緑）のままだと濃い緑の上に緑が乗って読めない
+ */
+.solved-band a:not(.solved-issue) {
+	color: var(--surface);
+}
+
+@media (hover: hover) {
+	.solved-band a:not(.solved-issue):hover {
+		/* 下地の薄緑（--accent-soft）は濃い面の上では効かない */
+		background: var(--overlay-soft);
+	}
+}
+
+.solved-band a:focus-visible {
+	outline-color: var(--surface);
 }
 
 /* ステータスは順序のある流れなので、矢印で繋いだピルとして見せる */
@@ -1081,44 +1367,63 @@ main p {
 }
 
 /*
- * Issue 1 件のカード。公開一覧と自分の一覧が同じ見た目を使う。
+ * Issue 1 件（B4。元は #95 の「カード」）。公開一覧と自分の一覧が同じ見た目を使う。
  *
- * 面を持たせた（#95）。以前は地の色の上に枠線 1px だけで、カードの
- * 区切りが枠でしか伝わらなかった。地を --ground にしたので、
- * 白い面がそのまま「1 件のまとまり」を示す
+ * 以前は白い面＋枠線＋角丸＋影の「カード」だった。1 件だけ見れば
+ * まとまって見えるが、一覧として並べると枠と影が行数ぶん重なり、
+ * **中身より容れ物の方が目立つ**。読みたいのは Issue のタイトルであって
+ * カードの縁ではない。
+ *
+ * B4 で区切り線だけのリストにする。面と影を外すと、残るのは文字と
+ * 1px の線だけになり、視線がタイトルの列を素直に下りていく。
  */
 .issue-card {
-	background: var(--surface);
-	box-shadow: var(--shadow-card);
-	border: 1px solid var(--line);
-	border-radius: var(--radius-md);
-	padding: var(--space-3) var(--space-4);
-	margin-bottom: var(--space-3);
+	/*
+	 * 素の `li` が持つタグ用の装飾（白い面・枠・角丸）を打ち消す。
+	 * あれは `li` を「タグの粒」として使う箇所のための指定で、
+	 * 一覧の 1 件はタグではない。書かないと li の指定がそのまま残り、
+	 * 罫線リストにしたつもりでカードのままになる
+	 */
+	background: none;
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+	padding: var(--space-4) 0;
+	/*
+	 * 区切りは下線 1 本。最後の 1 件にも引く（一覧全体の締めになる）。
+	 * 枠で囲まないので、左右の padding も要らない
+	 */
+	border-bottom: 1px solid var(--line);
 	list-style: none;
-	transition:
-		box-shadow var(--transition-base),
-		border-color var(--transition-fast),
-		transform var(--transition-fast);
+	transition: background-color var(--transition-fast);
 }
 
 /*
- * 触れたときに持ち上げる。カード自体はリンクではないが、
- * 中のタイトルが詳細への入口なので、どのカードを見ているかを示す
+ * 触れたときに面をうっすら変える。行自体はリンクではないが、
+ * 中のタイトルが詳細への入口なので、どの行を見ているかを示す。
+ *
+ * 影で持ち上げる形はやめた。カードでなくなったので浮かせる面が無く、
+ * 行の背景をわずかに変える方が罫線リストの見え方に合う
  */
 @media (hover: hover) {
 	.issue-card:hover {
-		border-color: var(--accent-line);
-		box-shadow: var(--shadow-card-hover);
+		background: var(--surface-accent);
 	}
 }
 
 .issue-card-title {
 	margin: 0 0 var(--space-2);
 	/*
-	 * カードの中で最も強い要素にする。以前は --text-base（本文と同じ）で、
-	 * 説明文と同じ重みに見えていた
+	 * 1 件の中で最も強い要素にする。以前は --text-base（本文と同じ）で、
+	 * 説明文と同じ重みに見えていた。
+	 *
+	 * B4 で 17px（--text-lg）から 19px へ上げた。枠と影を外したぶん、
+	 * 「どこからどこまでが 1 件か」を示す手がかりがタイトルの大きさに移る。
+	 * --text-lg のままだと説明文（16px）との差が 1px しかなく、
+	 * 罫線だけの一覧では 1 件の始まりが読み取りにくかった
 	 */
-	font-size: var(--text-lg);
+	font-size: var(--text-list-title);
+	line-height: var(--leading-snug);
 }
 
 .issue-card-title a {
@@ -1168,6 +1473,45 @@ main p {
 /* 補助情報の 1 項目。中の語が途中で割れないようにする */
 .issue-meta-item {
 	white-space: nowrap;
+}
+
+/*
+ * スコープのピル（B4）。
+ *
+ * ステータス（.status-pill）と同じ形にする。どちらも「決められた
+ * 選択肢のどれか」を示す情報なので、片方だけ地の文だと並びが不揃いに見える。
+ *
+ * 色は変えている。ステータスは段階ごとに色が動く（進み具合を示す）が、
+ * スコープは動かない。同じ色にすると、スコープも進んでいくものに見える
+ */
+.scope-pill {
+	display: inline-flex;
+	align-items: center;
+	line-height: var(--leading-snug);
+	font-size: var(--text-sm);
+	font-weight: 600;
+	white-space: nowrap;
+	border-radius: var(--radius-pill);
+	padding: var(--space-1) var(--space-3);
+	color: var(--accent);
+	background: var(--accent-soft);
+	/*
+	 * ステータスのピルは枠を持つ（`border: 1px solid currentColor`）。
+	 * こちらは下地だけにして、同じ形でも役割が違うことを示す
+	 */
+	border: 1px solid transparent;
+}
+
+/*
+ * カテゴリのタグ（B4）。`#` は tsx 側が文字として出す。
+ *
+ * ピルにしないのは、カテゴリが自由入力だから。ステータスとスコープは
+ * 決められた選択肢で、取りうる値が有限だと分かる形（ピル）が合う。
+ * 自由入力を同じ形にすると、選べる何かだと誤解させる
+ */
+.issue-tag {
+	white-space: nowrap;
+	color: var(--ink-soft);
 }
 
 /* 一覧の「N 件中 M 件を表示」 */
@@ -1679,7 +2023,11 @@ main p {
 		border-color: var(--accent-line);
 	}
 
-	.issue-card:hover,
+	/*
+	 * `.issue-card` はここから外した。B4 で面と影を外したので、
+	 * 浮かせる面が無い。触れたときの変化は背景色で示す
+	 * （.issue-card:hover の指定を参照）
+	 */
 	.comment-card:hover,
 	.issue-filters:hover,
 	.location:hover,
@@ -2114,10 +2462,24 @@ main p {
 	}
 
 	/*
-	 * 枠を持つまとまりは左右の内側の余白を削る。枠の中の文字が
-	 * 画面幅の半分近くまで押し込まれるのを防ぐ
+	 * スコープのバー（B3）は狭い画面では幅を変えない。
+	 *
+	 * 幅 390px だといちばん狭い段が 46% ＝ 約 150px しかなく、
+	 * 「コミュニティ」のラベルすら入らない。読めないバーで
+	 * 広さを示しても意味が無いので、ここでは全段を同じ幅にして
+	 * 中身を読ませる方を採る。順序は番号と並び順が示している
 	 */
-	.issue-card,
+	.scopes li {
+		width: 100%;
+	}
+
+	/*
+	 * 枠を持つまとまりは左右の内側の余白を削る。枠の中の文字が
+	 * 画面幅の半分近くまで押し込まれるのを防ぐ。
+	 *
+	 * `.issue-card` はここから外した。B4 で枠を外して罫線だけにしたので、
+	 * 左右の余白そのものを持たない（0 のまま本文と同じ線で揃える）
+	 */
 	.comment-card,
 	.location,
 	.issue-filters {

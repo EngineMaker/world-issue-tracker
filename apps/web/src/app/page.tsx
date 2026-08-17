@@ -1,11 +1,11 @@
 import {
 	getUiMessages,
+	ISSUE_LIFECYCLE_HIGHLIGHT_VALUES,
 	ISSUE_SCOPE_LABELS,
 	IssueScope,
-	IssueStatus,
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
-import { fetchIssues } from "../lib/issues";
+import { DEFAULT_ISSUE_FILTERS, fetchIssues } from "../lib/issues";
 import { getLocale } from "../lib/locale";
 import { IssueList } from "./components/IssueList";
 import { StatusPill } from "./components/StatusPill";
@@ -25,19 +25,46 @@ export default async function Home() {
 	const locale = await getLocale();
 	const messages = getUiMessages(locale);
 	const scopeLabels = ISSUE_SCOPE_LABELS[locale];
-	const result = await fetchIssues();
+	/*
+	 * 一覧と、解決の実例（B5）を並行して取る。
+	 *
+	 * 解決済みは 1 件だけ。帯に置くのは「実際に直った」ことを示す証拠で、
+	 * 一覧として眺めさせる場所ではない。件数を増やすと、下にある
+	 * 「最近の Issue」と役割が重なる。
+	 */
+	const [result, solved] = await Promise.all([
+		fetchIssues(),
+		fetchIssues({
+			limit: 1,
+			filters: { ...DEFAULT_ISSUE_FILTERS, status: "resolved" },
+		}),
+	]);
+	// 取得に失敗したときは帯ごと出さない。トップページの主役は一覧なので、
+	// 補助的な帯のために「取得できませんでした」を出す価値が無い
+	const solvedIssue = solved.ok ? solved.issues[0] : undefined;
 
 	return (
 		<main>
 			{/*
 			  ヒーロー（Issue #95、見本は #94）。
-			  文字を絵の上に重ねず隣に置いている。重ねると絵ごとに読みやすさが
-			  変わり、差し替えのたびに文字色や影の調整が要る。
+
+			  以前は右にベクター画像を置いた 2 列だったが、B2 で絵を削除した。
+			  意味を持たない装飾で、字を大きくするための幅を奪っていたため
+			  （経緯は globals.css の .hero を参照）。
 			*/}
 			<section className="hero">
 				<div className="hero-body">
-					{/* サイト名は Header が出しているので、ここはページ固有の見出しにする */}
-					<h1 className="hero-heading">{messages.home.heading}</h1>
+					{/*
+					  サイト名は Header が出しているので、ここはページ固有の見出しにする。
+
+					  アイブロウ（B1）は見出しの一部として h1 の中に置く。外に出すと
+					  読み上げが「個人から世界まで」と「地球のバグを、みんなで直す。」を
+					  別々の要素として読み、繋がりが消える。見た目の大きさは CSS が分ける
+					*/}
+					<h1 className="hero-heading">
+						<span className="hero-eyebrow">{messages.home.headingEyebrow}</span>
+						{messages.home.heading}
+					</h1>
 					<p className="hero-lead">{messages.home.aboutBody1}</p>
 					<p className="hero-actions">
 						<Link className="button-link" href="/issues/new">
@@ -45,38 +72,6 @@ export default async function Home() {
 						</Link>
 						<Link href="/issues">{messages.home.viewIssues}</Link>
 					</p>
-				</div>
-				{/*
-				  絵の置き場所。#94 は素材写真をここに置くと決めたが、素材そのものは
-				  まだ選定されていない（ライセンス一覧が要る）。写真が入るまでの間も
-				  ヒーローが成立するよう、外部素材に依存しないインライン SVG を置く。
-				  内容を持たない装飾なので、読み上げからは外す。
-				*/}
-				<div className="hero-figure" aria-hidden="true">
-					{/*
-					  `aria-hidden` の中なので `<title>` は読まれない。
-					  装飾に説明を付けても読み上げが冗長になるだけなので置かない
-					*/}
-					<svg
-						className="hero-figure-art"
-						viewBox="0 0 160 120"
-						role="presentation"
-					>
-						{/* 地平線。個人から世界までが同じ地続きにあることを面で示す */}
-						<circle className="hero-art-sun" cx="118" cy="34" r="18" />
-						<path
-							className="hero-art-ground"
-							d="M0 84 C 30 70, 60 92, 90 78 S 140 70, 160 82 L160 120 L0 120 Z"
-						/>
-						{/* 直っていく道筋。左から右へ、印が満ちていく */}
-						<g className="hero-art-steps">
-							<circle cx="24" cy="60" r="6" />
-							<circle cx="52" cy="52" r="6" />
-							<circle cx="80" cy="44" r="6" />
-							<circle cx="108" cy="36" r="6" />
-						</g>
-						<path className="hero-art-path" d="M24 60 L52 52 L80 44 L108 36" />
-					</svg>
 				</div>
 			</section>
 
@@ -123,11 +118,23 @@ export default async function Home() {
 				<h2>{messages.home.scopesHeading}</h2>
 				<p>{messages.home.scopesBody}</p>
 				{/*
-				  スコープの階段（#94）。段が上がるほど右に寄る形で、
+				  スコープのバー（B3）。段が上がるほど**幅が広がる**形で、
 				  個人と世界が同じ物差しの上にあることを示す。
-				  字下げの量は CSS が `--depth` から算出する
+
+				  以前は段が上がるほど右に字下げする形だったが、それだと
+				  スコープが広がるほど行が短くなり、意味と見た目が逆行していた
+				  （世界＝いちばん広いはずのものが、いちばん細い行になる）。
+
+				  幅は CSS が `--depth`（0 起点の段目）と `--steps`（総段数）から
+				  算出する。段数を CSS に書かないのは、スコープが増えたときに
+				  直し忘れて階段が途切れるのを防ぐため（#94 からの方針）
 				*/}
-				<ol className="scopes">
+				<ol
+					className="scopes"
+					style={
+						{ "--steps": IssueScope.options.length } as React.CSSProperties
+					}
+				>
 					{IssueScope.options.map((scope, index) => (
 						<li key={scope} style={{ "--depth": index } as React.CSSProperties}>
 							<span className="scope-name">{scopeLabels[scope].label}</span>
@@ -152,8 +159,14 @@ export default async function Home() {
 				  並び順が既に持っている。読み上げに「右矢印」が挟まると
 				  段階の名前が続けて読めなくなるので `aria-hidden` で外す
 				*/}
+				{/*
+				  出す段階は 5 つ（B6）。「クローズ」は解決までの道筋には
+				  乗っていない別の出口なので、この流れからは外して下の
+				  折りたたみで補う。状態そのものは 6 つのままで、
+				  絞り込みと状態の変更では 6 つすべてを選べる
+				*/}
 				<ol className="statuses">
-					{IssueStatus.options.map((status, index) => (
+					{ISSUE_LIFECYCLE_HIGHLIGHT_VALUES.map((status, index) => (
 						<li className="status-step" key={status}>
 							{index > 0 ? (
 								<span className="status-arrow" aria-hidden="true">
@@ -164,6 +177,56 @@ export default async function Home() {
 						</li>
 					))}
 				</ol>
+				{/*
+				  流れから外した「クローズ」の補足（B6）。
+				  並びから消すだけだと、その状態が存在すること自体が
+				  画面から失われる。読みたい人だけが開ける形にして残す。
+
+				  `details` を使うのは、開閉に JS が要らないため。
+				  JS の読み込み前でも開けるし、読み上げにも既定で対応している
+				*/}
+				<details className="statuses-more">
+					<summary>{messages.home.statusesMoreLabel}</summary>
+					<p>{messages.home.statusesMoreBody}</p>
+				</details>
+			</section>
+
+			{/*
+			  解決の実例（B5）。ページ全体が同じ明度で続いているので、
+			  濃緑の帯を 1 つだけ入れて面のコントラストを作る。
+
+			  中身は実際に解決した Issue を API から取って出す。事例を文言として
+			  書かないのは、書いた瞬間に「実在しない事例」になるため
+			  （指示書も、見本の草刈りの事例を架空だとして使用を禁じている）。
+			  解決済みがまだ無いうちは、空状態として「最初の解決を待っています」を出す。
+
+			  帯だけ全幅にしたいが、main には左右の余白がある。負のマージンで
+			  外へ広げると横スクロールの原因になるので、CSS 側で対処している
+			*/}
+			<section className="solved-band">
+				<h2>{messages.home.solvedHeading}</h2>
+				{solvedIssue ? (
+					<>
+						{/* 3 ビート（投稿された → 誰かが動いた → 解決した） */}
+						<p className="solved-flow">{messages.home.solvedFlow}</p>
+						<Link className="solved-issue" href={`/issues/${solvedIssue.id}`}>
+							<span className="solved-issue-title">{solvedIssue.title}</span>
+							<span className="solved-issue-meta">
+								{scopeLabels[solvedIssue.scope].label}
+							</span>
+						</Link>
+						<p className="solved-actions">
+							<Link href="/issues?status=resolved">
+								{messages.home.solvedViewAll}
+							</Link>
+						</p>
+					</>
+				) : (
+					<p className="solved-actions">
+						{messages.home.solvedEmpty}{" "}
+						<Link href="/issues/new">{messages.home.solvedEmptyAction}</Link>
+					</p>
+				)}
 			</section>
 		</main>
 	);

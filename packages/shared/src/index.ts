@@ -50,6 +50,26 @@ export const ISSUE_STATUS_VALUES = [
 export const IssueStatus = z.enum(ISSUE_STATUS_VALUES);
 export type IssueStatus = z.infer<typeof IssueStatus>;
 
+/**
+ * トップページで「解決までの流れ」として見せる段階（B6）。
+ *
+ * `ISSUE_STATUS_VALUES` から `closed` を除いたもの。6 段階すべてを
+ * 並べると、初めて来た人がまず読む場所に運用上の細かさが出すぎる。
+ * 知りたいのは「書いたら直るのか」であって、状態の全一覧ではない。
+ *
+ * `closed` を選んだのは、あれが**解決までの道筋には乗っていない**ため。
+ * 解決せずに終わる場合（対応しないと決まった、重複していた等）に使う出口で、
+ * 「Issue が解決するまで」という節の流れとは意味が違う。
+ *
+ * **画面に出す段階を絞るだけで、状態そのものは 6 つのまま。**
+ * 絞り込み（`IssueFilterForm`）と状態の変更（`StatusControl`）は
+ * `ISSUE_STATUS_VALUES` を使い続ける。そちらから外すと、実際に存在する
+ * 状態を選べなくなって運用できない。
+ */
+export const ISSUE_LIFECYCLE_HIGHLIGHT_VALUES = ISSUE_STATUS_VALUES.filter(
+	(status) => status !== "closed",
+);
+
 export const CreateIssueSchema = z.object({
 	title: z.string().min(1).max(200),
 	description: z.string().min(1).max(5000),
@@ -386,10 +406,35 @@ const JA_UI_MESSAGES = {
 
 	/** トップページ */
 	home: {
-		heading: "地球のバグを、みんなで可視化して、みんなで直す",
+		/*
+		 * ヒーローの見出し（B1）。
+		 *
+		 * 元は「地球のバグを、みんなで可視化して、みんなで直す」（22 文字）だった。
+		 * 見出しを大きくするのが B1 の狙いだが、22 文字のままだと狭い画面で
+		 * 4 行に折り返してヒーローだけで画面が埋まる。字を大きくできない理由が
+		 * 文言の長さにあったので、短くする。
+		 *
+		 * 落ちた「可視化」は `common.siteDescription` に残っている。あちらは
+		 * OGP と検索結果に出る説明文なので、概念そのものが失われるわけではない。
+		 * 見出しから落ちたぶんは `headingEyebrow` が受ける
+		 */
+		heading: "地球のバグを、みんなで直す。",
+		/*
+		 * 見出しの上に小さく置く一行（B1）。
+		 *
+		 * 見出しを短くしたことで「どこまでを扱うのか」が読めなくなる。
+		 * 個人の困りごとから国際問題までを 1 つの場所で扱うことは、
+		 * このサービスの前提そのものなので、見出しの手前で示す
+		 */
+		headingEyebrow: "個人から世界まで",
 		aboutHeading: "これは何をするサービス？",
+		/*
+		 * ヒーローのリード文。仕組みの説明から、書いた後に何が起きるかの
+		 * 説明に変えた。「Issue として投稿できる」ことより「誰かが手を挙げる」
+		 * ことの方が、読み手にとっては先に知りたい
+		 */
 		aboutBody1:
-			"身の回りの困りごとを「Issue」として投稿して、みんなで見えるようにする場所です。近所の壊れた街灯から、国の制度の問題まで、大きさを問わず扱います。",
+			"壊れた街灯も、空き家も、国の制度も。困りごとを Issue として書けば、誰かが手を挙げるところから解決が始まります。",
 		aboutBody2:
 			"投稿された Issue には誰でもコメントでき、「手伝います」と手を挙げることで解決に向けて動き出します。犯人を探すのではなく、直すことが目的です。",
 		actionsLabel: "主な操作",
@@ -410,6 +455,32 @@ const JA_UI_MESSAGES = {
 			"個人の悩みも世界の課題も、地続きにつながっています。Issue は次の5段階のどれかに位置づけて投稿します。",
 		statusesHeading: "Issue が解決するまで",
 		statusesBody: "投稿された Issue は、次の順に状態が変わっていきます。",
+		/*
+		 * 流れから外した「クローズ」の補足（B6）。
+		 *
+		 * 折りたたみにして、開いたときだけ読めるようにする。並びから
+		 * 消すだけだと「クローズという状態が存在すること」自体が画面から
+		 * 失われ、一覧の絞り込みに出てくる語の説明がどこにも無くなる
+		 */
+		statusesMoreLabel: "解決しなかったときは",
+		statusesMoreBody:
+			"対応しないと決まった Issue や、他の Issue と重複していた Issue は「クローズ」になります。解決までの道筋とは別の出口なので、上の流れには入れていません。",
+		/*
+		 * 解決の実例を見せる帯（B5）。
+		 *
+		 * ここに出すのは実際に解決した Issue で、文言は API から取れない
+		 * 部分（見出しと導線）だけを持つ。事例そのものを文言として書かない
+		 * のは、書いた瞬間に「実在しない事例」になるため。指示書も、見本に
+		 * 載っていた草刈りの事例を架空だとして使用を禁じている
+		 */
+		solvedHeading: "実際に、直っています",
+		/** 解決済みが 1 件も無いときに出す。空でも帯が成立するようにする */
+		solvedEmpty: "最初の解決を待っています。",
+		solvedEmptyAction: "Issue を書く",
+		/** 解決済みの Issue へ送る導線 */
+		solvedViewAll: "解決した Issue を見る",
+		/** 1 件の事例に添える、状態の移り変わり */
+		solvedFlow: "投稿された → 誰かが動いた → 解決した",
 	},
 
 	/** Issue 一覧（`IssueList`） */
@@ -704,10 +775,14 @@ const EN_UI_MESSAGES: UiMessages = {
 	},
 
 	home: {
-		heading: "Visualize the bugs of our planet, and fix them together",
+		// 日本語側と同じ理由で短くしている（B1）。英語は日本語より 1 文字が
+		// 細いぶん折り返しにくいが、見出しの長さを言語で変えると
+		// 同じ画面が別物に見えるので、揃えて短くする
+		heading: "Let’s fix the bugs of our planet.",
+		headingEyebrow: "From personal to global",
 		aboutHeading: "What is this service?",
 		aboutBody1:
-			"A place to post the problems around you as “issues” so that everyone can see them. From a broken streetlight nearby to a flaw in national policy — size does not matter here.",
+			"A broken streetlight, an abandoned house, a national policy. Write your problem down as an issue, and it starts getting solved the moment someone raises their hand.",
 		aboutBody2:
 			"Anyone can comment on a posted issue, and raising your hand with “I can help” starts moving it toward a fix. The goal is not to find someone to blame, but to fix things.",
 		actionsLabel: "Main actions",
@@ -723,6 +798,14 @@ const EN_UI_MESSAGES: UiMessages = {
 			"Personal worries and global problems are part of the same continuum. Every issue is posted at one of these five levels.",
 		statusesHeading: "How an issue gets resolved",
 		statusesBody: "A posted issue moves through these states in order.",
+		statusesMoreLabel: "When an issue is not resolved",
+		statusesMoreBody:
+			"An issue is closed when we decide not to act on it, or when it duplicates another one. That is a different exit from the path above, so it is not part of the flow.",
+		solvedHeading: "Things really do get fixed",
+		solvedEmpty: "Waiting for the first one to be resolved.",
+		solvedEmptyAction: "Write an issue",
+		solvedViewAll: "See resolved issues",
+		solvedFlow: "Posted → Someone stepped in → Resolved",
 	},
 
 	issueList: {

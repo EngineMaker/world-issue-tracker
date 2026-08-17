@@ -107,6 +107,8 @@ describe("トークンの定義", () => {
 		"--text-base": "1rem",
 		"--text-sm": "0.875rem",
 		"--text-xs": "0.75rem",
+		/* 一覧の Issue タイトル（B4）。罫線だけの一覧で 1 件の始まりを示す */
+		"--text-list-title": "1.1875rem",
 
 		/*
 		 * 見出しの段階（#94 の結論）。5 段階には畳まず、見出し専用に
@@ -115,11 +117,19 @@ describe("トークンの定義", () => {
 		 *
 		 * --text-heading-site だけは 1.2rem → 1.0625rem に変更した。
 		 * サイト名が本文より大きい必要はなく、狭い画面でヘッダが崩れる一因
-		 * でもあるため。#94 が認めた既存値の変更はこの 1 つだけ
+		 * でもあるため。#94 が認めた既存値の変更はこの 1 つだけ。
+		 *
+		 * B1 で 2 つ変えている:
+		 * - --text-heading-section を可変にした（1.25rem では本文との差が
+		 *   小さく、節の変わり目が読み取れなかった）
+		 * - --text-heading-hero を足した。トップページのヒーロー専用で、
+		 *   --text-heading-page とは分ける（あちらは詳細ページの h1 でも
+		 *   使われ、中身は利用者が書いた最大 200 文字のタイトル）
 		 */
 		"--text-heading-page": "2rem",
-		"--text-heading-section": "1.25rem",
+		"--text-heading-section": "clamp(1.625rem, 3vw, 2.125rem)",
 		"--text-heading-site": "1.0625rem",
+		"--text-heading-hero": "clamp(2.75rem, 9.5cqi, 4.375rem)",
 
 		"--space-1": "0.25rem",
 		"--space-2": "0.5rem",
@@ -145,6 +155,12 @@ describe("トークンの定義", () => {
 		"--leading-normal": "1.6",
 		"--tracking-tight": "-0.01em",
 		"--tracking-normal": "0",
+		/* 特大の見出し用（B1）。大きい字は同じ倍率でも行間・字間が広く見える */
+		"--leading-hero": "1.14",
+		"--tracking-hero": "-0.03em",
+		/* 濃い面（B5 の帯）の上に重ねる明るい面。白を置くと明るすぎる */
+		"--overlay-soft": "rgb(255 255 255 / 0.1)",
+		"--overlay-strong": "rgb(255 255 255 / 0.18)",
 		"--transition-fast": "160ms ease",
 		"--transition-base": "240ms ease",
 
@@ -267,11 +283,13 @@ describe("文字サイズは 5 段階に収まっている", () => {
 		"comment-date": "var(--text-xs)",
 		"issue-map-attribution": "var(--text-xs)",
 		/*
-		 * カードの見出しは #95 で --text-base（本文と同じ）から --text-lg へ上げた。
-		 * 一覧はカードが並ぶ画面で、タイトルが説明文と同じ重みだと
-		 * どこから読めばよいか分からない（#94 の見本もタイトルを一段強くしている）
+		 * 一覧の見出しは #95 で --text-base（本文と同じ）から --text-lg へ上げ、
+		 * B4 でさらに --text-list-title（19px）にした。B4 で枠と影を外して
+		 * 罫線だけの一覧にしたので、「どこからが 1 件か」を示す手がかりが
+		 * タイトルの大きさに移っている。--text-lg（17px）だと説明文（16px）との
+		 * 差が 1px しかなく、区切りとして働かない
 		 */
-		"issue-card-title": "var(--text-lg)",
+		"issue-card-title": "var(--text-list-title)",
 	};
 
 	for (const [className, token] of Object.entries(sizeBindings)) {
@@ -298,7 +316,12 @@ describe("見出し・角丸・影・遷移の決定が CSS に反映されて�
 	it("h1 / h2 / .site-header-title は見出し用の行間と字送りを使う", () => {
 		expect(ruleBody("h1")).toContain("line-height: var(--leading-tight)");
 		expect(ruleBody("h1")).toContain("letter-spacing: var(--tracking-tight)");
-		expect(ruleBody("h2")).toContain("line-height: var(--leading-snug)");
+		/*
+		 * h2 は B1 で大きくした（最大 34px）ので、行間も --leading-snug（1.4）
+		 * から詰めている。大きい字は同じ倍率でも行が離れて見えるため
+		 */
+		expect(ruleBody("h2")).toContain("line-height: var(--leading-tight)");
+		expect(ruleBody("h2")).toContain("letter-spacing: var(--tracking-tight)");
 		expect(ruleBody(".site-header-title")).toContain(
 			"font-size: var(--text-heading-site)",
 		);
@@ -307,9 +330,27 @@ describe("見出し・角丸・影・遷移の決定が CSS に反映されて�
 		);
 	});
 
+	/*
+	 * ヒーローの見出し（B1）。
+	 *
+	 * ここが --text-heading-page に戻ると、詳細ページの h1（利用者が書いた
+	 * 最大 200 文字のタイトル）と同じ物差しに乗る。文言をこちらで決められる
+	 * ヒーローだけが大きくてよい、という切り分けが崩れていないことを見る
+	 */
+	it(".hero-heading はヒーロー専用の大きさと行間を使う", () => {
+		const body = ruleBody(".hero-heading");
+
+		expect(body).toContain("font-size: var(--text-heading-hero)");
+		expect(body).toContain("line-height: var(--leading-hero)");
+		expect(body).toContain("letter-spacing: var(--tracking-hero)");
+	});
+
+	/*
+	 * `.issue-card` はこの一覧から外している。B4 で枠・角丸・影を外して
+	 * 罫線だけのリストにしたため（下の「B4」の describe で別途見る）
+	 */
 	it("主要なカードと大きい面は角丸・影をトークンで決める", () => {
 		for (const selector of [
-			".issue-card",
 			".comment-card",
 			".issue-filters",
 			".location",
@@ -392,15 +433,42 @@ describe("同じ意味の色が同じ値で描かれる", () => {
 
 	/*
 	 * 枠を持つまとまり（カード）は、ルールごと消えても描画結果の
-	 * class 属性は変わらない。定義の存在と、枠がトークンを指すことを見る
+	 * class 属性は変わらない。定義の存在と、枠がトークンを指すことを見る。
+	 *
+	 * `issue-card` は B4 で枠を外して下線 1 本にしたので、ここには含めない
 	 */
-	for (const className of ["issue-card", "comment-card"]) {
+	for (const className of ["comment-card"]) {
 		it(`.${className} は --line の枠を持つ`, () => {
 			const rule = css.match(new RegExp(`\\.${className}\\s*\\{([^}]*)\\}`));
 			expect(rule, `.${className} の定義が見つからない`).not.toBeNull();
 			expect(rule?.[1]).toContain("border: 1px solid var(--line)");
 		});
 	}
+
+	/*
+	 * Issue 1 件の区切り（B4）。
+	 *
+	 * 枠・角丸・影を外した代わりに、下線 1 本が唯一の区切りになっている。
+	 * この線が消えると、一覧が「どこで 1 件が終わるか分からない文字の塊」に
+	 * なる。線が在ることと、色がトークンを指すことを見る
+	 */
+	it(".issue-card は --line の下線で 1 件を区切る", () => {
+		const rule = css.match(/\.issue-card\s*\{([^}]*)\}/);
+		expect(rule, ".issue-card の定義が見つからない").not.toBeNull();
+		const body = rule?.[1] ?? "";
+
+		expect(body, "1 件の区切りが無い").toContain(
+			"border-bottom: 1px solid var(--line)",
+		);
+		/*
+		 * カードに戻っていないこと。`border-radius: 0` / `box-shadow: none` は
+		 * 素の `li` が持つタグ用の装飾を打ち消すための指定なので、
+		 * 「宣言が無いこと」ではなく「角丸と影が付いていないこと」を見る
+		 */
+		expect(body, "枠が復活している").not.toMatch(/border:\s*1px/);
+		expect(body, "角丸が復活している").not.toMatch(/border-radius:\s*var\(/);
+		expect(body, "影が復活している").not.toMatch(/box-shadow:\s*var\(/);
+	});
 
 	it("Issue 一覧の取得失敗は --danger で描く", () => {
 		const html = renderToStaticMarkup(
@@ -625,16 +693,21 @@ describe("#95 で足した部品がトークン経由で描かれている", () 
 	 * （上の .issue-card / .comment-card と同じ考え方）
 	 */
 	const tokenBindings: Record<string, string[]> = {
-		// カードの面と浮き。#94 が「border だけで平面的」と指摘した点
-		"issue-card": ["var(--surface)", "var(--shadow-card)", "var(--radius-md)"],
+		/*
+		 * `issue-card` はここから外した。#95 は「カードの面と浮き」を
+		 * 求めていたが、B4 で面・角丸・影を外して罫線だけのリストにしている。
+		 * 区切りが在ることは上の「--line の下線で 1 件を区切る」が見る
+		 */
 		// 0 件のまとまり。暖色を使うのはヒーローとここだけ
 		"empty-state": ["var(--sun-soft)", "var(--radius-md)"],
-		// ヒーロー。文字は絵に重ねず隣に置く
+		// ヒーロー。B2 で絵を消して 1 列になったが、面と角丸はそのまま
 		hero: ["var(--sun-soft)", "var(--radius-md)"],
 		// 絞り込み・ページ送りはクラスだけあって定義が無かった
 		"issue-filters": ["var(--surface)", "var(--radius-md)"],
 		// ピルは丸め切る段階を使う
 		"status-pill": ["var(--radius-pill)"],
+		// スコープのピル（B4）。ステータスと同じ形にするので同じ段階を使う
+		"scope-pill": ["var(--radius-pill)", "var(--accent-soft)"],
 	};
 
 	for (const [className, tokens] of Object.entries(tokenBindings)) {

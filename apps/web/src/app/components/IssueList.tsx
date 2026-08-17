@@ -87,9 +87,19 @@ export function IssueCard({
 			*/}
 			<p className="issue-meta">
 				<StatusPill status={issue.status} locale={locale} />
-				<span className="issue-meta-item">{scopes[issue.scope].label}</span>
+				{/*
+				  スコープもピルで出す（B4）。以前は素のテキストで、同じ
+				  「その Issue がどこに属するか」を示す情報なのに、ステータスだけが
+				  ピルでスコープは地の文という不揃いな並びだった
+				*/}
+				<span className="scope-pill">{scopes[issue.scope].label}</span>
+				{/*
+				  カテゴリは `#` を付けてタグとして見せる（B4）。ピルにしないのは、
+				  ステータスとスコープが「決められた選択肢のどれか」なのに対して、
+				  カテゴリは自由入力だから。同じ形にすると区別が付かなくなる
+				*/}
 				{issue.category ? (
-					<span className="issue-meta-item">{issue.category}</span>
+					<span className="issue-tag">#{issue.category}</span>
 				) : null}
 				{/*
 				  読む人向けの文字列は相対表記（A5）。機械可読な値は
