@@ -31,6 +31,18 @@ export type IssueFormValues = {
 	latitude: string;
 	longitude: string;
 	category: string;
+	/**
+	 * 「名前を出す」チェックボックスの状態（#88）。
+	 *
+	 * 画面には「名前を出す」として置き、API へ送るときに `is_anonymous` へ
+	 * 反転させる。画面側で `is_anonymous` を直接持たないのは、チェックが
+	 * 入った状態＝匿名という逆向きの対応になり、既定値をどちらに倒すかの
+	 * 判断が読みにくくなるため。**既定はチェックなし（＝匿名）**。
+	 *
+	 * 他の項目と違って `boolean` なのは、チェックボックスの値が `checked`
+	 * として真偽値で取れるため。文字列に直す意味がない。
+	 */
+	showName: boolean;
 };
 
 /** フィールド名 → そのフィールドのエラーメッセージ。 */
@@ -116,6 +128,11 @@ export function validateIssueForm(values: IssueFormValues): ValidationResult {
 		latitude: toNumber(values.latitude),
 		longitude: toNumber(values.longitude),
 		category: omitEmpty(values.category),
+		// 画面の「名前を出す」を API の「匿名かどうか」へ反転させる（#88）。
+		// ここで `?? true` のようなフォールバックを挟まないのは、
+		// 呼び出し側が値を渡し忘れたときに黙って匿名に倒すより、
+		// 型エラーとして気づける方が安全なため。
+		is_anonymous: !values.showName,
 	});
 
 	if (parsed.success) {

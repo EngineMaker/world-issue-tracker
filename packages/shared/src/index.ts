@@ -57,6 +57,20 @@ export const CreateIssueSchema = z.object({
 	latitude: z.number().min(-90).max(90),
 	longitude: z.number().min(-180).max(180),
 	category: z.string().min(1).max(100).optional(),
+	/**
+	 * 匿名で起票するかどうか。既定は匿名（#88）。
+	 *
+	 * 困りごとの投稿は生活圏を晒す側面があるため、安全側を既定にする。
+	 * 匿名を既定にして後から名乗れるようにするのは容易だが、一度表示した
+	 * ものを後から匿名化しても、既に見られた事実は消せない。
+	 *
+	 * `.optional()` ではなく `.default(true)` にしているのは、未指定の
+	 * リクエストが DB のカラム既定値へ素通りするのではなく、この層で
+	 * 匿名に確定させるため。DB 側（`0007_add_is_anonymous.sql` の
+	 * `DEFAULT 1`）にも同じ既定値があり、どちらか片方が消えても匿名側に
+	 * 倒れる二重の担保になっている。
+	 */
+	is_anonymous: z.boolean().default(true),
 });
 export type CreateIssue = z.infer<typeof CreateIssueSchema>;
 
@@ -215,6 +229,37 @@ export const ISSUE_STATUS_LABELS: Record<
 		closed: "Closed",
 	},
 };
+
+/**
+ * 起票者の名乗りに関する表示ラベル（#88）。
+ *
+ * 匿名かどうかは真偽値でしかないが、画面に `true` / `false` を出すわけには
+ * いかないので、スコープやステータスと同じ流儀で対応表をここに置く。
+ * 一覧・詳細で別々に文言を書くと、同じ Issue が画面ごとに違う顔になる（#59）。
+ *
+ * 名乗っている側を「投稿者あり」という抽象的な表現に留めているのは、
+ * 実際の表示名の取得（Clerk Backend API 連携）が #67 の範囲だから。
+ * 名前が取れるようになったら、ここの `named` を実際の表示名に置き換える。
+ */
+export const ISSUE_ANONYMITY_LABELS: Record<
+	Locale,
+	{ anonymous: string; named: string }
+> = {
+	ja: {
+		anonymous: "匿名の方",
+		named: "投稿者あり",
+	},
+	en: {
+		anonymous: "Anonymous",
+		named: "Named author",
+	},
+};
+
+/** 匿名かどうかの表示ラベルを引く。ロケール省略時は既定ロケール */
+export const getIssueAnonymityLabel = (
+	isAnonymous: boolean,
+	locale: Locale = DEFAULT_LOCALE,
+) => ISSUE_ANONYMITY_LABELS[locale][isAnonymous ? "anonymous" : "named"];
 
 /** スコープの表示ラベルを引く。ロケール省略時は既定ロケール */
 export const getIssueScopeLabel = (
@@ -450,6 +495,8 @@ const JA_UI_MESSAGES = {
 		status: "ステータス",
 		category: "カテゴリ",
 		categoryUnset: "未設定",
+		/** 起票者（#88）。値は `getIssueAnonymityLabel` が出す */
+		author: "起票者",
 		location: "場所",
 		/** 地図の下に残す座標の数値表示 */
 		coordinates: (latitude: number, longitude: number) =>
@@ -551,6 +598,10 @@ const JA_UI_MESSAGES = {
 		locating: "取得中…",
 		geolocationFailed:
 			"位置情報を取得できませんでした。緯度経度を直接入力してください。",
+		/** 名乗るかどうか（#88）。既定は未チェック＝匿名 */
+		showName: "名前を出す",
+		showNameHint:
+			"チェックしないと「匿名の方」として表示されます。困りごとは住んでいる場所が伝わることがあるため、既定では名前を出しません。投稿した後からは変更できないので、ここで決めてください。",
 		validationFailed: "入力内容を確認してください。",
 		submit: "起票する",
 		viewIssues: "Issue 一覧を見る",
@@ -715,6 +766,8 @@ const EN_UI_MESSAGES: UiMessages = {
 		status: "Status",
 		category: "Category",
 		categoryUnset: "Not set",
+		/** 起票者（#88）。値は `getIssueAnonymityLabel` が出す */
+		author: "Posted by",
 		location: "Location",
 		coordinates: (latitude: number, longitude: number) =>
 			`Latitude ${latitude} / Longitude ${longitude}`,
@@ -809,6 +862,10 @@ const EN_UI_MESSAGES: UiMessages = {
 		locating: "Locating…",
 		geolocationFailed:
 			"Could not get your location. Please enter the coordinates directly.",
+		/** 名乗るかどうか（#88）。既定は未チェック＝匿名 */
+		showName: "Show my name",
+		showNameHint:
+			"If you leave this unchecked, you will be shown as “Anonymous”. Issues can reveal where you live, so names are hidden by default. This cannot be changed after posting, so please decide here.",
 		validationFailed: "Please check what you entered.",
 		submit: "Post issue",
 		viewIssues: "Browse issues",
@@ -994,3 +1051,52 @@ export const ListIssuesQuerySchema = z
 		path: ["cursor"],
 	});
 export type ListIssuesQuery = z.infer<typeof ListIssuesQuerySchema>;
+
+/**
+ * Clerk のキーが開発用インスタンスのものか（#98）。
+ *
+ * Clerk のキーは接頭辞で種別が分かる。publishable key は `pk_test_` /
+ * `pk_live_`、secret key は `sk_test_` / `sk_live_` で始まり、`test` が
+ * 開発用インスタンス、`live` が本番用インスタンスを指す。
+ *
+ * この判定を置いている理由は、開発用キーが本番に出ても**何も落ちない**から。
+ * ローカルでも CI でも本番でも同じように認証が通り、テストも型検査も
+ * ビルドも全部緑になる。実際 #98 は、本番サイトを人が操作していて
+ * ブラウザのコンソールに出た Clerk 自身の警告で見つかっている。
+ *
+ * 開発用インスタンスには Clerk 側の利用者数上限があり、上限に達すると
+ * サインインできなくなる。つまり「人が増えたら止まる」種類の不備で、
+ * 出てから気付くのでは遅い。ビルド時に落とすための判定材料にする。
+ *
+ * 接頭辞で見ているのは、キーの本体（base64 のインスタンス識別子）を
+ * 復号しなくても種別が確定するため。Clerk がこの接頭辞を変えた場合は
+ * 判定が効かなくなるが、そのときは `null`（判定不能）を返して
+ * 呼び出し側に委ねる。誤って「本番用」と断定して素通りさせるより、
+ * 判定できないことが分かるほうが安全。
+ */
+export type ClerkKeyKind = "development" | "production";
+
+export function clerkKeyKind(key: string | undefined): ClerkKeyKind | null {
+	if (!key) {
+		return null;
+	}
+	// `pk_test_` / `sk_test_` / `pk_live_` / `sk_live_` のいずれか。
+	// 接頭辞だけを見て、本体の中身は問わない。
+	const match = /^(?:pk|sk)_(test|live)_/.exec(key);
+	if (!match) {
+		return null;
+	}
+	return match[1] === "live" ? "production" : "development";
+}
+
+/**
+ * 本番デプロイで使ってはいけないキーか（#98）。
+ *
+ * 判定不能（`null`）を「使ってよい」に倒していないことに注意。キーの形式が
+ * 想定と違うなら、それは Clerk の仕様変更か設定ミスのどちらかで、
+ * どちらも本番に黙って出してよい状態ではない。空文字・未設定も同様に弾く
+ * （認証が丸ごと動かないビルドを本番へ出すことになるため）。
+ */
+export function isUnsafeForProduction(key: string | undefined): boolean {
+	return clerkKeyKind(key) !== "production";
+}

@@ -45,7 +45,16 @@ export function IssueFilterForm({
 	const sortLabels = ISSUE_SORT_LABELS[locale];
 
 	return (
-		<form method="get" action="/issues" className="issue-filters">
+		/*
+		 * `issue-form` は起票フォーム専用の見た目ではなく、入力要素の
+		 * スタイルを閉じ込めるスコープとして機能している（#86）。
+		 * 素の要素セレクタ（`input { ... }`）は Clerk のモーダルにも当たるため、
+		 * 入力要素の指定はすべて `.issue-form` の子孫に置かれている。
+		 * つまりこのクラスが無いと、中の input と select にスタイルが
+		 * 1 つも当たらない（#93 のコメント欄と同じ症状が、直された後も
+		 * この画面に残っていた）。
+		 */
+		<form method="get" action="/issues" className="issue-form issue-filters">
 			<fieldset>
 				<legend>{messages.filterForm.legend}</legend>
 

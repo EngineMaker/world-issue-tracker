@@ -32,6 +32,11 @@ const INITIAL_VALUES: IssueFormValues = {
 	latitude: "",
 	longitude: "",
 	category: "",
+	// 既定は「名前を出さない」＝匿名（#88）。
+	// 困りごとの投稿は生活圏を晒す側面があるため、安全側を既定にする。
+	// ここを true に変えると、名乗るつもりのなかった人が既定のまま
+	// 名乗ってしまう。一度表示したものは後から取り消せない。
+	showName: false,
 };
 
 /** 現在地の取得状態。押しても何も起きないように見える時間を作らないため */
@@ -71,8 +76,16 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 	const [geolocation, setGeolocation] = useState<GeolocationState>("idle");
 	const [photo, setPhoto] = useState<PhotoState>({ status: "empty" });
 
-	const update = (field: keyof IssueFormValues) => (value: string) => {
-		setValues((current) => ({ ...current, [field]: value }));
+	// 文字列の入力欄用。チェックボックス（`showName`）は値が真偽値なので
+	// `updateShowName` を使う。1 つの関数で両方を受けると、
+	// フィールド名と値の型の対応が緩くなって取り違えに気づけない。
+	const update =
+		(field: Exclude<keyof IssueFormValues, "showName">) => (value: string) => {
+			setValues((current) => ({ ...current, [field]: value }));
+		};
+
+	const updateShowName = (checked: boolean) => {
+		setValues((current) => ({ ...current, showName: checked }));
 	};
 
 	// 選択中のスコープが何を指すかを、選ぶその場に出す。
@@ -453,6 +466,34 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 						</output>
 					)}
 				</fieldset>
+
+				{/*
+				  名乗るかどうか（#88）。既定は未チェック＝匿名。
+
+				  `FormField` を使わずに書いているのは、あちらが
+				  「ラベル → 補助テキスト → 入力欄」の縦並びを前提にしていて、
+				  チェックボックスの「四角 → ラベル」という横並びに合わないため。
+				  補助テキストの id と `aria-describedby` の対応はここでも同じ形にする。
+
+				  未ログインでも操作できるようにしている。送信時に
+				  サインインへ誘導する作りなので、ここだけ先に無効化すると
+				  「書けたのに選べない」という食い違いになる。
+				*/}
+				<p className="form-field">
+					<label htmlFor="show-name">
+						<input
+							id="show-name"
+							type="checkbox"
+							checked={values.showName}
+							onChange={(event) => updateShowName(event.target.checked)}
+							aria-describedby="show-name-hint"
+						/>{" "}
+						{messages.newIssue.showName}
+					</label>
+					<span className="field-hint" id="show-name-hint">
+						{messages.newIssue.showNameHint}
+					</span>
+				</p>
 
 				{submitError && (
 					<output className="notice text-danger">

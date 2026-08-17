@@ -67,7 +67,30 @@ describe("Test database schema", () => {
 			// 0007_add_photo.sql — 写真の置き場（R2）へのキーと、その MIME
 			"photo_key",
 			"photo_content_type",
+			// 0008_add_is_anonymous.sql
+			"is_anonymous",
 		]);
+	});
+
+	// 既存行（`is_anonymous` が無かった時代に入った行）が匿名として読めること。
+	//
+	// マイグレーションの DEFAULT が匿名側でないと、過去の投稿が遡って
+	// 「名乗っている」扱いになる。一度表示したものは後から取り消せないため、
+	// ここは DB の既定値そのものを見る（アプリの Zod を通さない経路）。
+	it("defaults is_anonymous to 1 for rows inserted without it", async () => {
+		await env.DB.prepare(
+			"INSERT INTO issues (id, title, description, scope, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?)",
+		)
+			.bind("legacy-anonymity-row", "t", "d", "personal", 0, 0)
+			.run();
+
+		const row = await env.DB.prepare(
+			"SELECT is_anonymous FROM issues WHERE id = ?",
+		)
+			.bind("legacy-anonymity-row")
+			.first<{ is_anonymous: number }>();
+
+		expect(row?.is_anonymous).toBe(1);
 	});
 
 	// 手書き定数はインデックスを一本も作っていなかった。

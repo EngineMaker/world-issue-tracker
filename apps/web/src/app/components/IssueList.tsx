@@ -1,5 +1,6 @@
 import {
 	DEFAULT_LOCALE,
+	getIssueAnonymityLabel,
 	getUiMessages,
 	ISSUE_SCOPE_LABELS,
 	ISSUE_STATUS_LABELS,
@@ -100,6 +101,14 @@ export function IssueCard({
 				<time className="issue-meta-item" dateTime={issue.created_at}>
 					{formatCreatedAt(issue.created_at)}
 				</time>
+				{/*
+				  起票者が名乗っているかどうか（#88）。実際の表示名はまだ出せない
+				  （#67 で取得する）が、匿名かどうかの区別だけは一覧の時点で分かる
+				  ようにしておく。何も出さないと「全員匿名」と「全員名乗っている」の
+				  どちらの世界なのかが画面から読み取れない
+				*/}
+				{" / "}
+				<span>{getIssueAnonymityLabel(issue.is_anonymous, locale)}</span>
 			</p>
 		</li>
 	);

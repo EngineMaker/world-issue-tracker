@@ -23,6 +23,10 @@
 	--accent: #1a7f5a;
 	--accent-soft: #e8f5ef;
 	--accent-line: #b8ddcb;
+	--surface-muted: #f1f5f2;
+	--surface-accent: #f3faf6;
+	--sun: #f3c76a;
+	--sun-soft: #fff4d6;
 
 	/* 状態を表す色。主役（--accent）とは別系統として扱う */
 	--danger: #b91c1c;
@@ -73,43 +77,32 @@
 	--space-section: 2rem;
 	--space-page: 3rem;
 
-	/*
-	 * 行間（#94）。これまで body の `line-height: 1.6` 一律だった。
-	 * 見出しは字が大きい分だけ行間が開きすぎて見え、まとまりが崩れる。
-	 * 本文は読みやすさを優先して広めに保つ
-	 */
-	--leading-body: 1.7;
-	--leading-heading: 1.3;
-
-	/*
-	 * 角丸（#94）。これまで 4px と 6px が場当たりで混在していた。
-	 * 「小さい部品 / 面を持つまとまり / 丸」の 3 段階に畳む。
-	 * 値そのものより、同じ役割のものが同じ丸みを持つことが要点
-	 */
-	--radius-sm: 6px;
-	--radius-md: 10px;
+	/* 角丸の段階（#94） */
+	--radius-sm: 0.25rem;
+	--radius-md: 0.5rem;
+	--radius-lg: 0.75rem;
 	--radius-pill: 999px;
 
-	/*
-	 * 影（#94）。これまで border だけで平面的だった。
-	 * --shadow-raised は常時の浮き、--shadow-hover は触れたときの持ち上がり。
-	 * 色は無彩色の黒ではなく本文色（--ink 相当）に寄せた緑がかった暗色にして、
-	 * 面の色（--ground / --surface）と喧嘩しないようにする
-	 */
-	--shadow-raised: 0 1px 2px rgba(28, 36, 32, 0.06);
-	--shadow-hover: 0 4px 12px rgba(28, 36, 32, 0.1);
+	/* 影の段階（#94） */
+	--shadow-card: 0 8px 24px rgba(28, 36, 32, 0.08);
+	--shadow-card-hover: 0 12px 28px rgba(28, 36, 32, 0.12);
+	--shadow-button: 0 4px 16px rgba(26, 127, 90, 0.18);
+	--shadow-marker: 0 0 0 1px rgba(0, 0, 0, 0.4);
+
+	/* 行間と字送り（#94） */
+	--leading-tight: 1.2;
+	--leading-snug: 1.4;
+	--leading-normal: 1.6;
+	--tracking-tight: -0.01em;
+	--tracking-normal: 0;
+
+	/* 遷移（#94） */
+	--transition-fast: 160ms ease;
+	--transition-base: 240ms ease;
 
 	/*
-	 * 遷移（#94）。これまで指定がゼロで、ホバーや状態変化が瞬間的に
-	 * 切り替わっていた。手触りの硬さの主因はここ。
-	 * 速い方（--transition-fast）は色や影のような「触れた合図」、
-	 * 遅い方（--transition-slow）は寸法が動くものに使う
-	 */
-	--transition-fast: 120ms ease-out;
-	--transition-slow: 200ms ease-out;
-
-	/*
-	 * ライフサイクル 6 段階の色（#94）。
+	 * ライフサイクル 6 段階の色（#95）。#94 の見本には無かったので
+	 * ここで新しく足す（見本側の語彙とは衝突しない）。
 	 *
 	 * 進むほど --accent（緑）に近づく並びにして、色そのものが
 	 * 「直っていく道筋」を示す。open は未着手を表す中立な灰、
@@ -132,13 +125,6 @@
 	--status-resolved-soft: #e8f5ef;
 	--status-closed: #5d6763;
 	--status-closed-soft: #f2f4f3;
-
-	/*
-	 * ヒーローと空の状態にだけ使う暖色（#94）。
-	 * 緑と競合しないよう彩度を抑えてある。ここ以外では使わない
-	 */
-	--sun: #a1522a;
-	--sun-soft: #fdf1e7;
 }
 
 *,
@@ -165,7 +151,7 @@ html {
 body {
 	font-family: system-ui, -apple-system, sans-serif;
 	/* 本文の行間はトークンから引く（#94）。見出しは下で別に上書きする */
-	line-height: var(--leading-body);
+	line-height: var(--leading-normal);
 	color: var(--ink);
 	max-width: 800px;
 	margin: 0 auto;
@@ -202,6 +188,10 @@ a {
 	color: var(--accent);
 	/* 色だけに頼らない。色覚特性のある人にもリンクだと分かる必要がある */
 	text-decoration: underline;
+	transition:
+		color var(--transition-fast),
+		background-color var(--transition-fast),
+		box-shadow var(--transition-base);
 }
 
 /*
@@ -244,16 +234,23 @@ a:focus-visible {
 h1,
 h2,
 h3 {
-	line-height: var(--leading-heading);
+	line-height: var(--leading-snug);
 }
 
 h1 {
 	font-size: var(--text-heading-page);
+	line-height: var(--leading-tight);
+	letter-spacing: var(--tracking-tight);
 	margin-bottom: var(--space-2);
 }
 
 h2 {
 	font-size: var(--text-heading-section);
+	line-height: var(--leading-snug);
+	/*
+	 * 節の見出しの上は「まとまりの区切り」なので --space-section を使う（#95）。
+	 * --space-6 では前の節の本文と近すぎて、どこで話が変わったのか読めなかった
+	 */
 	margin-top: var(--space-section);
 	margin-bottom: var(--space-3);
 }
@@ -408,7 +405,7 @@ main p {
 	.button-link:hover {
 		/* a:hover の --accent-soft（薄緑）が当たると白文字が読めなくなる */
 		background: var(--accent);
-		box-shadow: var(--shadow-hover);
+		box-shadow: var(--shadow-card-hover);
 	}
 }
 
@@ -463,7 +460,7 @@ main p {
 	background: var(--surface);
 	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
-	box-shadow: var(--shadow-raised);
+	box-shadow: var(--shadow-card);
 	padding: var(--space-4);
 	height: 100%;
 	/* 面全体が押せることを示すので、文字の下線は外す */
@@ -472,7 +469,7 @@ main p {
 	transition:
 		box-shadow var(--transition-fast),
 		border-color var(--transition-fast),
-		transform var(--transition-slow);
+		transform var(--transition-base);
 }
 
 @media (hover: hover) {
@@ -484,7 +481,7 @@ main p {
 		 */
 		background: var(--surface);
 		border-color: var(--accent-line);
-		box-shadow: var(--shadow-hover);
+		box-shadow: var(--shadow-card-hover);
 		transform: translateY(-1px);
 	}
 }
@@ -604,7 +601,7 @@ main p {
 	align-items: center;
 	gap: var(--space-1);
 	/* 文字が縦に潰れないよう、ピルの中は行間を詰める */
-	line-height: var(--leading-heading);
+	line-height: var(--leading-snug);
 	font-size: var(--text-sm);
 	font-weight: 600;
 	white-space: nowrap;
@@ -739,22 +736,51 @@ main p {
 	outline-offset: 1px;
 }
 
-/* 既定では横幅いっぱい。短い入力は下の .field-narrow で絞る */
-.issue-form input[type="text"],
-.issue-form textarea,
 /*
- * 絞り込みの入力欄も幅いっぱいにする（#95）。ブラウザ既定の `size` 由来の
- * 幅のままだと、キーワード欄が 20 文字分しかなく、入れた語が読めない
- * （#93 の実機確認で「入力欄が狭い」として挙がっていた症状）
+ * 既定では横幅いっぱい。短い入力は下の .field-narrow で絞る。
+ *
+ * `type="search"` は #96 で足した。一覧の絞り込みフォームに `.issue-form` を
+ * 与えても、幅の指定が `type="text"` と `textarea` にしか無いため、
+ * キーワード欄（`type="search"`）は既定の幅のままだった。**枠は付くが幅は
+ * 広がらない**という中途半端な状態で、docs/visual-check.md に自分で書いた
+ * 確認軸（「入力欄が本文の幅いっぱいに広がる — 一覧の絞り込みを含む 3 箇所」）を
+ * 満たしていなかった（レビュー指摘）。
  */
-.issue-filters input,
-.issue-filters select {
+/*
+ * `.issue-filters input` も同じ幅の扱いに入れる（#95）。ブラウザ既定の
+ * `size` 由来の幅のままだと、キーワード欄が 20 文字分しかなく、入れた語が
+ * 読めない（#93 の実機確認で「入力欄が狭い」として挙がっていた症状）。
+ *
+ * `.issue-filters select` は含めない。下の `select` の指定（#96）が
+ * 「幅は伸ばさず上限だけ与える」と決めており、そちらに従う。
+ *
+ * セレクタの列の途中にコメントを挟まないこと。`.issue-form textarea` の
+ * 直後に `width` があることを見ているテストがあり、間に文字が入ると
+ * 届かなくなる（apps/api/test/node/web-issue-form-guidance.test.ts）
+ */
+.issue-form input[type="text"],
+.issue-form input[type="search"],
+.issue-form textarea,
+.issue-filters input {
 	width: 100%;
 	/*
 	 * `width: 100%` でも、textarea は既定の `cols` 由来の最小幅を持つため
 	 * 狭い画面では親をはみ出してページ全体に横スクロールが出る（#93）。
 	 * 上の `box-sizing: border-box` と合わせて、親の幅で頭打ちにする
 	 */
+	max-width: 100%;
+}
+
+/*
+ * `select` は幅を伸ばさず、はみ出しだけを止める（#96）。
+ *
+ * 絞り込みの 3 つの `select`（スコープ・ステータス・並び順）は、選択肢の
+ * 文字列が長いと親をはみ出して横スクロールを作る。一方で `width: 100%` に
+ * すると起票フォームのスコープ選択も幅いっぱいになり、**破綻を止める範囲を
+ * 超えて見た目を変える**ことになる（どの幅にするかは #95 で決まる）。
+ * ここでは上限だけを与える。
+ */
+.issue-form select {
 	max-width: 100%;
 }
 
@@ -781,9 +807,12 @@ main p {
 	border: 1px solid var(--accent);
 	padding: var(--space-2) var(--space-5);
 	font-weight: 600;
+	box-shadow: var(--shadow-button);
 	transition:
-		box-shadow var(--transition-fast),
-		opacity var(--transition-fast);
+		transform var(--transition-fast),
+		box-shadow var(--transition-base),
+		background-color var(--transition-fast),
+		border-color var(--transition-fast);
 }
 
 /* 補助操作（現在地から入力・サインイン）。押しても主要操作ではないと分かる見た目 */
@@ -796,30 +825,20 @@ main p {
 	border: 1px solid var(--line);
 	padding: 0.375rem 0.875rem;
 	transition:
+		transform var(--transition-fast),
+		box-shadow var(--transition-base),
+		background-color var(--transition-fast),
 		border-color var(--transition-fast),
-		background var(--transition-fast);
-}
-
-/*
- * 押せることを触れた時点で示す（#94）。これまで遷移が無く、
- * ホバーでも見た目が変わらないため「押せるのか」が分からなかった。
- * `:disabled` を除いているのは、押せないものが反応すると誤解を招くため
- */
-@media (hover: hover) {
-	.button-primary:hover:not(:disabled) {
-		box-shadow: var(--shadow-hover);
-	}
-
-	.button-secondary:hover:not(:disabled) {
-		border-color: var(--accent-line);
-		background: var(--accent-soft);
-	}
+		color var(--transition-fast);
 }
 
 .button-primary:disabled,
 .button-secondary:disabled {
 	cursor: default;
 	opacity: 0.6;
+	transform: none;
+	box-shadow: none;
+	transition: none;
 }
 
 /* 1 項目のまとまり。ラベル・補助テキスト・入力欄の間より、項目間を広く取る */
@@ -851,8 +870,12 @@ main p {
 
 /* 場所に関する項目のまとまり。狭い画面では緯度・経度を縦に積む */
 .location {
+	box-shadow: var(--shadow-card);
+	transition:
+		box-shadow var(--transition-base),
+		transform var(--transition-fast);
 	border: 1px solid var(--line);
-	border-radius: var(--radius-sm);
+	border-radius: var(--radius-md);
 	padding: var(--space-3) var(--space-4);
 	margin-bottom: var(--space-5);
 }
@@ -879,10 +902,14 @@ main p {
 }
 
 .issue-map-view {
+	box-shadow: var(--shadow-card);
+	transition:
+		box-shadow var(--transition-base),
+		transform var(--transition-fast);
 	position: relative;
 	overflow: hidden;
 	border: 1px solid var(--line);
-	border-radius: var(--radius-sm);
+	border-radius: var(--radius-md);
 	/* タイルが読み込めないときに、枠だけが残って中身が抜けて見えないように */
 	background-color: var(--line);
 	max-width: 100%;
@@ -930,7 +957,7 @@ main p {
 	 * 統一先に指定している値
 	 */
 	background-color: var(--danger);
-	box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+	box-shadow: var(--shadow-marker);
 }
 
 /* 帰属表示は隠さないことがタイル配信元の利用条件に含まれる */
@@ -1024,15 +1051,16 @@ main p {
  */
 .issue-card {
 	background: var(--surface);
+	box-shadow: var(--shadow-card);
 	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
-	box-shadow: var(--shadow-raised);
-	padding: var(--space-4);
+	padding: var(--space-3) var(--space-4);
 	margin-bottom: var(--space-3);
 	list-style: none;
 	transition:
-		box-shadow var(--transition-fast),
-		border-color var(--transition-fast);
+		box-shadow var(--transition-base),
+		border-color var(--transition-fast),
+		transform var(--transition-fast);
 }
 
 /*
@@ -1042,7 +1070,7 @@ main p {
 @media (hover: hover) {
 	.issue-card:hover {
 		border-color: var(--accent-line);
-		box-shadow: var(--shadow-hover);
+		box-shadow: var(--shadow-card-hover);
 	}
 }
 
@@ -1110,6 +1138,55 @@ main p {
 	font-size: var(--text-sm);
 }
 
+/*
+ * 一覧の絞り込みフォームとページ送り（Issue #96）。
+ *
+ * どちらも tsx が `className` を出しているのに、globals.css に定義が
+ * 1 行も無かった。既存のテスト 385 件はすべて通っていた —
+ * 直書きの色もインライン style も無く、描画結果にクラス名も出ているので、
+ * 「値が正しいか」を見る検査には引っかかりようがない。
+ * **指定が存在しないことだけが、誰にも見えていなかった。**
+ *
+ * ここは破綻を止める範囲に留めている。まとまりとして認識できる枠と、
+ * 前後との間隔だけを与える（どの見た目を目指すかは #94 / #95 で決まる）。
+ */
+
+/*
+ * 絞り込みフォーム（Issue #95）。
+ *
+ * クラスは付いていたが globals.css に定義が無く、スタイルが何も
+ * 当たっていなかった。入力欄はブラウザ既定の見た目のまま、
+ * 5 項目が縦に間延びして一覧そのものが画面の下に押しやられていた。
+ *
+ * 面としてまとめ、項目は入る幅があれば横に並べる。
+ * 「絞り込みは一覧の付属物である」ことが幅で伝わるようにする。
+ * 浮きと遷移は #94 が足したもの
+ */
+.issue-filters {
+	background: var(--surface);
+	box-shadow: var(--shadow-card);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	padding: var(--space-4);
+	margin-bottom: var(--space-5);
+	transition:
+		box-shadow var(--transition-base),
+		transform var(--transition-fast);
+}
+
+/*
+ * 絞り込みの各項目。`.form-field` の 1.25rem は縦に 5 項目並ぶこの
+ * フォームでは間延びするので、絞り込みの中だけ詰める
+ */
+.issue-filters .form-field {
+	margin-bottom: var(--space-3);
+}
+
+/* ページ送りは一覧の末尾に置く。上の最後のカードとくっつかないよう離す */
+.issue-pagination {
+	margin-top: var(--space-4);
+}
+
 /* カードを並べる ul。素の ul はタグを横に並べるスタイルなので打ち消す */
 .issue-cards {
 	display: block;
@@ -1120,6 +1197,10 @@ main p {
 /* コメント 1 件。カードと似た面だが、下の余白と本文の扱いが違う */
 .comment-card {
 	background: var(--surface);
+	box-shadow: var(--shadow-card);
+	transition:
+		box-shadow var(--transition-base),
+		transform var(--transition-fast);
 	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
 	padding: var(--space-3) var(--space-4);
@@ -1149,24 +1230,6 @@ main p {
 .section-lead {
 	color: var(--ink-soft);
 	font-size: var(--text-sm);
-}
-
-/*
- * 絞り込みフォーム（Issue #95）。
- *
- * クラスは付いていたが globals.css に定義が無く、スタイルが何も
- * 当たっていなかった。入力欄はブラウザ既定の見た目のまま、
- * 5 項目が縦に間延びして一覧そのものが画面の下に押しやられていた。
- *
- * 面としてまとめ、項目は入る幅があれば横に並べる。
- * 「絞り込みは一覧の付属物である」ことが幅で伝わるようにする
- */
-.issue-filters {
-	background: var(--surface);
-	border: 1px solid var(--line);
-	border-radius: var(--radius-md);
-	padding: var(--space-4);
-	margin-bottom: var(--space-5);
 }
 
 /* fieldset の既定の枠は要らない。囲いは .issue-filters が持っている */
@@ -1340,6 +1403,7 @@ main p {
 .site-header-title {
 	margin: 0;
 	font-size: var(--text-heading-site);
+	line-height: var(--leading-snug);
 	white-space: nowrap;
 }
 
@@ -1493,6 +1557,442 @@ main p {
  * 優先する」という判断で、特定の端末の実寸に合わせたものではない
  * （どの見た目を目指すかは #94 / #95 で決まる。ここは破綻を止める範囲）。
  */
+
+@media (hover: hover) {
+	.button-primary:hover,
+	.button-secondary:hover {
+		transform: translateY(-1px);
+	}
+
+	.button-secondary:hover {
+		background: var(--surface-accent);
+		border-color: var(--accent-line);
+	}
+
+	.issue-card:hover,
+	.comment-card:hover,
+	.issue-filters:hover,
+	.location:hover,
+	.issue-map-view:hover {
+		box-shadow: var(--shadow-card-hover);
+	}
+}
+
+/* #94 の承認済み見本をリポジトリ内で確認するためのページ */
+.design-direction-page {
+	max-width: 72rem;
+	padding: var(--space-6) 0;
+}
+
+.design-direction-hero,
+.design-screen,
+.design-empty-card,
+.design-loading-card,
+.design-token-table-wrap,
+.design-heading-decision,
+.design-mock-card,
+.design-detail-panel,
+.design-filter-panel,
+.design-map-card,
+.design-photo-card,
+.design-hero-art-frame {
+	background: var(--surface);
+	border: 1px solid var(--line);
+	box-shadow: var(--shadow-card);
+}
+
+.design-direction-hero {
+	display: grid;
+	grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 1fr);
+	gap: var(--space-6);
+	padding: var(--space-6);
+	border-radius: var(--radius-lg);
+	background: linear-gradient(180deg, var(--surface-accent), var(--surface));
+}
+
+.design-direction-copy,
+.design-hero-panel,
+.design-home-copy,
+.design-home-rail,
+.design-stack,
+.design-photo-stack,
+.design-section-heading {
+	display: grid;
+	gap: var(--space-3);
+}
+
+.design-kicker,
+.design-screen-kicker {
+	font-size: var(--text-sm);
+	line-height: var(--leading-snug);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--ink-soft);
+}
+
+.design-lead {
+	font-size: var(--text-lg);
+	line-height: var(--leading-snug);
+	max-width: 42rem;
+}
+
+.design-action-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	align-items: center;
+}
+
+.design-button-primary,
+.design-button-secondary {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--space-2) var(--space-4);
+	border-radius: var(--radius-pill);
+	font-weight: 600;
+	text-decoration: none;
+}
+
+.design-button-primary {
+	background: var(--accent);
+	color: var(--surface);
+	box-shadow: var(--shadow-button);
+}
+
+.design-button-secondary {
+	background: var(--surface);
+	color: var(--accent);
+	border: 1px solid var(--accent-line);
+}
+
+.design-decision-list {
+	display: grid;
+	gap: var(--space-3);
+}
+
+.design-decision-list div {
+	padding: var(--space-3) var(--space-4);
+	border-radius: var(--radius-md);
+	background: var(--surface-muted);
+}
+
+.design-decision-list dt {
+	font-weight: 700;
+	margin-bottom: var(--space-1);
+}
+
+.design-hero-art-frame,
+.design-photo-card,
+.design-map-card {
+	border-radius: var(--radius-lg);
+	overflow: hidden;
+}
+
+.design-hero-art-frame {
+	padding: var(--space-3);
+	background: linear-gradient(180deg, var(--sun-soft), var(--surface));
+}
+
+.design-hero-note,
+.design-photo-caption,
+.design-filter-summary,
+.design-mock-meta,
+.design-footnote,
+.design-back-link {
+	color: var(--ink-soft);
+	font-size: var(--text-sm);
+}
+
+.design-section {
+	margin-top: calc(var(--space-6) * 2);
+	display: grid;
+	gap: var(--space-4);
+}
+
+.design-screen-grid,
+.design-state-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--space-4);
+}
+
+.design-screen {
+	border-radius: var(--radius-lg);
+	padding: var(--space-5);
+	display: grid;
+	gap: var(--space-4);
+}
+
+.design-screen-header,
+.design-detail-header {
+	display: grid;
+	gap: var(--space-2);
+}
+
+.design-screen h3,
+.design-heading-decision h3 {
+	font-size: var(--text-xl);
+	line-height: var(--leading-tight);
+	letter-spacing: var(--tracking-tight);
+}
+
+.design-screen h4,
+.design-empty-title {
+	font-size: var(--text-lg);
+	line-height: var(--leading-snug);
+}
+
+.design-screen-body,
+.design-home-mock {
+	display: grid;
+	gap: var(--space-3);
+}
+
+.design-home-mock {
+	grid-template-columns: minmax(0, 1.1fr) minmax(16rem, 1fr);
+	align-items: start;
+}
+
+.design-home-rail {
+	grid-column: 1 / -1;
+}
+
+.design-band,
+.design-scope-pill,
+.design-status-pill,
+.design-input-chip,
+.design-status-flow > li {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	width: fit-content;
+	padding: 0.375rem 0.75rem;
+	border-radius: var(--radius-pill);
+	font-size: var(--text-sm);
+	line-height: var(--leading-snug);
+}
+
+.design-band {
+	background: var(--surface-accent);
+	color: var(--accent);
+}
+
+.design-scope-pill {
+	background: var(--surface-muted);
+	color: var(--ink);
+}
+
+.design-status-flow,
+.design-filter-row,
+.design-mock-meta-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+
+.design-status-pill {
+	background: var(--surface-muted);
+	border: 1px solid transparent;
+}
+
+.design-status-open {
+	color: var(--ink-soft);
+	border-color: var(--line);
+}
+
+.design-status-triaged {
+	color: var(--warning);
+	border-color: var(--warning);
+}
+
+.design-status-progress,
+.design-status-review,
+.design-status-resolved,
+.design-status-closed {
+	color: var(--accent);
+	border-color: var(--accent-line);
+}
+
+.design-photo-card {
+	padding: var(--space-2);
+	background: linear-gradient(180deg, var(--surface-accent), var(--surface));
+}
+
+.design-photo-card-tall {
+	min-height: 18rem;
+}
+
+.design-mock-card,
+.design-detail-panel,
+.design-filter-panel,
+.design-empty-card,
+.design-loading-card,
+.design-heading-decision,
+.design-map-card {
+	border-radius: var(--radius-md);
+	padding: var(--space-4);
+}
+
+.design-mock-card p:last-child,
+.design-detail-panel p:last-child,
+.design-empty-card p:last-child,
+.design-loading-card p:last-child {
+	margin-bottom: 0;
+}
+
+.design-detail-layout {
+	grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+	align-items: start;
+}
+
+.design-map-card {
+	background: linear-gradient(180deg, var(--surface-muted), var(--surface));
+}
+
+.design-map-grid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: var(--space-1);
+	aspect-ratio: 1;
+}
+
+.design-map-grid > span {
+	display: block;
+	border-radius: var(--radius-sm);
+	background: var(--surface-accent);
+	border: 1px solid var(--accent-line);
+	min-height: 4.5rem;
+}
+
+.design-map-marker {
+	background: var(--danger);
+	box-shadow: var(--shadow-marker);
+}
+
+.design-empty-card {
+	gap: var(--space-3);
+	display: grid;
+}
+
+.design-empty-card-warm {
+	background: linear-gradient(180deg, var(--sun-soft), var(--surface));
+}
+
+.design-loading-card {
+	display: grid;
+	gap: var(--space-2);
+	background: var(--surface-muted);
+}
+
+.design-skeleton,
+.design-skeleton-pill {
+	background: var(--surface);
+	border-radius: var(--radius-sm);
+	height: 0.875rem;
+}
+
+.design-skeleton-wide {
+	width: 72%;
+}
+
+.design-skeleton-pill {
+	width: 36%;
+	height: 2.25rem;
+	border-radius: var(--radius-pill);
+}
+
+.design-token-table-wrap {
+	border-radius: var(--radius-lg);
+	overflow: hidden;
+}
+
+.design-token-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.design-token-table th,
+.design-token-table td {
+	padding: var(--space-3) var(--space-4);
+	border-bottom: 1px solid var(--line);
+	text-align: left;
+	vertical-align: top;
+}
+
+.design-token-table thead {
+	background: var(--surface-muted);
+}
+
+.design-heading-decision {
+	background: var(--surface-accent);
+}
+
+.design-hero-illustration {
+	display: block;
+	width: 100%;
+	height: auto;
+}
+
+.design-art-sun-soft {
+	fill: var(--sun-soft);
+}
+
+.design-art-sun {
+	fill: var(--sun);
+}
+
+.design-art-accent-soft {
+	fill: var(--accent-soft);
+}
+
+.design-art-surface {
+	fill: var(--surface);
+}
+
+.design-art-ink {
+	fill: var(--ink);
+}
+
+.design-art-line,
+.design-art-accent,
+.design-art-surface-stroke {
+	fill: none;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	stroke-width: 8;
+}
+
+.design-art-line {
+	stroke: var(--accent-line);
+}
+
+.design-art-accent {
+	stroke: var(--accent);
+}
+
+.design-art-surface-stroke {
+	stroke: var(--surface);
+}
+
+@media (max-width: 768px) {
+	.design-direction-hero,
+	.design-screen-grid,
+	.design-state-grid,
+	.design-home-mock,
+	.design-detail-layout {
+		grid-template-columns: 1fr;
+	}
+
+	.design-direction-hero,
+	.design-screen {
+		padding: var(--space-4);
+	}
+}
+
 @media (max-width: 480px) {
 	body {
 		padding: var(--space-4);
@@ -1509,7 +2009,8 @@ main p {
 	 */
 	.issue-card,
 	.comment-card,
-	.location {
+	.location,
+	.issue-filters {
 		padding-left: var(--space-3);
 		padding-right: var(--space-3);
 	}

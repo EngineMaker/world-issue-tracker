@@ -21,6 +21,24 @@ import {
  * ラベルは `packages/shared` の辞書から引く（Issue #82）。ここに写すと
  * 一覧と詳細で同じステータスが違う表記になる。
  */
+/*
+ * 段階ごとのクラス名。`status-pill-${status}` と組み立てれば短く書けるが、
+ * それをすると `style-coverage.test.tsx` の突き合わせ（クラス名を文字列
+ * リテラルとして読み、CSS 側に定義があるかを照合する）から静かに外れる。
+ * **検査が効いているように見えて効かなくなる**ため、明示的に並べる。
+ *
+ * `Record<IssueStatus, string>` にしているので、段階が増えたときは
+ * ここが型エラーになって気付ける。
+ */
+const STATUS_CLASS: Record<IssueStatus, string> = {
+	open: "status-pill status-pill-open",
+	triaged: "status-pill status-pill-triaged",
+	in_progress: "status-pill status-pill-in_progress",
+	review: "status-pill status-pill-review",
+	resolved: "status-pill status-pill-resolved",
+	closed: "status-pill status-pill-closed",
+};
+
 export function StatusPill({
 	status,
 	locale = DEFAULT_LOCALE,
@@ -41,7 +59,7 @@ export function StatusPill({
 	const fill = (index + 1) / ISSUE_STATUS_VALUES.length;
 
 	return (
-		<span className={`status-pill status-pill-${status}`}>
+		<span className={STATUS_CLASS[status]}>
 			<span
 				className="status-pill-mark"
 				aria-hidden="true"

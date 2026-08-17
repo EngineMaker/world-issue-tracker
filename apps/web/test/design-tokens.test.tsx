@@ -95,6 +95,10 @@ describe("トークンの定義", () => {
 		"--accent": "#1a7f5a",
 		"--accent-soft": "#e8f5ef",
 		"--accent-line": "#b8ddcb",
+		"--surface-muted": "#f1f5f2",
+		"--surface-accent": "#f3faf6",
+		"--sun": "#f3c76a",
+		"--sun-soft": "#fff4d6",
 		"--danger": "#b91c1c",
 		"--warning": "#b45309",
 		"--success": "#1a7f5a",
@@ -124,37 +128,29 @@ describe("トークンの定義", () => {
 		"--space-5": "1.25rem",
 		"--space-6": "1.5rem",
 
-		/*
-		 * ここから下は #94 で足すことが決まったトークン（#95 で実装）。
-		 *
-		 * #94 は「影 / 角丸の段階 / 遷移 / 行間 / 面で使う色の段階を足す」
-		 * ところまでを文章で決めており、それぞれの実寸は #95 で置いた。
-		 * 以後はこの表が正本になるので、実装に合わせて書き換えないこと。
-		 */
-
-		/* 節の区切り。0.25rem 刻みの続きにせず、用途の名前で 2 段階だけ持つ */
+		/* 節の区切り。0.25rem 刻みの続きにせず、用途の名前で 2 段階だけ持つ（#95） */
 		"--space-section": "2rem",
 		"--space-page": "3rem",
 
-		/* 行間。見出しは字が大きい分だけ本文より詰める */
-		"--leading-body": "1.7",
-		"--leading-heading": "1.3",
-
-		/* 角丸。以前は 4px / 6px が場当たりで混在していた */
-		"--radius-sm": "6px",
-		"--radius-md": "10px",
+		"--radius-sm": "0.25rem",
+		"--radius-md": "0.5rem",
+		"--radius-lg": "0.75rem",
 		"--radius-pill": "999px",
-
-		/* 影。色は無彩色の黒ではなく --ink に寄せて、緑がかった面と喧嘩させない */
-		"--shadow-raised": "0 1px 2px rgba(28, 36, 32, 0.06)",
-		"--shadow-hover": "0 4px 12px rgba(28, 36, 32, 0.1)",
-
-		/* 遷移。速い方は色や影、遅い方は寸法が動くもの */
-		"--transition-fast": "120ms ease-out",
-		"--transition-slow": "200ms ease-out",
+		"--shadow-card": "0 8px 24px rgba(28, 36, 32, 0.08)",
+		"--shadow-card-hover": "0 12px 28px rgba(28, 36, 32, 0.12)",
+		"--shadow-button": "0 4px 16px rgba(26, 127, 90, 0.18)",
+		"--shadow-marker": "0 0 0 1px rgba(0, 0, 0, 0.4)",
+		"--leading-tight": "1.2",
+		"--leading-snug": "1.4",
+		"--leading-normal": "1.6",
+		"--tracking-tight": "-0.01em",
+		"--tracking-normal": "0",
+		"--transition-fast": "160ms ease",
+		"--transition-base": "240ms ease",
 
 		/*
-		 * ライフサイクル 6 段階の色。進むほど --accent（緑）に近づく。
+		 * ライフサイクル 6 段階の色（#95）。#94 の見本には無かったので
+		 * ここで新しく足した。進むほど --accent（緑）に近づく。
 		 * 下の「ピルの文字色がコントラスト比を満たす」が、この組み合わせを
 		 * 実際に計算して検証している
 		 */
@@ -170,10 +166,6 @@ describe("トークンの定義", () => {
 		"--status-resolved-soft": "#e8f5ef",
 		"--status-closed": "#5d6763",
 		"--status-closed-soft": "#f2f4f3",
-
-		/* ヒーローと空の状態にだけ使う暖色。緑と競合しないよう彩度を抑えてある */
-		"--sun": "#a1522a",
-		"--sun-soft": "#fdf1e7",
 	};
 
 	for (const [name, value] of Object.entries(expected)) {
@@ -289,6 +281,62 @@ describe("文字サイズは 5 段階に収まっている", () => {
 			expect(rule?.[1]).toContain(`font-size: ${token}`);
 		});
 	}
+});
+
+describe("見出し・角丸・影・遷移の決定が CSS に反映されている", () => {
+	function ruleBody(selector: string): string {
+		const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const rule = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
+		expect(rule, `${selector} の定義が見つからない`).not.toBeNull();
+		return rule?.[1] ?? "";
+	}
+
+	it("body の行間は --leading-normal を使う", () => {
+		expect(ruleBody("body")).toContain("line-height: var(--leading-normal)");
+	});
+
+	it("h1 / h2 / .site-header-title は見出し用の行間と字送りを使う", () => {
+		expect(ruleBody("h1")).toContain("line-height: var(--leading-tight)");
+		expect(ruleBody("h1")).toContain("letter-spacing: var(--tracking-tight)");
+		expect(ruleBody("h2")).toContain("line-height: var(--leading-snug)");
+		expect(ruleBody(".site-header-title")).toContain(
+			"font-size: var(--text-heading-site)",
+		);
+		expect(ruleBody(".site-header-title")).toContain(
+			"line-height: var(--leading-snug)",
+		);
+	});
+
+	it("主要なカードと大きい面は角丸・影をトークンで決める", () => {
+		for (const selector of [
+			".issue-card",
+			".comment-card",
+			".issue-filters",
+			".location",
+			".issue-map-view",
+		]) {
+			const body = ruleBody(selector);
+			expect(body).toContain("border-radius: var(--radius-md)");
+			expect(body).toContain("box-shadow: var(--shadow-card)");
+		}
+	});
+
+	it("リンクとボタンは遷移トークンを使う", () => {
+		const linkRule = ruleBody("a");
+		expect(linkRule).toContain("color var(--transition-fast)");
+		expect(linkRule).toContain("background-color var(--transition-fast)");
+		expect(linkRule).toContain("box-shadow var(--transition-base)");
+		expect(ruleBody(".button-primary")).toContain(
+			"box-shadow: var(--shadow-button)",
+		);
+		expect(ruleBody(".button-primary")).toContain("var(--transition-fast)");
+		expect(ruleBody(".button-secondary")).toContain("var(--transition-fast)");
+	});
+
+	it("border-radius に 4px / 6px を直書きしない", () => {
+		const withoutRoot = css.replace(/:root\s*\{[^}]*\}/g, "");
+		expect(withoutRoot.match(/border-radius:\s*(4px|6px)/g) ?? []).toEqual([]);
+	});
 });
 
 describe("同じ意味の色が同じ値で描かれる", () => {
@@ -578,11 +626,7 @@ describe("#95 で足した部品がトークン経由で描かれている", () 
 	 */
 	const tokenBindings: Record<string, string[]> = {
 		// カードの面と浮き。#94 が「border だけで平面的」と指摘した点
-		"issue-card": [
-			"var(--surface)",
-			"var(--shadow-raised)",
-			"var(--radius-md)",
-		],
+		"issue-card": ["var(--surface)", "var(--shadow-card)", "var(--radius-md)"],
 		// 0 件のまとまり。暖色を使うのはヒーローとここだけ
 		"empty-state": ["var(--sun-soft)", "var(--radius-md)"],
 		// ヒーロー。文字は絵に重ねず隣に置く
@@ -612,7 +656,7 @@ describe("#95 で足した部品がトークン経由で描かれている", () 
 			/:root\s*\{[^}]*\}/g,
 			"",
 		);
-		for (const token of ["--transition-fast", "--transition-slow"]) {
+		for (const token of ["--transition-fast", "--transition-base"]) {
 			expect(
 				withoutRoot.includes(`var(${token})`),
 				`${token} を参照している箇所が無い`,
@@ -629,7 +673,7 @@ describe("#95 で足した部品がトークン経由で描かれている", () 
 			/:root\s*\{[^}]*\}/g,
 			"",
 		);
-		for (const token of ["--shadow-raised", "--shadow-hover"]) {
+		for (const token of ["--shadow-card", "--shadow-card-hover"]) {
 			expect(
 				withoutRoot.includes(`var(${token})`),
 				`${token} を参照している箇所が無い`,

@@ -24,7 +24,7 @@ import type { IssueScope, IssueStatus } from "@world-issue-tracker/shared";
 
 /**
  * `issues` テーブルの 1 行（`0001_initial.sql` / `0002_add_user_id.sql` /
- * `0007_add_photo.sql`）。
+ * `0007_add_photo.sql` / `0008_add_is_anonymous.sql`）。
  *
  * `scope` / `status` は CHECK 制約で値が固定されているため、
  * `packages/shared` の enum をそのまま当てる。制約の値と enum の値が
@@ -38,6 +38,11 @@ import type { IssueScope, IssueStatus } from "@world-issue-tracker/shared";
  * 両方が揃っているか両方とも NULL かのどちらか（`0007` のコメント参照）。
  * どちらも内部フィールドで、レスポンスには載せない
  * （公開する形は `routes/issues.ts` の `PublicIssue` 側で決める）。
+ *
+ * `is_anonymous` は SQLite に真偽値型が無いため INTEGER の 0/1 で入る
+ * （`0008` のコメント参照）。この型が `number` なのはその生の姿を写した
+ * もので、レスポンスに載る真偽値への変換は `toPublicIssue` が行う。
+ * NOT NULL DEFAULT 1 なので NULL は来ない。
  */
 export type IssueRow = {
 	id: string;
@@ -51,6 +56,7 @@ export type IssueRow = {
 	user_id: string | null;
 	photo_key: string | null;
 	photo_content_type: string | null;
+	is_anonymous: number;
 	created_at: string;
 	updated_at: string;
 };
