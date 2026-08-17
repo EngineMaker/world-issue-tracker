@@ -1,3 +1,7 @@
+import {
+	LEGACY_WEB_ORIGINS,
+	PRODUCTION_WEB_ORIGIN,
+} from "@world-issue-tracker/shared";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { clerkKeyKindWarning } from "./middleware/clerk";
@@ -23,8 +27,10 @@ export type Bindings = {
  */
 export const ALLOWED_ORIGINS = [
 	"http://localhost:3000",
-	"https://world-issue-tracker-web.mktoho.workers.dev",
-	"https://world-issue-tracker.pages.dev",
+	// 本番の入口。Clerk の本番インスタンスもこのドメインに紐づく（#98）
+	PRODUCTION_WEB_ORIGIN,
+	// 切り替え前の入口。消してよくなる条件は shared 側のコメントを参照
+	...LEGACY_WEB_ORIGINS,
 ];
 
 export function createApp() {

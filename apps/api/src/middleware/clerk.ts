@@ -1,5 +1,9 @@
 import { clerkMiddleware } from "@hono/clerk-auth";
-import { clerkKeyKind } from "@world-issue-tracker/shared";
+import {
+	clerkKeyKind,
+	LEGACY_WEB_ORIGINS,
+	PRODUCTION_WEB_ORIGIN,
+} from "@world-issue-tracker/shared";
 import type { Context, Next } from "hono";
 
 /**
@@ -68,6 +72,24 @@ export function resetClerkKeyWarning(): void {
 }
 
 /**
+ * トークンの発行元として許可するオリジン（#98）。
+ *
+ * Clerk のドキュメントが「サブドメインの cookie 漏洩と CSRF への対策として
+ * 強く推奨」としている allowlist。指定しないと、**同じ root ドメイン配下の
+ * 別サブドメインが侵害された場合に、そこで作られたセッションがこのアプリでも
+ * 通ってしまう**。`emaker.dev` は reactions.emaker.dev とゾーンを共有して
+ * いるため、まさにこの警告が当てはまる。
+ *
+ * localhost を含めているのは開発用。本番のトークンは本番のドメインでしか
+ * 発行されないので、これを許可しても本番側の検証が緩むことはない。
+ */
+const AUTHORIZED_PARTIES = [
+	"http://localhost:3000",
+	PRODUCTION_WEB_ORIGIN,
+	...LEGACY_WEB_ORIGINS,
+];
+
+/**
  * 認証が必要なルートにだけ差す Clerk ミドルウェア。
  *
  * `clerkMiddleware()` を `app.use()` で全ルートに適用すると、Clerk のキーが
@@ -86,9 +108,30 @@ export function resetClerkKeyWarning(): void {
  * これを差すだけで済む（キー不在時は「未ログイン扱い」で公開部分が生き残る）。
  */
 export function clerkAuth() {
-	const middleware = clerkMiddleware();
-
 	return async function withClerk(c: Context, next: Next) {
+		/*
+		 * ミドルウェアはリクエストごとに作る。キーを明示的に渡すため。
+		 *
+		 * `@hono/clerk-auth` の実装は次の形になっている:
+		 *
+		 *   const { secretKey, publishableKey, ... } = options || {
+		 *     secretKey: clerkEnv.CLERK_SECRET_KEY || "",
+		 *     publishableKey: clerkEnv.CLERK_PUBLISHABLE_KEY || "",
+		 *   }
+		 *
+		 * つまり **options を渡した時点で env からキーを読む経路が丸ごと
+		 * 消える**。`authorizedParties` だけを渡すとキーが空になり、
+		 * 「Missing Clerk Secret key」で認証が全滅する。Workers ではキーが
+		 * env（Secrets）にしか無いので、ここで自分で読んで渡す必要がある。
+		 *
+		 * 生成コストは Clerk クライアントの構築のみで、外部通信は伴わない。
+		 */
+		const middleware = clerkMiddleware({
+			secretKey: c.env?.CLERK_SECRET_KEY,
+			publishableKey: c.env?.CLERK_PUBLISHABLE_KEY,
+			authorizedParties: AUTHORIZED_PARTIES,
+		});
+
 		try {
 			return await middleware(c, next);
 		} catch (err) {
