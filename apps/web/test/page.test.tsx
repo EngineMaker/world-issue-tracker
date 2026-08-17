@@ -4,6 +4,7 @@ import "./helpers/mock-cookies";
 import { describe, expect, it } from "bun:test";
 import {
 	DEFAULT_LOCALE,
+	ISSUE_LIFECYCLE_HIGHLIGHT_VALUES,
 	ISSUE_SCOPE_LABELS,
 	ISSUE_STATUS_LABELS,
 	IssueScope,
@@ -620,6 +621,66 @@ describe("トップページ", () => {
 		expect(html).toContain("最初の解決を待っています");
 		// 見出しは残す（帯そのものが消えると面のコントラストが無くなる）
 		expect(html).toContain("実際に、直っています");
+	});
+
+	/*
+	 * 解決までの流れ（B6）。
+	 *
+	 * トップページに出す段階は 5 つ（「クローズ」を除く）。ここを
+	 * `ISSUE_STATUS_VALUES` に戻すと 6 つに増えるが、描画結果の見た目は
+	 * 似ているので気付きにくい。実際に描いて数を数える。
+	 */
+	it("解決までの流れは「クローズ」を除いた 5 段階で出す", async () => {
+		const { html } = await renderHome(
+			Response.json({ data: [sampleIssue], total: 1, limit: 20, offset: 0 }),
+		);
+
+		const steps = html.split('<li class="status-step">').length - 1;
+		expect(steps, "段階の数が想定と違う").toBe(
+			ISSUE_LIFECYCLE_HIGHLIGHT_VALUES.length,
+		);
+		expect(steps, "「クローズ」を含む 6 段階のまま").toBe(5);
+
+		// 流れの中に「クローズ」のピルが出ていないこと
+		const flow = html.slice(html.indexOf('<ol class="statuses">'));
+		expect(
+			flow.slice(0, flow.indexOf("</ol>")),
+			"流れに「クローズ」が残っている",
+		).not.toContain(ISSUE_STATUS_LABELS[DEFAULT_LOCALE].closed);
+	});
+
+	/*
+	 * 並びから外しただけだと、その状態が存在すること自体が画面から
+	 * 失われる。折りたたみで残していることを見る
+	 */
+	it("流れから外した「クローズ」は折りたたみで補う", async () => {
+		const { html } = await renderHome(
+			Response.json({ data: [sampleIssue], total: 1, limit: 20, offset: 0 }),
+		);
+
+		expect(html).toContain("<details");
+		expect(html).toContain("解決しなかったときは");
+		// 説明の中では「クローズ」に触れている
+		expect(html).toContain(ISSUE_STATUS_LABELS[DEFAULT_LOCALE].closed);
+	});
+
+	/*
+	 * B6 で絞ったのは**トップページの表示だけ**で、状態そのものは 6 つのまま。
+	 *
+	 * 絞り込みからも外すと、実際に存在する「クローズ」の Issue を
+	 * 探す手段が無くなる。トップページの見た目を整える変更が、
+	 * 運用の機能を削っていないことを見る
+	 */
+	it("絞り込みでは「クローズ」も選べる（表示を絞っただけ）", () => {
+		const html = renderToStaticMarkup(
+			IssueFilterForm({ filters: DEFAULT_ISSUE_FILTERS }),
+		);
+
+		for (const status of IssueStatus.options) {
+			expect(html, `${status} が絞り込みから消えている`).toContain(
+				`value="${status}"`,
+			);
+		}
 	});
 
 	/*

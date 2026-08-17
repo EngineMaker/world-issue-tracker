@@ -710,6 +710,39 @@ main p {
 }
 
 /*
+ * 流れから外した状態の補足（B6）。
+ *
+ * `details` のブラウザ既定は、三角の印と字が詰まって出るだけで、
+ * 押せる場所であることが伝わりにくい。開ける手がかりとして
+ * 見出しの側に色と太さを与える。
+ */
+.statuses-more {
+	margin-top: var(--space-4);
+	font-size: var(--text-sm);
+}
+
+.statuses-more summary {
+	cursor: pointer;
+	color: var(--accent);
+	font-weight: 600;
+	/* 既定の三角と字の間が詰まりすぎるので、印の後ろに余白を取る */
+	padding-left: var(--space-1);
+}
+
+.statuses-more summary:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: var(--radius-sm);
+}
+
+.statuses-more p {
+	margin: var(--space-2) 0 0;
+	color: var(--ink-soft);
+	/* 印のぶん字下げして、開いた本文が見出しと揃って見えるようにする */
+	padding-left: var(--space-4);
+}
+
+/*
  * 解決の実例の帯（B5）。
  *
  * ページ全体が同じ明度（--ground）で続いていて、どこも同じ強さに見える。

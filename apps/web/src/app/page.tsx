@@ -1,8 +1,8 @@
 import {
 	getUiMessages,
+	ISSUE_LIFECYCLE_HIGHLIGHT_VALUES,
 	ISSUE_SCOPE_LABELS,
 	IssueScope,
-	IssueStatus,
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import { DEFAULT_ISSUE_FILTERS, fetchIssues } from "../lib/issues";
@@ -159,8 +159,14 @@ export default async function Home() {
 				  並び順が既に持っている。読み上げに「右矢印」が挟まると
 				  段階の名前が続けて読めなくなるので `aria-hidden` で外す
 				*/}
+				{/*
+				  出す段階は 5 つ（B6）。「クローズ」は解決までの道筋には
+				  乗っていない別の出口なので、この流れからは外して下の
+				  折りたたみで補う。状態そのものは 6 つのままで、
+				  絞り込みと状態の変更では 6 つすべてを選べる
+				*/}
 				<ol className="statuses">
-					{IssueStatus.options.map((status, index) => (
+					{ISSUE_LIFECYCLE_HIGHLIGHT_VALUES.map((status, index) => (
 						<li className="status-step" key={status}>
 							{index > 0 ? (
 								<span className="status-arrow" aria-hidden="true">
@@ -171,6 +177,18 @@ export default async function Home() {
 						</li>
 					))}
 				</ol>
+				{/*
+				  流れから外した「クローズ」の補足（B6）。
+				  並びから消すだけだと、その状態が存在すること自体が
+				  画面から失われる。読みたい人だけが開ける形にして残す。
+
+				  `details` を使うのは、開閉に JS が要らないため。
+				  JS の読み込み前でも開けるし、読み上げにも既定で対応している
+				*/}
+				<details className="statuses-more">
+					<summary>{messages.home.statusesMoreLabel}</summary>
+					<p>{messages.home.statusesMoreBody}</p>
+				</details>
 			</section>
 
 			{/*

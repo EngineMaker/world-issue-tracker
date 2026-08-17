@@ -50,6 +50,26 @@ export const ISSUE_STATUS_VALUES = [
 export const IssueStatus = z.enum(ISSUE_STATUS_VALUES);
 export type IssueStatus = z.infer<typeof IssueStatus>;
 
+/**
+ * トップページで「解決までの流れ」として見せる段階（B6）。
+ *
+ * `ISSUE_STATUS_VALUES` から `closed` を除いたもの。6 段階すべてを
+ * 並べると、初めて来た人がまず読む場所に運用上の細かさが出すぎる。
+ * 知りたいのは「書いたら直るのか」であって、状態の全一覧ではない。
+ *
+ * `closed` を選んだのは、あれが**解決までの道筋には乗っていない**ため。
+ * 解決せずに終わる場合（対応しないと決まった、重複していた等）に使う出口で、
+ * 「Issue が解決するまで」という節の流れとは意味が違う。
+ *
+ * **画面に出す段階を絞るだけで、状態そのものは 6 つのまま。**
+ * 絞り込み（`IssueFilterForm`）と状態の変更（`StatusControl`）は
+ * `ISSUE_STATUS_VALUES` を使い続ける。そちらから外すと、実際に存在する
+ * 状態を選べなくなって運用できない。
+ */
+export const ISSUE_LIFECYCLE_HIGHLIGHT_VALUES = ISSUE_STATUS_VALUES.filter(
+	(status) => status !== "closed",
+);
+
 export const CreateIssueSchema = z.object({
 	title: z.string().min(1).max(200),
 	description: z.string().min(1).max(5000),
@@ -436,6 +456,16 @@ const JA_UI_MESSAGES = {
 		statusesHeading: "Issue が解決するまで",
 		statusesBody: "投稿された Issue は、次の順に状態が変わっていきます。",
 		/*
+		 * 流れから外した「クローズ」の補足（B6）。
+		 *
+		 * 折りたたみにして、開いたときだけ読めるようにする。並びから
+		 * 消すだけだと「クローズという状態が存在すること」自体が画面から
+		 * 失われ、一覧の絞り込みに出てくる語の説明がどこにも無くなる
+		 */
+		statusesMoreLabel: "解決しなかったときは",
+		statusesMoreBody:
+			"対応しないと決まった Issue や、他の Issue と重複していた Issue は「クローズ」になります。解決までの道筋とは別の出口なので、上の流れには入れていません。",
+		/*
 		 * 解決の実例を見せる帯（B5）。
 		 *
 		 * ここに出すのは実際に解決した Issue で、文言は API から取れない
@@ -768,6 +798,9 @@ const EN_UI_MESSAGES: UiMessages = {
 			"Personal worries and global problems are part of the same continuum. Every issue is posted at one of these five levels.",
 		statusesHeading: "How an issue gets resolved",
 		statusesBody: "A posted issue moves through these states in order.",
+		statusesMoreLabel: "When an issue is not resolved",
+		statusesMoreBody:
+			"An issue is closed when we decide not to act on it, or when it duplicates another one. That is a different exit from the path above, so it is not part of the flow.",
 		solvedHeading: "Things really do get fixed",
 		solvedEmpty: "Waiting for the first one to be resolved.",
 		solvedEmptyAction: "Write an issue",
