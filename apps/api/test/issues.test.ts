@@ -37,6 +37,7 @@ type IssueInput = {
 	latitude: number;
 	longitude: number;
 	category?: string;
+	is_anonymous?: boolean;
 };
 
 /**
@@ -463,6 +464,147 @@ describe("Issues CRUD", () => {
 				const res = await createIssue([] as never);
 				expect(res.status).toBe(400);
 			});
+		});
+	});
+
+	// --- 匿名で起票するかどうか（#88）---
+	//
+	// 「書く側は既定で匿名、手を挙げる側は名乗る」という非対称を守る。
+	// ここが検証するのは「既定が匿名であること」と「選んだ値が実際に
+	// 保存され、レスポンスに反映されること」の 2 点。
+	// 実際の表示名は出さない（#67）ので、ここに `user_id` は現れない。
+	describe("Anonymity", () => {
+		it("defaults to anonymous when is_anonymous is omitted", async () => {
+			const res = await createIssue();
+			expect(res.status).toBe(201);
+			const body = await readBody(res);
+
+			// レスポンスは真偽値。SQLite の 0/1 がそのまま出ていないこと。
+			expect(body.is_anonymous).toBe(true);
+
+			// DB にも匿名として保存されていること。レスポンスだけを見ていると、
+			// 保存は 0（名乗る）なのに返す値だけ true という実装でも通る。
+			const stored = await readStoredIssue(body.id);
+			expect(stored.is_anonymous).toBe(1);
+		});
+
+		it("stores is_anonymous=false when the author chooses to be named", async () => {
+			const res = await createIssue({ ...validIssue, is_anonymous: false });
+			expect(res.status).toBe(201);
+			const body = await readBody(res);
+
+			expect(body.is_anonymous).toBe(false);
+
+			const stored = await readStoredIssue(body.id);
+			expect(stored.is_anonymous).toBe(0);
+		});
+
+		it("stores is_anonymous=true when explicitly requested", async () => {
+			const res = await createIssue({ ...validIssue, is_anonymous: true });
+			const body = await readBody(res);
+
+			expect(body.is_anonymous).toBe(true);
+			expect((await readStoredIssue(body.id)).is_anonymous).toBe(1);
+		});
+
+		// 真偽値以外は弾く。`"false"` のような文字列を通すと、Zod では truthy に
+		// なって「名乗る」つもりの指定が匿名として保存される（またはその逆）。
+		it("rejects a non-boolean is_anonymous", async () => {
+			for (const value of ["false", 0, 1, null]) {
+				const res = await createIssue({
+					...validIssue,
+					is_anonymous: value as never,
+				});
+				expect(res.status, `is_anonymous=${JSON.stringify(value)}`).toBe(400);
+			}
+		});
+
+		// カラム追加前に入った行は匿名として読めること。
+		//
+		// マイグレーションの DEFAULT が匿名側でないと、過去の投稿が遡って
+		// 「名乗っている」扱いで公開される。取り返しが付かない側の事故なので、
+		// API を通した読み取り（一覧・詳細の両方）で確かめる。
+		it("treats rows created before the column existed as anonymous", async () => {
+			await env.DB.prepare(
+				`INSERT INTO issues (id, title, description, scope, latitude, longitude, user_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			)
+				.bind(
+					"legacy-issue",
+					"Legacy",
+					"created before is_anonymous existed",
+					"community",
+					0,
+					0,
+					"test-user-123",
+					"2024-01-01 00:00:00",
+					"2024-01-01 00:00:00",
+				)
+				.run();
+
+			setMockUserId(null);
+
+			const detail = await readBody(
+				await app.request("/issues/legacy-issue", {}, env),
+			);
+			expect(detail.is_anonymous).toBe(true);
+
+			const list = await readBody(await app.request("/issues", {}, env));
+			expect(list.data).toHaveLength(1);
+			expect(list.data[0].is_anonymous).toBe(true);
+		});
+
+		// PATCH では変えられないこと（#88 の範囲外）。
+		//
+		// 投稿後に匿名を解除できると、既に匿名として読まれた投稿の
+		// 前提が後から覆る。`UpdateIssueSchema` に無いキーなので、
+		// 送っても無視される（Zod は未知のキーを落とす）。
+		it("ignores is_anonymous in PATCH", async () => {
+			const created = await readBody(await createIssue());
+			expect(created.is_anonymous).toBe(true);
+
+			const res = await app.request(
+				`/issues/${created.id}`,
+				{
+					method: "PATCH",
+					headers: {
+						"Content-Type": "application/json",
+						Origin: ALLOWED_ORIGIN,
+					},
+					body: JSON.stringify({ title: "Updated", is_anonymous: false }),
+				},
+				env,
+			);
+
+			expect(res.status).toBe(200);
+			const body = await readBody(res);
+			expect(body.title).toBe("Updated");
+			expect(body.is_anonymous).toBe(true);
+			expect((await readStoredIssue(created.id)).is_anonymous).toBe(1);
+		});
+
+		// 匿名かどうかを返しても `user_id` は漏れないこと。
+		//
+		// この Issue で足したのは真偽値だけで、起票者の識別子ではない。
+		// 「名乗っている投稿だから user_id を出してよい」と広げると、
+		// #8 で塞いだ穴が別の形で開く。
+		it("never exposes user_id even when the author is named", async () => {
+			setMockUserId("user_2abcSECRETclerkid");
+			const created = await readBody(
+				await createIssue({ ...validIssue, is_anonymous: false }),
+			);
+
+			setMockUserId(null);
+			const detail = await app.request(`/issues/${created.id}`, {}, env);
+			const body = await readBody(detail);
+			expect(body.is_anonymous).toBe(false);
+			expect(body).not.toHaveProperty("user_id");
+			expect(JSON.stringify(body)).not.toContain("user_2abcSECRETclerkid");
+
+			const list = await app.request("/issues", {}, env);
+			expect(JSON.stringify(await readBody(list))).not.toContain(
+				"user_2abcSECRETclerkid",
+			);
 		});
 	});
 
@@ -2051,6 +2193,8 @@ describe("Issues CRUD", () => {
 			// 写真（#65）は有無だけを返す。R2 のキー（`photo_key`）は内部の
 			// 識別子なので載せない。画像そのものは `GET /issues/:id/photo`
 			"has_photo",
+			// 匿名で起票されたかどうか（#88）。真偽値だけで、起票者は載らない。
+			"is_anonymous",
 		];
 
 		beforeEach(async () => {

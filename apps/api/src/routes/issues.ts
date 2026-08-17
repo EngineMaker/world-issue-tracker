@@ -53,6 +53,10 @@ export const PUBLIC_ISSUE_COLUMNS = [
 	"category",
 	"created_at",
 	"updated_at",
+	// 匿名で起票されたかどうか（#88）。返すのは真偽値だけで、`user_id` は
+	// ここに足さない。「誰が書いたか」を伏せる方針は変えず、
+	// 「名乗っているかどうか」だけを画面が出し分けられるようにする。
+	"is_anonymous",
 ] as const;
 
 /**
@@ -72,6 +76,16 @@ const INTERNAL_PHOTO_COLUMNS = [
 ] as const satisfies readonly (keyof IssueRow)[];
 
 /**
+ * JSON で真偽値として返すカラム。
+ *
+ * SQLite に真偽値型は無く、`is_anonymous` は INTEGER の 0/1 として
+ * 返ってくる。そのまま載せると JSON にも 0/1 が出て、クライアント側で
+ * `0` を falsy として扱うか数値として扱うかが実装ごとにぶれる。
+ * 「匿名かどうか」は真偽値だという契約をレスポンスの形で固定する。
+ */
+const BOOLEAN_ISSUE_COLUMNS: ReadonlySet<string> = new Set(["is_anonymous"]);
+
+/**
  * レスポンスに載る Issue。`IssueRow` から公開カラムだけを取り出し、
  * 写真の有無を表す派生フィールドを足したもの。
  *
@@ -86,7 +100,10 @@ const INTERNAL_PHOTO_COLUMNS = [
  * `Defence layers` で、実際に足すとあのテストが落ちる。
  * このリストを触るときは「型が通ったから安全」と判断しないこと。
  */
-type PublicIssue = Pick<IssueRow, (typeof PUBLIC_ISSUE_COLUMNS)[number]> & {
+type PublicIssue = Omit<
+	Pick<IssueRow, (typeof PUBLIC_ISSUE_COLUMNS)[number]>,
+	"is_anonymous"
+> & {
 	/**
 	 * この Issue に写真が添付されているか。
 	 *
@@ -94,6 +111,16 @@ type PublicIssue = Pick<IssueRow, (typeof PUBLIC_ISSUE_COLUMNS)[number]> & {
 	 * 必要なのは有無だけで、キーの中身は要らない。
 	 */
 	has_photo: boolean;
+
+	/**
+	 * 匿名で起票されたか（#88）。
+	 *
+	 * `IssueRow` 側は SQLite の生の姿である `number`（0/1）だが、
+	 * レスポンスでは真偽値として返す（`toPublicIssue` が変換する）。
+	 * ここで `Omit` して上書きしているのはそのため。素の `Pick` のままだと
+	 * 型が `number` になり、実際に返る値と食い違う。
+	 */
+	is_anonymous: boolean;
 };
 
 /**
@@ -136,8 +163,16 @@ export const PUBLIC_SELECT = [
 export function toPublicIssue(row: IssueRowLike): PublicIssue {
 	return {
 		...(Object.fromEntries(
-			PUBLIC_ISSUE_COLUMNS.map((column) => [column, row[column]]),
-		) as Pick<IssueRow, (typeof PUBLIC_ISSUE_COLUMNS)[number]>),
+			PUBLIC_ISSUE_COLUMNS.map((column) => [
+				column,
+				// 真偽値のカラムだけ 0/1 を boolean に直す。NULL は「値が無い」
+				// ではなく「匿名でない」に倒さないよう、Boolean() ではなく
+				// 明示的に 0 との比較で判定する（NOT NULL なので通常は来ない）。
+				BOOLEAN_ISSUE_COLUMNS.has(column) ? row[column] !== 0 : row[column],
+			]),
+			// 真偽値へ直したカラムがあるので、`IssueRow` そのままの形にはならない。
+			// 変換後の形（＝レスポンスの形）で受ける
+		) as Omit<PublicIssue, "has_photo">),
 		has_photo: Boolean(row.photo_key),
 	};
 }
@@ -425,8 +460,15 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 		photoContentType = validated.contentType;
 	}
 
-	const { title, description, scope, latitude, longitude, category } =
-		parsed.data;
+	const {
+		title,
+		description,
+		scope,
+		latitude,
+		longitude,
+		category,
+		is_anonymous: isAnonymous,
+	} = parsed.data;
 	const auth = getAuth(c);
 	const userId = auth?.userId;
 
@@ -435,8 +477,8 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 	// `created_at` と `updated_at` が作成時点でずれる。
 	const result = await c.env.DB.prepare(
 		`WITH ts(v) AS (SELECT ${NEXT_CREATED_AT_SQL})
-     INSERT INTO issues (title, description, scope, latitude, longitude, category, user_id, created_at, updated_at)
-     SELECT ?, ?, ?, ?, ?, ?, ?, v, v FROM ts
+     INSERT INTO issues (title, description, scope, latitude, longitude, category, user_id, is_anonymous, created_at, updated_at)
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, v, v FROM ts
      RETURNING ${PUBLIC_SELECT}`,
 	)
 		.bind(
@@ -447,6 +489,9 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 			longitude,
 			category ?? null,
 			userId,
+			// D1 に真偽値をそのまま渡せないため 0/1 に直す。
+			// スキーマの `.default(true)` が効いているので undefined は来ない。
+			isAnonymous ? 1 : 0,
 		)
 		.first<IssueRowLike>();
 

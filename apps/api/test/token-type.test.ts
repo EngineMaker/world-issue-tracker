@@ -87,6 +87,10 @@ async function issueExists(id: string): Promise<boolean> {
  * 確かめるため。
  */
 describe("Machine tokens must not pass requireAuth", () => {
+	// スキーマは実マイグレーションから作る。手書きの CREATE TABLE を
+	// 持たせると、`migrations/` にカラムが増えてもここだけ古いままになり、
+	// このファイルのテストが本番と別物のスキーマに対して緑になる
+	// （`schema.test.ts` が同じ理由で手書き定数を廃した）。
 	beforeAll(async () => {
 		// スキーマは実マイグレーションから作る。以前はここに手書きの
 		// `CREATE TABLE` を置いていたが、`migrations/` と同期する仕組みが

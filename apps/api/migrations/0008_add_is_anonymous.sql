@@ -1,0 +1,17 @@
+-- Issue を匿名で出すかどうか（#88）。
+--
+-- 困りごとの投稿は生活圏を晒す側面があるため、安全側（匿名）を既定にする。
+-- 匿名を既定にして後から名乗れるようにするのは容易だが、一度表示したものを
+-- 後から匿名化しても、既に見られた事実は消せない。
+--
+-- DEFAULT 1（匿名）にしているのは、このカラムが無い時代に入った既存行が
+-- 遡って名前を出さないようにするため。`ALTER TABLE ADD COLUMN` は既存行の
+-- 値をこの DEFAULT で埋めるので、過去の投稿はすべて匿名として読まれる。
+-- Zod 側（`CreateIssueSchema` の `.default(true)`）にも同じ既定値を置いており、
+-- どちらか片方が消えても匿名側に倒れる。
+--
+-- 型が INTEGER なのは SQLite に真偽値型が無いため（0/1 で持つ）。
+-- CHECK 制約は付けていない。D1 の `ALTER TABLE ADD COLUMN` は
+-- 制約付きのカラム追加を受け付けない場合があり、値を作るのはアプリ側の
+-- Zod（`z.boolean()`）に限られるので、DB 側で二重に縛る必要が薄い。
+ALTER TABLE issues ADD COLUMN is_anonymous INTEGER NOT NULL DEFAULT 1;

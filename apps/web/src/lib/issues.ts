@@ -41,6 +41,14 @@ export type PublicIssue = {
 	 * `GET /issues/:id/photo` から読む。
 	 */
 	has_photo: boolean;
+
+	/**
+	 * 匿名で起票されたかどうか（#88）。
+	 *
+	 * 真の場合は「匿名の方」として表示する。偽の場合は起票者が名乗ることを
+	 * 選んでいるが、**表示名そのものはこのレスポンスに含まれない**（#67）。
+	 */
+	is_anonymous: boolean;
 };
 
 const SCOPES: readonly string[] = IssueScope.options;
@@ -72,6 +80,7 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 		created_at,
 		updated_at,
 		has_photo,
+		is_anonymous,
 	} = value;
 
 	if (typeof id !== "string") return null;
@@ -97,6 +106,20 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 	// 変更が画面に静かに影響する。
 	if (has_photo !== undefined && typeof has_photo !== "boolean") return null;
 
+	// `is_anonymous`（#88）も欠けていれば弾かないが、倒す先が逆になる。
+	//
+	// この値を返さない古い API に対して一覧ごと失敗させると、画面から
+	// Issue が消えるだけで、誰も匿名性の問題に気づけない。一方で
+	// 「名乗っている」に倒すのは、名乗るつもりのなかった投稿を晒すことに
+	// なり、取り返しが付かない。だから欠けていれば匿名として読む。
+	//
+	// ただし `0` / `"false"` のような**別の型の値**は弾く。SQLite の 0/1 が
+	// 変換されずに出てきたときに黙って truthy 判定するとちょうど逆の意味
+	// （0 = 匿名でない）に読めてしまうため、それは形の不一致として扱う。
+	if (is_anonymous !== undefined && typeof is_anonymous !== "boolean") {
+		return null;
+	}
+
 	return {
 		id,
 		title,
@@ -109,6 +132,7 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 		created_at,
 		updated_at,
 		has_photo: has_photo ?? false,
+		is_anonymous: is_anonymous ?? true,
 	};
 }
 

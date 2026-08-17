@@ -1,4 +1,5 @@
 import {
+	getIssueAnonymityLabel,
 	getUiMessages,
 	ISSUE_SCOPE_LABELS,
 	ISSUE_STATUS_LABELS,
@@ -101,6 +102,8 @@ export default async function IssueDetailPage({
 				<time dateTime={issue.created_at}>
 					{formatCreatedAt(issue.created_at)}
 				</time>
+				{" / "}
+				<span>{getIssueAnonymityLabel(issue.is_anonymous, locale)}</span>
 			</p>
 
 			{/*
@@ -151,6 +154,15 @@ export default async function IssueDetailPage({
 
 					<dt>{messages.issueDetail.category}</dt>
 					<dd>{issue.category ?? messages.issueDetail.categoryUnset}</dd>
+
+					{/*
+					  起票者（#88）。今は「名乗っているかどうか」しか出せない。
+					  実際の表示名は Clerk Backend API から引く必要があり、
+					  それは #67 の範囲。ここが「投稿者あり」のまま名前が
+					  出ないのは未完成なのではなく、意図した段階
+					*/}
+					<dt>{messages.issueDetail.author}</dt>
+					<dd>{getIssueAnonymityLabel(issue.is_anonymous, locale)}</dd>
 
 					<dt>{messages.issueDetail.location}</dt>
 					{/*
