@@ -158,6 +158,9 @@ describe("トークンの定義", () => {
 		/* 特大の見出し用（B1）。大きい字は同じ倍率でも行間・字間が広く見える */
 		"--leading-hero": "1.14",
 		"--tracking-hero": "-0.03em",
+		/* 濃い面（B5 の帯）の上に重ねる明るい面。白を置くと明るすぎる */
+		"--overlay-soft": "rgb(255 255 255 / 0.1)",
+		"--overlay-strong": "rgb(255 255 255 / 0.18)",
 		"--transition-fast": "160ms ease",
 		"--transition-base": "240ms ease",
 

@@ -527,12 +527,26 @@ describe("IssueCreated", () => {
  * その結線だけは、ページを実際に描画してみないと確認できない。
  */
 describe("トップページ", () => {
-	/** `globalThis.fetch` を差し替えてページを描画する。呼ばれた URL を返す。 */
-	async function renderHome(response: Response) {
+	/**
+	 * `globalThis.fetch` を差し替えてページを描画する。呼ばれた URL を返す。
+	 *
+	 * トップページは 2 本投げる。一覧（`fetchIssues()`）と、
+	 * 解決の実例（B5。`status=resolved` を付けた 1 件だけの取得）。
+	 * 同じ `Response` を 2 回返すと 2 度目が `Body already used` で落ちるので、
+	 * URL で振り分ける。`solved` を省いたときは 0 件を返す
+	 * （帯が空状態になるだけで、一覧の検証には影響しない）。
+	 */
+	async function renderHome(response: Response, solved?: Response) {
 		const originalFetch = globalThis.fetch;
 		const calls: string[] = [];
 		globalThis.fetch = (async (input: string | URL | Request) => {
-			calls.push(typeof input === "string" ? input : input.toString());
+			const url = typeof input === "string" ? input : input.toString();
+			calls.push(url);
+			if (url.includes("status=resolved")) {
+				return (
+					solved ?? Response.json({ data: [], total: 0, limit: 1, offset: 0 })
+				);
+			}
 			return response;
 		}) as unknown as typeof globalThis.fetch;
 
@@ -549,9 +563,14 @@ describe("トップページ", () => {
 			Response.json({ data: [sampleIssue], total: 1, limit: 20, offset: 0 }),
 		);
 
-		// API を呼んでいること（呼ばずに空を出す実装だとここで落ちる）
-		expect(calls).toHaveLength(1);
+		// API を呼んでいること（呼ばずに空を出す実装だとここで落ちる）。
+		// 一覧と解決の実例（B5）で 2 本投げる
+		expect(calls).toHaveLength(2);
 		expect(calls[0]).toContain("/issues");
+		expect(
+			calls.some((url) => url.includes("status=resolved")),
+			"解決の実例を取りに行っていない",
+		).toBe(true);
 		// 返ってきた内容が実際に描画されていること
 		expect(html).toContain("駅前の街灯が切れている");
 		expect(html).not.toContain("まだ Issue がありません");
@@ -563,6 +582,59 @@ describe("トップページ", () => {
 		);
 
 		expect(html).toContain("まだ Issue がありません");
+	});
+
+	/*
+	 * 解決の実例の帯（B5）。
+	 *
+	 * 事例は API から取る。文言として書くと、書いた瞬間に「実在しない事例」に
+	 * なる（指示書も、見本の草刈りの事例を架空だとして使用を禁じている）。
+	 * 描画された事例が、返ってきた Issue そのものであることを見る。
+	 */
+	it("解決済みの Issue を実例として帯に出す", async () => {
+		const solvedIssue = {
+			...sampleIssue,
+			id: "5f1c9a24b7e34d80a1f6c2d3e4b5a678",
+			title: "公園のベンチが壊れていた",
+			status: "resolved",
+		};
+		const { html } = await renderHome(
+			Response.json({ data: [sampleIssue], total: 1, limit: 20, offset: 0 }),
+			Response.json({ data: [solvedIssue], total: 1, limit: 1, offset: 0 }),
+		);
+
+		expect(html).toContain("公園のベンチが壊れていた");
+		// 詳細への入口になっていること
+		expect(html).toContain(`/issues/${solvedIssue.id}`);
+		// 空状態の文言は出さない
+		expect(html).not.toContain("最初の解決を待っています");
+	});
+
+	// 解決済みがまだ 1 件も無い状態。帯を出さないのではなく、空として成立させる
+	it("解決済みが無いときは帯を空状態にする", async () => {
+		const { html } = await renderHome(
+			Response.json({ data: [sampleIssue], total: 1, limit: 20, offset: 0 }),
+			Response.json({ data: [], total: 0, limit: 1, offset: 0 }),
+		);
+
+		expect(html).toContain("最初の解決を待っています");
+		// 見出しは残す（帯そのものが消えると面のコントラストが無くなる）
+		expect(html).toContain("実際に、直っています");
+	});
+
+	/*
+	 * 帯の取得に失敗しても、トップページの主役である一覧は出し切る。
+	 * 補助的な帯のために「取得できませんでした」を出す価値が無い
+	 */
+	it("実例の取得に失敗しても一覧は描く", async () => {
+		const { html } = await renderHome(
+			Response.json({ data: [sampleIssue], total: 1, limit: 20, offset: 0 }),
+			new Response("boom", { status: 500 }),
+		);
+
+		expect(html).toContain("駅前の街灯が切れている");
+		// 失敗を帯の中で報告しない
+		expect(html).not.toContain("取得できませんでした");
 	});
 
 	it("API が落ちていたらエラーの案内を出す", async () => {

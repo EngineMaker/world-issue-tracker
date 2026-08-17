@@ -142,6 +142,19 @@
 	--leading-hero: 1.14;
 	--tracking-hero: -0.03em;
 
+	/*
+	 * 濃い面の上に重ねる明るい面（B5）。
+	 *
+	 * 解決の実例の帯は地が濃緑なので、そこに白い面（--surface）を置くと
+	 * 明るすぎて帯の中が 2 つに割れて見える。透過で薄く重ねると、
+	 * 「帯の中の 1 件」であることを保ったまま切り出せる。
+	 *
+	 * 濃緑の実値ではなく透過にしているのは、帯の色を変えても
+	 * 重なりの関係がそのまま保たれるようにするため
+	 */
+	--overlay-soft: rgb(255 255 255 / 0.1);
+	--overlay-strong: rgb(255 255 255 / 0.18);
+
 	/* 遷移（#94） */
 	--transition-fast: 160ms ease;
 	--transition-base: 240ms ease;
@@ -694,6 +707,124 @@ main p {
  */
 .scopes li:last-child .scope-description {
 	color: var(--accent-soft);
+}
+
+/*
+ * 解決の実例の帯（B5）。
+ *
+ * ページ全体が同じ明度（--ground）で続いていて、どこも同じ強さに見える。
+ * 濃い面を 1 つだけ入れて、そこが他と違うことを面で示す。
+ *
+ * 指示書は「全幅バンド」と書いているが、body が `max-width: 800px` の
+ * 中央寄せなので、画面いっぱいに広げるには body の外に出す構造変更が要る。
+ * 負のマージン（`margin-inline: calc(50% - 50vw)`）で外へ広げる手もあるが、
+ * スクロールバーのぶん 100vw が画面幅を超えて横スクロールが出る。
+ * B5 の狙いは面のコントラストなので、本文の幅いっぱいの帯に留めた。
+ *
+ * 色は既存の濃い緑（--status-resolved）を使う。指示書が挙げている
+ * #08402B に近く、かつ「解決」を示す色として既に画面で使われている。
+ * 新しい色を足すと、同じ意味の緑が 2 種類になる（#86 が畳んだ問題）
+ */
+.solved-band {
+	background: var(--status-resolved);
+	color: var(--surface);
+	border-radius: var(--radius-md);
+	padding: var(--space-6) var(--space-5);
+	margin-top: var(--space-section);
+	margin-bottom: var(--space-section);
+}
+
+/*
+ * 帯の中の見出しは、地の色が変わったぶん色も変える。
+ * `h2` の既定（--ink）のままだと濃い緑の上でほとんど読めない
+ */
+.solved-band h2 {
+	color: var(--surface);
+	/* 帯の中では最初の要素なので、節どうしの間隔（--space-section）は要らない */
+	margin-top: 0;
+	margin-bottom: var(--space-3);
+}
+
+/*
+ * 「投稿された → 誰かが動いた → 解決した」の 3 ビート。
+ * 事例そのものより前に置いて、これから見るものが何なのかを先に伝える
+ */
+.solved-flow {
+	margin: 0 0 var(--space-4);
+	font-size: var(--text-sm);
+	/* 白のままだと見出しと同じ強さになる。面に馴染む側へ落とす */
+	color: var(--accent-line);
+}
+
+/*
+ * 事例 1 件。詳細への入口なのでリンクにする。
+ *
+ * 一覧の行（.issue-card）と同じ形にはしない。あちらは「並べて眺める」
+ * ためのもので、こちらは 1 件だけを見せる。同じ形にすると、
+ * 帯の中に一覧が紛れ込んだように見える
+ */
+.solved-issue {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-2) var(--space-3);
+	padding: var(--space-4);
+	border-radius: var(--radius-sm);
+	/* 濃い面の上に、さらに一段明るい面を重ねて 1 件を切り出す */
+	background: var(--overlay-soft);
+	color: var(--surface);
+	text-decoration: none;
+	transition: background-color var(--transition-fast);
+}
+
+@media (hover: hover) {
+	.solved-issue:hover {
+		background: var(--overlay-strong);
+	}
+}
+
+.solved-issue:focus-visible {
+	outline: 2px solid var(--surface);
+	outline-offset: 2px;
+}
+
+.solved-issue-title {
+	font-size: var(--text-list-title);
+	font-weight: 600;
+	line-height: var(--leading-snug);
+	word-break: keep-all;
+	overflow-wrap: break-word;
+}
+
+.solved-issue-meta {
+	font-size: var(--text-sm);
+	color: var(--accent-line);
+	white-space: nowrap;
+}
+
+/* 帯の中の導線。空状態の文言もここに入る */
+.solved-actions {
+	margin: var(--space-4) 0 0;
+	font-size: var(--text-sm);
+}
+
+/*
+ * 帯の中のリンクは、地の色が変わったぶん色も変える。
+ * --accent（緑）のままだと濃い緑の上に緑が乗って読めない
+ */
+.solved-band a:not(.solved-issue) {
+	color: var(--surface);
+}
+
+@media (hover: hover) {
+	.solved-band a:not(.solved-issue):hover {
+		/* 下地の薄緑（--accent-soft）は濃い面の上では効かない */
+		background: var(--overlay-soft);
+	}
+}
+
+.solved-band a:focus-visible {
+	outline-color: var(--surface);
 }
 
 /* ステータスは順序のある流れなので、矢印で繋いだピルとして見せる */

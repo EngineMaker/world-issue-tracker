@@ -5,7 +5,7 @@ import {
 	IssueStatus,
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
-import { fetchIssues } from "../lib/issues";
+import { DEFAULT_ISSUE_FILTERS, fetchIssues } from "../lib/issues";
 import { getLocale } from "../lib/locale";
 import { IssueList } from "./components/IssueList";
 import { StatusPill } from "./components/StatusPill";
@@ -25,7 +25,23 @@ export default async function Home() {
 	const locale = await getLocale();
 	const messages = getUiMessages(locale);
 	const scopeLabels = ISSUE_SCOPE_LABELS[locale];
-	const result = await fetchIssues();
+	/*
+	 * 一覧と、解決の実例（B5）を並行して取る。
+	 *
+	 * 解決済みは 1 件だけ。帯に置くのは「実際に直った」ことを示す証拠で、
+	 * 一覧として眺めさせる場所ではない。件数を増やすと、下にある
+	 * 「最近の Issue」と役割が重なる。
+	 */
+	const [result, solved] = await Promise.all([
+		fetchIssues(),
+		fetchIssues({
+			limit: 1,
+			filters: { ...DEFAULT_ISSUE_FILTERS, status: "resolved" },
+		}),
+	]);
+	// 取得に失敗したときは帯ごと出さない。トップページの主役は一覧なので、
+	// 補助的な帯のために「取得できませんでした」を出す価値が無い
+	const solvedIssue = solved.ok ? solved.issues[0] : undefined;
 
 	return (
 		<main>
@@ -155,6 +171,44 @@ export default async function Home() {
 						</li>
 					))}
 				</ol>
+			</section>
+
+			{/*
+			  解決の実例（B5）。ページ全体が同じ明度で続いているので、
+			  濃緑の帯を 1 つだけ入れて面のコントラストを作る。
+
+			  中身は実際に解決した Issue を API から取って出す。事例を文言として
+			  書かないのは、書いた瞬間に「実在しない事例」になるため
+			  （指示書も、見本の草刈りの事例を架空だとして使用を禁じている）。
+			  解決済みがまだ無いうちは、空状態として「最初の解決を待っています」を出す。
+
+			  帯だけ全幅にしたいが、main には左右の余白がある。負のマージンで
+			  外へ広げると横スクロールの原因になるので、CSS 側で対処している
+			*/}
+			<section className="solved-band">
+				<h2>{messages.home.solvedHeading}</h2>
+				{solvedIssue ? (
+					<>
+						{/* 3 ビート（投稿された → 誰かが動いた → 解決した） */}
+						<p className="solved-flow">{messages.home.solvedFlow}</p>
+						<Link className="solved-issue" href={`/issues/${solvedIssue.id}`}>
+							<span className="solved-issue-title">{solvedIssue.title}</span>
+							<span className="solved-issue-meta">
+								{scopeLabels[solvedIssue.scope].label}
+							</span>
+						</Link>
+						<p className="solved-actions">
+							<Link href="/issues?status=resolved">
+								{messages.home.solvedViewAll}
+							</Link>
+						</p>
+					</>
+				) : (
+					<p className="solved-actions">
+						{messages.home.solvedEmpty}{" "}
+						<Link href="/issues/new">{messages.home.solvedEmptyAction}</Link>
+					</p>
+				)}
 			</section>
 		</main>
 	);

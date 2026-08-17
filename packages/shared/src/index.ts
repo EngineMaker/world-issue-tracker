@@ -435,6 +435,22 @@ const JA_UI_MESSAGES = {
 			"個人の悩みも世界の課題も、地続きにつながっています。Issue は次の5段階のどれかに位置づけて投稿します。",
 		statusesHeading: "Issue が解決するまで",
 		statusesBody: "投稿された Issue は、次の順に状態が変わっていきます。",
+		/*
+		 * 解決の実例を見せる帯（B5）。
+		 *
+		 * ここに出すのは実際に解決した Issue で、文言は API から取れない
+		 * 部分（見出しと導線）だけを持つ。事例そのものを文言として書かない
+		 * のは、書いた瞬間に「実在しない事例」になるため。指示書も、見本に
+		 * 載っていた草刈りの事例を架空だとして使用を禁じている
+		 */
+		solvedHeading: "実際に、直っています",
+		/** 解決済みが 1 件も無いときに出す。空でも帯が成立するようにする */
+		solvedEmpty: "最初の解決を待っています。",
+		solvedEmptyAction: "Issue を書く",
+		/** 解決済みの Issue へ送る導線 */
+		solvedViewAll: "解決した Issue を見る",
+		/** 1 件の事例に添える、状態の移り変わり */
+		solvedFlow: "投稿された → 誰かが動いた → 解決した",
 	},
 
 	/** Issue 一覧（`IssueList`） */
@@ -752,6 +768,11 @@ const EN_UI_MESSAGES: UiMessages = {
 			"Personal worries and global problems are part of the same continuum. Every issue is posted at one of these five levels.",
 		statusesHeading: "How an issue gets resolved",
 		statusesBody: "A posted issue moves through these states in order.",
+		solvedHeading: "Things really do get fixed",
+		solvedEmpty: "Waiting for the first one to be resolved.",
+		solvedEmptyAction: "Write an issue",
+		solvedViewAll: "See resolved issues",
+		solvedFlow: "Posted → Someone stepped in → Resolved",
 	},
 
 	issueList: {
