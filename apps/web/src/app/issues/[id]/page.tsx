@@ -97,9 +97,14 @@ export default async function IssueDetailPage({
 				  一覧から詳細へ移っても同じ Issue が同じ見た目で続く
 				*/}
 				<StatusPill status={issue.status} locale={locale} />
-				<span className="issue-meta-item">{scope.label}</span>
+				{/*
+				  スコープはピル、カテゴリは `#` 付きのタグ（B4）。一覧と同じ形にする。
+				  リンクで繋がった 2 画面で同じ Issue が別の見た目になると、
+				  同じものだと分からなくなる（#59 と同じ理由）
+				*/}
+				<span className="scope-pill">{scope.label}</span>
 				{issue.category ? (
-					<span className="issue-meta-item">{issue.category}</span>
+					<span className="issue-tag">#{issue.category}</span>
 				) : null}
 				<time
 					className="issue-meta-item"

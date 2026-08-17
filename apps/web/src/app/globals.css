@@ -43,6 +43,14 @@
 	--text-base: 1rem;
 	--text-sm: 0.875rem;
 	--text-xs: 0.75rem;
+	/*
+	 * 一覧の Issue タイトル（B4）。19px。
+	 *
+	 * --text-lg（17px）とは別に持つ。あちらは詳細ページの小見出しなど
+	 * 「本文より少し強い」用途で、こちらは罫線だけの一覧で 1 件の
+	 * 始まりを示す役。枠が無いぶん、大きさが区切りの手がかりになる
+	 */
+	--text-list-title: 1.1875rem;
 
 	/*
 	 * 見出しの段階（#94 の結論）。
@@ -1195,44 +1203,63 @@ main p {
 }
 
 /*
- * Issue 1 件のカード。公開一覧と自分の一覧が同じ見た目を使う。
+ * Issue 1 件（B4。元は #95 の「カード」）。公開一覧と自分の一覧が同じ見た目を使う。
  *
- * 面を持たせた（#95）。以前は地の色の上に枠線 1px だけで、カードの
- * 区切りが枠でしか伝わらなかった。地を --ground にしたので、
- * 白い面がそのまま「1 件のまとまり」を示す
+ * 以前は白い面＋枠線＋角丸＋影の「カード」だった。1 件だけ見れば
+ * まとまって見えるが、一覧として並べると枠と影が行数ぶん重なり、
+ * **中身より容れ物の方が目立つ**。読みたいのは Issue のタイトルであって
+ * カードの縁ではない。
+ *
+ * B4 で区切り線だけのリストにする。面と影を外すと、残るのは文字と
+ * 1px の線だけになり、視線がタイトルの列を素直に下りていく。
  */
 .issue-card {
-	background: var(--surface);
-	box-shadow: var(--shadow-card);
-	border: 1px solid var(--line);
-	border-radius: var(--radius-md);
-	padding: var(--space-3) var(--space-4);
-	margin-bottom: var(--space-3);
+	/*
+	 * 素の `li` が持つタグ用の装飾（白い面・枠・角丸）を打ち消す。
+	 * あれは `li` を「タグの粒」として使う箇所のための指定で、
+	 * 一覧の 1 件はタグではない。書かないと li の指定がそのまま残り、
+	 * 罫線リストにしたつもりでカードのままになる
+	 */
+	background: none;
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+	padding: var(--space-4) 0;
+	/*
+	 * 区切りは下線 1 本。最後の 1 件にも引く（一覧全体の締めになる）。
+	 * 枠で囲まないので、左右の padding も要らない
+	 */
+	border-bottom: 1px solid var(--line);
 	list-style: none;
-	transition:
-		box-shadow var(--transition-base),
-		border-color var(--transition-fast),
-		transform var(--transition-fast);
+	transition: background-color var(--transition-fast);
 }
 
 /*
- * 触れたときに持ち上げる。カード自体はリンクではないが、
- * 中のタイトルが詳細への入口なので、どのカードを見ているかを示す
+ * 触れたときに面をうっすら変える。行自体はリンクではないが、
+ * 中のタイトルが詳細への入口なので、どの行を見ているかを示す。
+ *
+ * 影で持ち上げる形はやめた。カードでなくなったので浮かせる面が無く、
+ * 行の背景をわずかに変える方が罫線リストの見え方に合う
  */
 @media (hover: hover) {
 	.issue-card:hover {
-		border-color: var(--accent-line);
-		box-shadow: var(--shadow-card-hover);
+		background: var(--surface-accent);
 	}
 }
 
 .issue-card-title {
 	margin: 0 0 var(--space-2);
 	/*
-	 * カードの中で最も強い要素にする。以前は --text-base（本文と同じ）で、
-	 * 説明文と同じ重みに見えていた
+	 * 1 件の中で最も強い要素にする。以前は --text-base（本文と同じ）で、
+	 * 説明文と同じ重みに見えていた。
+	 *
+	 * B4 で 17px（--text-lg）から 19px へ上げた。枠と影を外したぶん、
+	 * 「どこからどこまでが 1 件か」を示す手がかりがタイトルの大きさに移る。
+	 * --text-lg のままだと説明文（16px）との差が 1px しかなく、
+	 * 罫線だけの一覧では 1 件の始まりが読み取りにくかった
 	 */
-	font-size: var(--text-lg);
+	font-size: var(--text-list-title);
+	line-height: var(--leading-snug);
 }
 
 .issue-card-title a {
@@ -1282,6 +1309,45 @@ main p {
 /* 補助情報の 1 項目。中の語が途中で割れないようにする */
 .issue-meta-item {
 	white-space: nowrap;
+}
+
+/*
+ * スコープのピル（B4）。
+ *
+ * ステータス（.status-pill）と同じ形にする。どちらも「決められた
+ * 選択肢のどれか」を示す情報なので、片方だけ地の文だと並びが不揃いに見える。
+ *
+ * 色は変えている。ステータスは段階ごとに色が動く（進み具合を示す）が、
+ * スコープは動かない。同じ色にすると、スコープも進んでいくものに見える
+ */
+.scope-pill {
+	display: inline-flex;
+	align-items: center;
+	line-height: var(--leading-snug);
+	font-size: var(--text-sm);
+	font-weight: 600;
+	white-space: nowrap;
+	border-radius: var(--radius-pill);
+	padding: var(--space-1) var(--space-3);
+	color: var(--accent);
+	background: var(--accent-soft);
+	/*
+	 * ステータスのピルは枠を持つ（`border: 1px solid currentColor`）。
+	 * こちらは下地だけにして、同じ形でも役割が違うことを示す
+	 */
+	border: 1px solid transparent;
+}
+
+/*
+ * カテゴリのタグ（B4）。`#` は tsx 側が文字として出す。
+ *
+ * ピルにしないのは、カテゴリが自由入力だから。ステータスとスコープは
+ * 決められた選択肢で、取りうる値が有限だと分かる形（ピル）が合う。
+ * 自由入力を同じ形にすると、選べる何かだと誤解させる
+ */
+.issue-tag {
+	white-space: nowrap;
+	color: var(--ink-soft);
 }
 
 /* 一覧の「N 件中 M 件を表示」 */
@@ -1793,7 +1859,11 @@ main p {
 		border-color: var(--accent-line);
 	}
 
-	.issue-card:hover,
+	/*
+	 * `.issue-card` はここから外した。B4 で面と影を外したので、
+	 * 浮かせる面が無い。触れたときの変化は背景色で示す
+	 * （.issue-card:hover の指定を参照）
+	 */
 	.comment-card:hover,
 	.issue-filters:hover,
 	.location:hover,
@@ -2241,9 +2311,11 @@ main p {
 
 	/*
 	 * 枠を持つまとまりは左右の内側の余白を削る。枠の中の文字が
-	 * 画面幅の半分近くまで押し込まれるのを防ぐ
+	 * 画面幅の半分近くまで押し込まれるのを防ぐ。
+	 *
+	 * `.issue-card` はここから外した。B4 で枠を外して罫線だけにしたので、
+	 * 左右の余白そのものを持たない（0 のまま本文と同じ線で揃える）
 	 */
-	.issue-card,
 	.comment-card,
 	.location,
 	.issue-filters {

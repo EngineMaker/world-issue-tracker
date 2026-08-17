@@ -107,6 +107,8 @@ describe("トークンの定義", () => {
 		"--text-base": "1rem",
 		"--text-sm": "0.875rem",
 		"--text-xs": "0.75rem",
+		/* 一覧の Issue タイトル（B4）。罫線だけの一覧で 1 件の始まりを示す */
+		"--text-list-title": "1.1875rem",
 
 		/*
 		 * 見出しの段階（#94 の結論）。5 段階には畳まず、見出し専用に
@@ -278,11 +280,13 @@ describe("文字サイズは 5 段階に収まっている", () => {
 		"comment-date": "var(--text-xs)",
 		"issue-map-attribution": "var(--text-xs)",
 		/*
-		 * カードの見出しは #95 で --text-base（本文と同じ）から --text-lg へ上げた。
-		 * 一覧はカードが並ぶ画面で、タイトルが説明文と同じ重みだと
-		 * どこから読めばよいか分からない（#94 の見本もタイトルを一段強くしている）
+		 * 一覧の見出しは #95 で --text-base（本文と同じ）から --text-lg へ上げ、
+		 * B4 でさらに --text-list-title（19px）にした。B4 で枠と影を外して
+		 * 罫線だけの一覧にしたので、「どこからが 1 件か」を示す手がかりが
+		 * タイトルの大きさに移っている。--text-lg（17px）だと説明文（16px）との
+		 * 差が 1px しかなく、区切りとして働かない
 		 */
-		"issue-card-title": "var(--text-lg)",
+		"issue-card-title": "var(--text-list-title)",
 	};
 
 	for (const [className, token] of Object.entries(sizeBindings)) {
@@ -338,9 +342,12 @@ describe("見出し・角丸・影・遷移の決定が CSS に反映されて�
 		expect(body).toContain("letter-spacing: var(--tracking-hero)");
 	});
 
+	/*
+	 * `.issue-card` はこの一覧から外している。B4 で枠・角丸・影を外して
+	 * 罫線だけのリストにしたため（下の「B4」の describe で別途見る）
+	 */
 	it("主要なカードと大きい面は角丸・影をトークンで決める", () => {
 		for (const selector of [
-			".issue-card",
 			".comment-card",
 			".issue-filters",
 			".location",
@@ -423,15 +430,42 @@ describe("同じ意味の色が同じ値で描かれる", () => {
 
 	/*
 	 * 枠を持つまとまり（カード）は、ルールごと消えても描画結果の
-	 * class 属性は変わらない。定義の存在と、枠がトークンを指すことを見る
+	 * class 属性は変わらない。定義の存在と、枠がトークンを指すことを見る。
+	 *
+	 * `issue-card` は B4 で枠を外して下線 1 本にしたので、ここには含めない
 	 */
-	for (const className of ["issue-card", "comment-card"]) {
+	for (const className of ["comment-card"]) {
 		it(`.${className} は --line の枠を持つ`, () => {
 			const rule = css.match(new RegExp(`\\.${className}\\s*\\{([^}]*)\\}`));
 			expect(rule, `.${className} の定義が見つからない`).not.toBeNull();
 			expect(rule?.[1]).toContain("border: 1px solid var(--line)");
 		});
 	}
+
+	/*
+	 * Issue 1 件の区切り（B4）。
+	 *
+	 * 枠・角丸・影を外した代わりに、下線 1 本が唯一の区切りになっている。
+	 * この線が消えると、一覧が「どこで 1 件が終わるか分からない文字の塊」に
+	 * なる。線が在ることと、色がトークンを指すことを見る
+	 */
+	it(".issue-card は --line の下線で 1 件を区切る", () => {
+		const rule = css.match(/\.issue-card\s*\{([^}]*)\}/);
+		expect(rule, ".issue-card の定義が見つからない").not.toBeNull();
+		const body = rule?.[1] ?? "";
+
+		expect(body, "1 件の区切りが無い").toContain(
+			"border-bottom: 1px solid var(--line)",
+		);
+		/*
+		 * カードに戻っていないこと。`border-radius: 0` / `box-shadow: none` は
+		 * 素の `li` が持つタグ用の装飾を打ち消すための指定なので、
+		 * 「宣言が無いこと」ではなく「角丸と影が付いていないこと」を見る
+		 */
+		expect(body, "枠が復活している").not.toMatch(/border:\s*1px/);
+		expect(body, "角丸が復活している").not.toMatch(/border-radius:\s*var\(/);
+		expect(body, "影が復活している").not.toMatch(/box-shadow:\s*var\(/);
+	});
 
 	it("Issue 一覧の取得失敗は --danger で描く", () => {
 		const html = renderToStaticMarkup(
@@ -656,16 +690,21 @@ describe("#95 で足した部品がトークン経由で描かれている", () 
 	 * （上の .issue-card / .comment-card と同じ考え方）
 	 */
 	const tokenBindings: Record<string, string[]> = {
-		// カードの面と浮き。#94 が「border だけで平面的」と指摘した点
-		"issue-card": ["var(--surface)", "var(--shadow-card)", "var(--radius-md)"],
+		/*
+		 * `issue-card` はここから外した。#95 は「カードの面と浮き」を
+		 * 求めていたが、B4 で面・角丸・影を外して罫線だけのリストにしている。
+		 * 区切りが在ることは上の「--line の下線で 1 件を区切る」が見る
+		 */
 		// 0 件のまとまり。暖色を使うのはヒーローとここだけ
 		"empty-state": ["var(--sun-soft)", "var(--radius-md)"],
-		// ヒーロー。文字は絵に重ねず隣に置く
+		// ヒーロー。B2 で絵を消して 1 列になったが、面と角丸はそのまま
 		hero: ["var(--sun-soft)", "var(--radius-md)"],
 		// 絞り込み・ページ送りはクラスだけあって定義が無かった
 		"issue-filters": ["var(--surface)", "var(--radius-md)"],
 		// ピルは丸め切る段階を使う
 		"status-pill": ["var(--radius-pill)"],
+		// スコープのピル（B4）。ステータスと同じ形にするので同じ段階を使う
+		"scope-pill": ["var(--radius-pill)", "var(--accent-soft)"],
 	};
 
 	for (const [className, tokens] of Object.entries(tokenBindings)) {
