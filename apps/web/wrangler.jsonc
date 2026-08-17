@@ -79,5 +79,17 @@
 			"pattern": "issues.emaker.dev",
 			"custom_domain": true
 		}
-	]
+	],
+	// 旧オリジン（`*.workers.dev`）を生かしておく（#98）。
+	//
+	// Custom Domain を設定すると workers.dev のサブドメインは既定で無効になり、
+	// 旧 URL は Worker に届く前に 404 になる。実際に切り替えた直後にそうなった。
+	//
+	// ここを true に戻しているのは、旧 URL を**入口として使うため**ではなく、
+	// `src/middleware.ts` が新しい入口へ 308 で送れるようにするため。
+	// 無効のままだとリクエストが Worker に届かず、リダイレクトも書けない。
+	//
+	// 入口は issues.emaker.dev の一本。旧 URL は転送専用で、Clerk の本番キーも
+	// そちらのドメインに紐づいている。
+	"workers_dev": true
 }
