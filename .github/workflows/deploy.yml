@@ -47,9 +47,34 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+      # デプロイの「後」に、出したばかりの API 自身へ種別を聞く（#98）。
+      #
+      # web と違って事前に止められない。API のキーは Workers Secrets にあり、
+      # 値は書き込み専用で読み出せないため（`wrangler secret list` が返すのは
+      # 名前と型だけ）、ビルド前に検査する材料が無い。
+      #
+      # 出てから気付く形になるが、#98 の再発検出としては成立する。#98 は
+      # 開発用キーが本番に出たまま誰にも気付かれず、別件の確認中に人が
+      # ブラウザのコンソールを見てようやく見つかったという不備だった。
+      # ここが赤くなるなら、気付くまでの時間は 1 デプロイ分に縮む。
+      #
+      # ここで落ちると後続の deploy-web も走らない（needs: deploy-api）。
+      # 「API だけ本番用・web だけ開発用」で本番が動く時間帯を作らないため。
+      - name: Verify Clerk production instance
+        run: bun run scripts/verify-clerk-instance.ts
+        working-directory: apps/api
+        env:
+          API_URL: https://world-issue-tracker-api.mktoho.workers.dev
+
   deploy-web:
     runs-on: ubuntu-latest
     name: Deploy Web
+    # API の検証が通ってから web を出す（#98）。
+    #
+    # 並走させると、片方だけ本番用インスタンスに切り替わった状態で本番が
+    # 動く時間帯ができる。トークンを発行した先と検証する先が食い違うので、
+    # その間サインインは通らない（#98 の補足が名指しで警告している失敗）。
+    needs: deploy-api
     steps:
       - uses: actions/checkout@v4
 
