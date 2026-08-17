@@ -102,11 +102,23 @@ export default async function Home() {
 				<h2>{messages.home.scopesHeading}</h2>
 				<p>{messages.home.scopesBody}</p>
 				{/*
-				  スコープの階段（#94）。段が上がるほど右に寄る形で、
+				  スコープのバー（B3）。段が上がるほど**幅が広がる**形で、
 				  個人と世界が同じ物差しの上にあることを示す。
-				  字下げの量は CSS が `--depth` から算出する
+
+				  以前は段が上がるほど右に字下げする形だったが、それだと
+				  スコープが広がるほど行が短くなり、意味と見た目が逆行していた
+				  （世界＝いちばん広いはずのものが、いちばん細い行になる）。
+
+				  幅は CSS が `--depth`（0 起点の段目）と `--steps`（総段数）から
+				  算出する。段数を CSS に書かないのは、スコープが増えたときに
+				  直し忘れて階段が途切れるのを防ぐため（#94 からの方針）
 				*/}
-				<ol className="scopes">
+				<ol
+					className="scopes"
+					style={
+						{ "--steps": IssueScope.options.length } as React.CSSProperties
+					}
+				>
 					{IssueScope.options.map((scope, index) => (
 						<li key={scope} style={{ "--depth": index } as React.CSSProperties}>
 							<span className="scope-name">{scopeLabels[scope].label}</span>

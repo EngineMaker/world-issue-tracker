@@ -444,6 +444,62 @@ describe("語の途中で改行しない（A1 / A2）", () => {
 });
 
 /**
+ * スコープのバー（B3）。
+ *
+ * 「個人 → 世界」でバーの幅が広がることで、扱う範囲の広さを見せる。
+ * 幅の指定が消えると、順序は残っても**意味を示す仕掛けが失われる**。
+ * 描画のピクセルではなく、その仕掛けが在ることを見る。
+ */
+describe("スコープは幅で広さを示す（B3）", () => {
+	it("段ごとの幅を --depth と --steps から算出している", () => {
+		const rules = rulesFor(".scopes li").join("\n");
+
+		expect(rules, ".scopes li の定義が無い").not.toBe("");
+		// 段目と総段数の両方を使っていること。総段数を使わず 4 や 5 を
+		// 直書きすると、スコープが増えたときに最後の段が 100% にならない
+		expect(rules, "段目（--depth）を見ていない").toContain("var(--depth");
+		expect(rules, "総段数（--steps）を見ていない").toContain("var(--steps");
+		expect(rules, "幅を算出していない").toMatch(/width:\s*max\(/);
+	});
+
+	/*
+	 * 以前の実装は margin-left で右へ字下げする形で、段が上がるほど
+	 * 行が短くなっていた（意味と逆行）。戻っていないことを見る
+	 */
+	it("字下げで段を表す形に戻っていない", () => {
+		const rules = rulesFor(".scopes li").join("\n");
+
+		expect(rules, "字下げ（margin-left）で段を表している").not.toMatch(
+			/margin-left:\s*calc\(var\(--depth/,
+		);
+	});
+
+	// 幅で広さを示すのは「中身が読めること」が前提。下限が無いと
+	// 狭い画面で 1 段目が 190px ほどになり、文字が枠からはみ出す
+	it("いちばん狭い段にも中身が入る下限がある", () => {
+		const rules = rulesFor(".scopes li").join("\n");
+
+		expect(rules, "幅の下限が無い（狭い画面で文字がはみ出す）").toMatch(
+			/max\(\s*[\d.]+rem/,
+		);
+	});
+
+	// 総段数は tsx が渡す。ここが消えると CSS 側の既定値（5）に落ち、
+	// スコープが増えたときに黙って間違った幅になる
+	it("トップページが総段数を渡している", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../src/app/page.tsx"),
+			"utf8",
+		);
+
+		expect(source, "--steps を渡していない").toContain('"--steps"');
+		expect(source, "総段数を直書きしている").toContain(
+			"IssueScope.options.length",
+		);
+	});
+});
+
+/**
  * ステータスの流れの矢印（A6）。
  *
  * 狭い画面で折り返したとき、行末に矢印だけが残って次に続く先が無い、

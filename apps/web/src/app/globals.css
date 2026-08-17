@@ -574,15 +574,26 @@ main p {
 }
 
 /*
- * スコープの階段（#94）。5 段階を昇る形で見せる。
- * 個人と世界が同じ物差しの上にあることを、順序と字下げの両方で示す。
+ * スコープのバー（B3。元は #94 の「階段」）。
  *
- * 字下げは `--depth`（0〜4）から算出する。段数は
- * `IssueScope.options` の並びで決まるので、CSS 側に段数を書かない
- * （スコープが増えたときに CSS を直し忘れて階段が途切れるのを防ぐ）
+ * 以前は段が上がるほど `margin-left` で右へ字下げする形だった。
+ * しかしそれだと**スコープが広がるほど行が短くなる**。「世界」は扱う
+ * 範囲がいちばん広いのに、画面ではいちばん細い行になっていて、
+ * 意味と見た目が逆行していた。
+ *
+ * B3 で「個人 → 世界」で幅が広がるバーに変える。扱う範囲の広さが
+ * そのままバーの長さになるので、読み手は説明を読む前に関係を掴める。
+ *
+ * 幅は `--depth`（0 起点の段目）と `--steps`（総段数）から算出する。
+ * どちらも tsx が渡すので、スコープが増えても CSS は直さなくてよい。
+ * 最初の段を 46% から始めるのは、いちばん狭い「個人」でも
+ * ラベルと説明が読める幅が要るため（見本もそのくらいから始めている）。
  */
 .scopes {
 	counter-reset: scope-step;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
 	margin-bottom: var(--space-section);
 }
 
@@ -591,16 +602,41 @@ main p {
 	display: flex;
 	align-items: baseline;
 	gap: var(--space-3);
-	background: var(--surface);
-	border: 1px solid var(--line);
+	background: var(--surface-accent);
+	border: 1px solid var(--accent-line);
 	border-radius: var(--radius-sm);
 	padding: var(--space-2) var(--space-3);
-	margin-bottom: var(--space-2);
 	/*
-	 * 段が上がるほど左に寄せる。狭い画面では字下げの分だけ本文が細くなるので
-	 * min() で頭打ちにする（幅 360px でも 1 段あたり 4px 以下に収まる）
+	 * 46% から 100% まで、段の数で等分して広げる。`--steps` は総段数で、
+	 * 最後の段（--depth が --steps - 1）でちょうど 100% になる。
+	 *
+	 * `max()` の第 1 引数（21rem ＝ 336px）は、いちばん狭い段でも
+	 * ラベルと説明が枠に収まる幅。割合だけで決めると、画面が狭いときに
+	 * 1 段目が 190px ほどになり、文字が枠からはみ出していた（600px 幅で発生）。
+	 * 幅で広さを示すのは「中身が読めること」が前提なので、読めなくなる
+	 * ところでは割合の方を諦める。
+	 *
+	 * `min-content` を下限にする手もあるが、あれは説明文を折り返さない
+	 * 幅なので 700px 近くになり、広い画面でも全段が同じ幅に潰れる
+	 * （＝ B3 の効果そのものが消える）。実寸で切る方が意図に合う
 	 */
-	margin-left: calc(var(--depth, 0) * min(var(--space-3), 2vw));
+	width: max(
+		21rem,
+		calc(46% + (100% - 46%) * var(--depth, 0) / max(var(--steps, 5) - 1, 1))
+	);
+}
+
+/*
+ * いちばん広い段（世界）だけ塗りを反転する。
+ *
+ * バーの長さだけでも順序は分かるが、「ここが端」であることは
+ * 長さの比較でしか読めない。到達点を面で示すと、一覧を眺めた
+ * ときに端がどこかが一目で分かる
+ */
+.scopes li:last-child {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: var(--surface);
 }
 
 /* 何段目かを数字で示す。色に頼らず順序が伝わる手がかり */
@@ -616,6 +652,12 @@ main p {
 	background: var(--accent-soft);
 	border-radius: var(--radius-pill);
 	padding: 0 var(--space-1);
+}
+
+/* 反転した段では、番号も面に合わせて反転する */
+.scopes li:last-child::before {
+	color: var(--accent);
+	background: var(--surface);
 }
 
 .scope-name {
@@ -634,6 +676,16 @@ main p {
 	font-size: var(--text-sm);
 	word-break: keep-all;
 	overflow-wrap: break-word;
+}
+
+/*
+ * 反転した段（世界）の説明文。--ink-soft は薄い墨なので、
+ * 緑の面の上ではほとんど読めない。面に合わせて明るい側へ寄せる。
+ * 白そのものにせず少し落としているのは、ラベル（--surface）より
+ * 説明が前に出ないようにするため
+ */
+.scopes li:last-child .scope-description {
+	color: var(--accent-soft);
 }
 
 /* ステータスは順序のある流れなので、矢印で繋いだピルとして見せる */
@@ -2173,6 +2225,18 @@ main p {
 	/* ヘッダも同じだけ詰める。ここだけ 1rem のままだと段差ができる */
 	.site-header {
 		padding: var(--space-3) var(--space-4);
+	}
+
+	/*
+	 * スコープのバー（B3）は狭い画面では幅を変えない。
+	 *
+	 * 幅 390px だといちばん狭い段が 46% ＝ 約 150px しかなく、
+	 * 「コミュニティ」のラベルすら入らない。読めないバーで
+	 * 広さを示しても意味が無いので、ここでは全段を同じ幅にして
+	 * 中身を読ませる方を採る。順序は番号と並び順が示している
+	 */
+	.scopes li {
+		width: 100%;
 	}
 
 	/*
