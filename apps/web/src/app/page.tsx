@@ -31,8 +31,10 @@ export default async function Home() {
 		<main>
 			{/*
 			  ヒーロー（Issue #95、見本は #94）。
-			  文字を絵の上に重ねず隣に置いている。重ねると絵ごとに読みやすさが
-			  変わり、差し替えのたびに文字色や影の調整が要る。
+
+			  以前は右にベクター画像を置いた 2 列だったが、B2 で絵を削除した。
+			  意味を持たない装飾で、字を大きくするための幅を奪っていたため
+			  （経緯は globals.css の .hero を参照）。
 			*/}
 			<section className="hero">
 				<div className="hero-body">
@@ -54,38 +56,6 @@ export default async function Home() {
 						</Link>
 						<Link href="/issues">{messages.home.viewIssues}</Link>
 					</p>
-				</div>
-				{/*
-				  絵の置き場所。#94 は素材写真をここに置くと決めたが、素材そのものは
-				  まだ選定されていない（ライセンス一覧が要る）。写真が入るまでの間も
-				  ヒーローが成立するよう、外部素材に依存しないインライン SVG を置く。
-				  内容を持たない装飾なので、読み上げからは外す。
-				*/}
-				<div className="hero-figure" aria-hidden="true">
-					{/*
-					  `aria-hidden` の中なので `<title>` は読まれない。
-					  装飾に説明を付けても読み上げが冗長になるだけなので置かない
-					*/}
-					<svg
-						className="hero-figure-art"
-						viewBox="0 0 160 120"
-						role="presentation"
-					>
-						{/* 地平線。個人から世界までが同じ地続きにあることを面で示す */}
-						<circle className="hero-art-sun" cx="118" cy="34" r="18" />
-						<path
-							className="hero-art-ground"
-							d="M0 84 C 30 70, 60 92, 90 78 S 140 70, 160 82 L160 120 L0 120 Z"
-						/>
-						{/* 直っていく道筋。左から右へ、印が満ちていく */}
-						<g className="hero-art-steps">
-							<circle cx="24" cy="60" r="6" />
-							<circle cx="52" cy="52" r="6" />
-							<circle cx="80" cy="44" r="6" />
-							<circle cx="108" cy="36" r="6" />
-						</g>
-						<path className="hero-art-path" d="M24 60 L52 52 L80 44 L108 36" />
-					</svg>
 				</div>
 			</section>
 

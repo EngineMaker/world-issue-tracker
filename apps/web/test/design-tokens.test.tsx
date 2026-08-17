@@ -127,7 +127,7 @@ describe("トークンの定義", () => {
 		"--text-heading-page": "2rem",
 		"--text-heading-section": "clamp(1.625rem, 3vw, 2.125rem)",
 		"--text-heading-site": "1.0625rem",
-		"--text-heading-hero": "clamp(2.75rem, 13cqi, 3.25rem)",
+		"--text-heading-hero": "clamp(2.75rem, 9.5cqi, 4.375rem)",
 
 		"--space-1": "0.25rem",
 		"--space-2": "0.5rem",
