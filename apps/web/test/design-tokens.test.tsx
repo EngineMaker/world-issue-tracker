@@ -115,11 +115,19 @@ describe("トークンの定義", () => {
 		 *
 		 * --text-heading-site だけは 1.2rem → 1.0625rem に変更した。
 		 * サイト名が本文より大きい必要はなく、狭い画面でヘッダが崩れる一因
-		 * でもあるため。#94 が認めた既存値の変更はこの 1 つだけ
+		 * でもあるため。#94 が認めた既存値の変更はこの 1 つだけ。
+		 *
+		 * B1 で 2 つ変えている:
+		 * - --text-heading-section を可変にした（1.25rem では本文との差が
+		 *   小さく、節の変わり目が読み取れなかった）
+		 * - --text-heading-hero を足した。トップページのヒーロー専用で、
+		 *   --text-heading-page とは分ける（あちらは詳細ページの h1 でも
+		 *   使われ、中身は利用者が書いた最大 200 文字のタイトル）
 		 */
 		"--text-heading-page": "2rem",
-		"--text-heading-section": "1.25rem",
+		"--text-heading-section": "clamp(1.625rem, 3vw, 2.125rem)",
 		"--text-heading-site": "1.0625rem",
+		"--text-heading-hero": "clamp(2.75rem, 13cqi, 3.25rem)",
 
 		"--space-1": "0.25rem",
 		"--space-2": "0.5rem",
@@ -145,6 +153,9 @@ describe("トークンの定義", () => {
 		"--leading-normal": "1.6",
 		"--tracking-tight": "-0.01em",
 		"--tracking-normal": "0",
+		/* 特大の見出し用（B1）。大きい字は同じ倍率でも行間・字間が広く見える */
+		"--leading-hero": "1.14",
+		"--tracking-hero": "-0.03em",
 		"--transition-fast": "160ms ease",
 		"--transition-base": "240ms ease",
 
@@ -298,13 +309,33 @@ describe("見出し・角丸・影・遷移の決定が CSS に反映されて�
 	it("h1 / h2 / .site-header-title は見出し用の行間と字送りを使う", () => {
 		expect(ruleBody("h1")).toContain("line-height: var(--leading-tight)");
 		expect(ruleBody("h1")).toContain("letter-spacing: var(--tracking-tight)");
-		expect(ruleBody("h2")).toContain("line-height: var(--leading-snug)");
+		/*
+		 * h2 は B1 で大きくした（最大 34px）ので、行間も --leading-snug（1.4）
+		 * から詰めている。大きい字は同じ倍率でも行が離れて見えるため
+		 */
+		expect(ruleBody("h2")).toContain("line-height: var(--leading-tight)");
+		expect(ruleBody("h2")).toContain("letter-spacing: var(--tracking-tight)");
 		expect(ruleBody(".site-header-title")).toContain(
 			"font-size: var(--text-heading-site)",
 		);
 		expect(ruleBody(".site-header-title")).toContain(
 			"line-height: var(--leading-snug)",
 		);
+	});
+
+	/*
+	 * ヒーローの見出し（B1）。
+	 *
+	 * ここが --text-heading-page に戻ると、詳細ページの h1（利用者が書いた
+	 * 最大 200 文字のタイトル）と同じ物差しに乗る。文言をこちらで決められる
+	 * ヒーローだけが大きくてよい、という切り分けが崩れていないことを見る
+	 */
+	it(".hero-heading はヒーロー専用の大きさと行間を使う", () => {
+		const body = ruleBody(".hero-heading");
+
+		expect(body).toContain("font-size: var(--text-heading-hero)");
+		expect(body).toContain("line-height: var(--leading-hero)");
+		expect(body).toContain("letter-spacing: var(--tracking-hero)");
 	});
 
 	it("主要なカードと大きい面は角丸・影をトークンで決める", () => {

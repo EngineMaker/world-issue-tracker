@@ -386,10 +386,35 @@ const JA_UI_MESSAGES = {
 
 	/** トップページ */
 	home: {
-		heading: "地球のバグを、みんなで可視化して、みんなで直す",
+		/*
+		 * ヒーローの見出し（B1）。
+		 *
+		 * 元は「地球のバグを、みんなで可視化して、みんなで直す」（22 文字）だった。
+		 * 見出しを大きくするのが B1 の狙いだが、22 文字のままだと狭い画面で
+		 * 4 行に折り返してヒーローだけで画面が埋まる。字を大きくできない理由が
+		 * 文言の長さにあったので、短くする。
+		 *
+		 * 落ちた「可視化」は `common.siteDescription` に残っている。あちらは
+		 * OGP と検索結果に出る説明文なので、概念そのものが失われるわけではない。
+		 * 見出しから落ちたぶんは `headingEyebrow` が受ける
+		 */
+		heading: "地球のバグを、みんなで直す。",
+		/*
+		 * 見出しの上に小さく置く一行（B1）。
+		 *
+		 * 見出しを短くしたことで「どこまでを扱うのか」が読めなくなる。
+		 * 個人の困りごとから国際問題までを 1 つの場所で扱うことは、
+		 * このサービスの前提そのものなので、見出しの手前で示す
+		 */
+		headingEyebrow: "個人から世界まで",
 		aboutHeading: "これは何をするサービス？",
+		/*
+		 * ヒーローのリード文。仕組みの説明から、書いた後に何が起きるかの
+		 * 説明に変えた。「Issue として投稿できる」ことより「誰かが手を挙げる」
+		 * ことの方が、読み手にとっては先に知りたい
+		 */
 		aboutBody1:
-			"身の回りの困りごとを「Issue」として投稿して、みんなで見えるようにする場所です。近所の壊れた街灯から、国の制度の問題まで、大きさを問わず扱います。",
+			"壊れた街灯も、空き家も、国の制度も。困りごとを Issue として書けば、誰かが手を挙げるところから解決が始まります。",
 		aboutBody2:
 			"投稿された Issue には誰でもコメントでき、「手伝います」と手を挙げることで解決に向けて動き出します。犯人を探すのではなく、直すことが目的です。",
 		actionsLabel: "主な操作",
@@ -704,10 +729,14 @@ const EN_UI_MESSAGES: UiMessages = {
 	},
 
 	home: {
-		heading: "Visualize the bugs of our planet, and fix them together",
+		// 日本語側と同じ理由で短くしている（B1）。英語は日本語より 1 文字が
+		// 細いぶん折り返しにくいが、見出しの長さを言語で変えると
+		// 同じ画面が別物に見えるので、揃えて短くする
+		heading: "Let’s fix the bugs of our planet.",
+		headingEyebrow: "From personal to global",
 		aboutHeading: "What is this service?",
 		aboutBody1:
-			"A place to post the problems around you as “issues” so that everyone can see them. From a broken streetlight nearby to a flaw in national policy — size does not matter here.",
+			"A broken streetlight, an abandoned house, a national policy. Write your problem down as an issue, and it starts getting solved the moment someone raises their hand.",
 		aboutBody2:
 			"Anyone can comment on a posted issue, and raising your hand with “I can help” starts moving it toward a fix. The goal is not to find someone to blame, but to fix things.",
 		actionsLabel: "Main actions",

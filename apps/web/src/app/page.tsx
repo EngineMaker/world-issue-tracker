@@ -36,8 +36,17 @@ export default async function Home() {
 			*/}
 			<section className="hero">
 				<div className="hero-body">
-					{/* サイト名は Header が出しているので、ここはページ固有の見出しにする */}
-					<h1 className="hero-heading">{messages.home.heading}</h1>
+					{/*
+					  サイト名は Header が出しているので、ここはページ固有の見出しにする。
+
+					  アイブロウ（B1）は見出しの一部として h1 の中に置く。外に出すと
+					  読み上げが「個人から世界まで」と「地球のバグを、みんなで直す。」を
+					  別々の要素として読み、繋がりが消える。見た目の大きさは CSS が分ける
+					*/}
+					<h1 className="hero-heading">
+						<span className="hero-eyebrow">{messages.home.headingEyebrow}</span>
+						{messages.home.heading}
+					</h1>
 					<p className="hero-lead">{messages.home.aboutBody1}</p>
 					<p className="hero-actions">
 						<Link className="button-link" href="/issues/new">
