@@ -1,4 +1,8 @@
 import { describe, expect, it, mock } from "bun:test";
+import {
+	getUiMessages,
+	ISSUE_ANONYMITY_LABELS,
+} from "@world-issue-tracker/shared";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { HelpOfferSummary } from "../src/lib/help-offers";
 
@@ -32,15 +36,24 @@ mock.module("@clerk/nextjs", () => ({
 // 静的 import ではなく await import にしているのは、上の `mock.module` が
 // 評価されてからテスト対象を読み込ませるため。静的 import は巻き上げられて
 // モックの登録より先に解決され、実物の Clerk が読み込まれてしまう。
-const { HelpOfferButton, shortUserId } = await import(
+const { HelpOfferButton } = await import(
 	"../src/app/components/HelpOfferButton"
 );
 
 const VIEWER = "user_2viewerabcdefgh";
 const OTHER = "user_2otherabcdefgh";
 
-function offer(userId: string, id = `offer_${userId}`) {
-	return { id, user_id: userId, created_at: "2026-08-01 12:00:00.000" };
+function offer(
+	userId: string,
+	displayName: string | null = null,
+	id = `offer_${userId}`,
+) {
+	return {
+		id,
+		user_id: userId,
+		created_at: "2026-08-01 12:00:00.000",
+		display_name: displayName,
+	};
 }
 
 /**
@@ -151,25 +164,45 @@ describe("HelpOfferButton", () => {
 			expect(text).not.toContain("2viewera");
 		});
 
-		it("他人の表明は ID を短くして出す", () => {
+		it("他人の表明は Clerk の表示名で出す", () => {
 			const text = visibleText(
 				render({
-					offers: [offer(OTHER)],
+					offers: [offer(OTHER, "山田 花子")],
 					total: 1,
 					viewerOffered: false,
 					viewerUserId: VIEWER,
 				}),
 			);
 
-			expect(text).toContain("参加者");
-			// Clerk の内部 ID をそのまま画面に出さない
+			expect(text).toContain("山田 花子");
+			// Clerk の内部 ID は画面に出さない（#108）
 			expect(text).not.toContain(OTHER);
+			// ID の断片で出す旧実装に戻っていないこと
+			expect(text).not.toContain("2otherab");
+		});
+
+		// 「名乗ったが Clerk に名前が無い」と「匿名を選んだ」は別の状態で、
+		// 同じ言葉で書くと本人の意思を取り違える（#108）
+		it("表示名が無い人は匿名とは別の文言で出す", () => {
+			const text = visibleText(
+				render({
+					offers: [offer(OTHER, null)],
+					total: 1,
+					viewerOffered: false,
+					viewerUserId: VIEWER,
+				}),
+			);
+
+			expect(text).toContain("名前未設定の方");
+			expect(text).not.toContain("匿名の方");
+			expect(text).not.toContain(OTHER);
+			expect(text).not.toContain("2otherab");
 		});
 
 		it("自分と他人が混ざっていても取り違えない", () => {
 			const text = visibleText(
 				render({
-					offers: [offer(OTHER), offer(VIEWER)],
+					offers: [offer(OTHER, "山田 花子"), offer(VIEWER, "自分の名前")],
 					total: 2,
 					viewerOffered: true,
 					viewerUserId: VIEWER,
@@ -177,7 +210,9 @@ describe("HelpOfferButton", () => {
 			);
 
 			expect(text).toContain("あなた");
-			expect(text).toContain("参加者");
+			expect(text).toContain("山田 花子");
+			// 自分の分は表示名が取れていても「あなた」のまま
+			expect(text).not.toContain("自分の名前");
 		});
 
 		it("表明が無ければ一覧の見出しごと出さない", () => {
@@ -223,16 +258,16 @@ describe("HelpOfferButton", () => {
 	});
 });
 
-describe("shortUserId", () => {
-	it("`user_` 接頭辞を落として短くする", () => {
-		expect(shortUserId("user_2abcdefghijklmnop")).toBe("参加者 2abcdefg");
-	});
+// 表示名が無い表明者の文言（#108）。匿名の起票者と同じ言葉になっていないことを、
+// 画面の描画とは別に、文言の定義そのものでも押さえる。
+// 片方だけを直したときに気付けるよう、ja / en の両方を見る。
+describe("表示名が無い表明者の文言", () => {
+	it("匿名の起票者とは別の文言になっている", () => {
+		for (const locale of ["ja", "en"] as const) {
+			const unnamed = getUiMessages(locale).helpOffer.unnamedOfferer;
 
-	it("接頭辞が無くても落ちない", () => {
-		expect(shortUserId("abcdefghijk")).toBe("参加者 abcdefgh");
-	});
-
-	it("8 文字より短い ID でもそのまま出す", () => {
-		expect(shortUserId("user_abc")).toBe("参加者 abc");
+			expect(unnamed).not.toBe("");
+			expect(unnamed).not.toBe(ISSUE_ANONYMITY_LABELS[locale].anonymous);
+		}
 	});
 });

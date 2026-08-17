@@ -9,7 +9,13 @@ vi.mock("@clerk/backend", async () => {
 });
 
 import { createApp } from "../src/index";
-import { setMockUserId } from "./helpers/clerk-mock";
+import {
+	getUserListCalls,
+	resetMockClerkUsers,
+	setMockClerkUsers,
+	setMockUserId,
+	setMockUserListError,
+} from "./helpers/clerk-mock";
 import { applyMigrations } from "./helpers/migrate";
 
 const app = createApp();
@@ -100,6 +106,9 @@ describe("Help offers", () => {
 		await env.DB.exec("DELETE FROM issues");
 		await insertIssue(ISSUE_ID);
 		setMockUserId(HELPER);
+		// 表示名まわりのモック（#108）。前のテストのユーザーや呼び出し記録が
+		// 残っていると、「引けた」「1 回で済んだ」を取り違える
+		resetMockClerkUsers();
 	});
 
 	describe("POST /issues/:id/help-offers", () => {
@@ -296,6 +305,152 @@ describe("Help offers", () => {
 			expect(res.status).toBe(404);
 			const body = await readBody(res);
 			expect(body.error).toBe("Issue not found");
+		});
+
+		// 表示名（#108）。それまで画面は Clerk User ID の先頭 8 文字を
+		// 並べていて、人に見せる情報として意味を持っていなかった。
+		describe("表示名", () => {
+			it("Clerk の表示名を display_name として返す", async () => {
+				setMockClerkUsers([
+					{
+						id: HELPER,
+						firstName: "花子",
+						lastName: "山田",
+						username: null,
+					},
+				]);
+				await postOffer(ISSUE_ID);
+
+				const body = await readBody(await listOffers(ISSUE_ID));
+
+				expect(body.data).toHaveLength(1);
+				expect(body.data[0].display_name).toBe("花子 山田");
+			});
+
+			it("姓名が無ければ username を使う", async () => {
+				setMockClerkUsers([
+					{ id: HELPER, firstName: null, lastName: null, username: "hanako" },
+				]);
+				await postOffer(ISSUE_ID);
+
+				const body = await readBody(await listOffers(ISSUE_ID));
+				expect(body.data[0].display_name).toBe("hanako");
+			});
+
+			// Clerk は表示名を必須にしていないので、この状態は普通に存在する。
+			// ID の断片で埋め戻すと #108 で消したかった表示が復活する。
+			it("表示名が一つも無いユーザーは display_name が null", async () => {
+				setMockClerkUsers([
+					{ id: HELPER, firstName: null, lastName: null, username: null },
+				]);
+				await postOffer(ISSUE_ID);
+
+				const body = await readBody(await listOffers(ISSUE_ID));
+				expect(body.data[0].display_name).toBeNull();
+			});
+
+			// 最重要（#108 の方針 2）。表示名は「あると嬉しい」情報でしかなく、
+			// Clerk が落ちていることで困りごとの画面が見えなくなってはいけない。
+			it("Clerk への問い合わせが失敗しても一覧は返る", async () => {
+				setMockUserListError(new Error("Clerk is down"));
+				await postOffer(ISSUE_ID);
+				setMockUserId(OTHER_HELPER);
+				await postOffer(ISSUE_ID);
+
+				const consoleError = vi
+					.spyOn(console, "error")
+					.mockImplementation(() => undefined);
+				try {
+					const res = await listOffers(ISSUE_ID);
+
+					expect(res.status).toBe(200);
+					const body = await readBody(res);
+					// 一覧そのものは欠けない。表示名だけが落ちる
+					expect(body.total).toBe(2);
+					expect(body.data.map((offer: Body) => offer.user_id)).toEqual([
+						HELPER,
+						OTHER_HELPER,
+					]);
+					expect(
+						body.data.every((offer: Body) => offer.display_name === null),
+					).toBe(true);
+					// 失敗を握り潰していないこと（ログに残っていること）
+					expect(consoleError).toHaveBeenCalled();
+				} finally {
+					consoleError.mockRestore();
+				}
+			});
+
+			it("CLERK_SECRET_KEY が無くても一覧は返る", async () => {
+				await postOffer(ISSUE_ID);
+
+				const consoleError = vi
+					.spyOn(console, "error")
+					.mockImplementation(() => undefined);
+				try {
+					const res = await app.request(
+						offerUrl(ISSUE_ID),
+						{},
+						{ ...env, CLERK_SECRET_KEY: "" },
+					);
+
+					expect(res.status).toBe(200);
+					const body = await readBody(res);
+					expect(body.total).toBe(1);
+					expect(body.data[0].display_name).toBeNull();
+					// キーが無い状態で Clerk を叩きに行っていないこと
+					expect(getUserListCalls()).toHaveLength(0);
+				} finally {
+					consoleError.mockRestore();
+				}
+			});
+
+			// 1 人ずつ問い合わせる実装にしないこと（#108 の方針 1）。
+			// レート制限は本番インスタンスで 1000 リクエスト / 10 秒しかない。
+			it("表明者が複数いても問い合わせは 1 回にまとめる", async () => {
+				setMockClerkUsers([
+					{ id: HELPER, firstName: "A", lastName: null, username: null },
+					{ id: OTHER_HELPER, firstName: "B", lastName: null, username: null },
+				]);
+				await postOffer(ISSUE_ID);
+				setMockUserId(OTHER_HELPER);
+				await postOffer(ISSUE_ID);
+
+				const body = await readBody(await listOffers(ISSUE_ID));
+
+				expect(body.data.map((offer: Body) => offer.display_name)).toEqual([
+					"A",
+					"B",
+				]);
+				const calls = getUserListCalls();
+				expect(calls).toHaveLength(1);
+				expect(calls[0]).toEqual([HELPER, OTHER_HELPER]);
+			});
+
+			it("表明が無ければ Clerk に問い合わせない", async () => {
+				const body = await readBody(await listOffers(ISSUE_ID));
+
+				expect(body.total).toBe(0);
+				expect(getUserListCalls()).toHaveLength(0);
+			});
+
+			// 生の User ID を新たに増やしていないこと（#108 の方針 4）。
+			// 増えてよいのは表示名だけで、メールアドレス等が紛れ込んでいないか見る。
+			it("公開されるフィールドは表示名しか増えていない", async () => {
+				setMockClerkUsers([
+					{ id: HELPER, firstName: "花子", lastName: null, username: null },
+				]);
+				await postOffer(ISSUE_ID);
+
+				const body = await readBody(await listOffers(ISSUE_ID));
+
+				expect(Object.keys(body.data[0]).sort()).toEqual([
+					"created_at",
+					"display_name",
+					"id",
+					"user_id",
+				]);
+			});
 		});
 	});
 

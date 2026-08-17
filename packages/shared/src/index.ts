@@ -240,6 +240,10 @@ export const ISSUE_STATUS_LABELS: Record<
  * 名乗っている側を「投稿者あり」という抽象的な表現に留めているのは、
  * 実際の表示名の取得（Clerk Backend API 連携）が #67 の範囲だから。
  * 名前が取れるようになったら、ここの `named` を実際の表示名に置き換える。
+ *
+ * 「手伝います」の表明者だけは #108 で表示名が出るようになっている。
+ * 名前が取れなかった場合の文言は `UI_MESSAGES[locale].helpOffer.unnamedOfferer`
+ * で、ここの `anonymous` とは意図的に別の言葉にしている（理由はそちらのコメント）。
  */
 export const ISSUE_ANONYMITY_LABELS: Record<
 	Locale,
@@ -532,8 +536,19 @@ const JA_UI_MESSAGES = {
 		youOffered: " — あなたはこの Issue に手を挙げています",
 		offerersHeading: "表明した人",
 		you: "あなた",
-		/** Clerk の User ID を短くしたものの前置き */
-		participant: (shortId: string) => `参加者 ${shortId}`,
+		/**
+		 * 表示名が取れなかった表明者の表記（#108）。
+		 *
+		 * 「匿名の方」（`ISSUE_ANONYMITY_LABELS`）とは別の文言にしている。
+		 * 手伝いますの表明は本人が自分の意思で名乗り出る行為なので、
+		 * 「名乗ったが Clerk に名前が登録されていない」状態を
+		 * 「匿名を選んだ」と同じ言葉で書くと、本人の意思を取り違える。
+		 *
+		 * Clerk への問い合わせ自体が失敗したときもこの文言になる。
+		 * 利用者から見ればどちらも「名前が分からない人が手を挙げている」で、
+		 * 障害の内訳を画面で説明しても次の行動が変わらないため。
+		 */
+		unnamedOfferer: "名前未設定の方",
 	},
 
 	/** コメント欄（`CommentSection`） */
@@ -800,7 +815,7 @@ const EN_UI_MESSAGES: UiMessages = {
 		youOffered: " — you have raised your hand for this issue",
 		offerersHeading: "People who offered",
 		you: "You",
-		participant: (shortId: string) => `Participant ${shortId}`,
+		unnamedOfferer: "Name not set",
 	},
 
 	comments: {
