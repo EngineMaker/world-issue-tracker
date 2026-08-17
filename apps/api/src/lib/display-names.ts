@@ -9,6 +9,13 @@ import { createClerkClient } from "@clerk/backend";
  * このリポジトリで Worker のランタイムから外部 HTTP を叩く最初の場所になる。
  * そのため「取れなかったとき何が起きるか」を、取れたときと同じくらい
  * 明示的に決めてある（`fetchDisplayNames` の戻り値の説明を参照）。
+ *
+ * キャッシュ層は入れていない（#108 では任意とされている）。ただし呼び出し元の
+ * `GET /issues/:id/help-offers` は無認証で叩ける公開エンドポイントなので、
+ * 同じ Issue を連打されるとその回数だけ Clerk への問い合わせが増える。
+ * Clerk のレート制限を使い切ると、表示名だけでなく認証（JWKS の取得）まで
+ * 巻き添えになりうる。表示名を KV にキャッシュすると、この増幅と
+ * 一覧のレイテンシの両方が同時に収まる。人数や閲覧数が増えたら足すこと。
  */
 
 /**
@@ -134,7 +141,12 @@ export async function fetchDisplayNames(
 
 	// チャンクは順に処理する。並列にすると人数が多いときに一気に
 	// リクエストを撃つことになり、レート制限（1000 req / 10 秒）に近づく。
-	// 表明の一覧は数十件の想定なので、直列でも往復は 1 回で収まる。
+	// 表明の一覧は数十件の想定なので、実際には 1 チャンクで済むことがほとんど。
+	//
+	// なお `getUserList` は 1 回の呼び出しで Clerk へ HTTP を 2 本出す
+	// （`GET /users` と、使わない `totalCount` のための `GET /users/count`。
+	// `@clerk/backend@2.33.0` の `UserApi.getUserList` がそう実装している）。
+	// レート制限の見積もりはこの 2 倍で考えること。
 	for (const ids of chunk(uniqueIds, CLERK_USER_LIST_CHUNK_SIZE)) {
 		try {
 			const { data } = await clerk.users.getUserList({
