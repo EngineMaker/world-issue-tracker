@@ -80,6 +80,15 @@ API は `http://localhost:8787`、Web は `http://localhost:3000` で起動し�
 | API | https://world-issue-tracker-api.mktoho.workers.dev |
 | Web | https://world-issue-tracker-web.mktoho.workers.dev |
 
+> **独自ドメインへの切り替えを準備中（#98）。**
+> Web の入口は `https://issues.emaker.dev` になる予定です。Clerk の本番
+> インスタンスは独自ドメインを必須としており、`*.workers.dev` では本番キー
+> （`pk_live_` / `sk_live_`）を使えないため。
+>
+> コード側の受け入れ準備（CORS の許可オリジン、Clerk の `authorizedParties`）は
+> 済んでいて、値は `packages/shared` の `PRODUCTION_WEB_ORIGIN` に集約してあります。
+> DNS と Clerk 側の設定が終わって実際に切り替わったら、この表を更新すること。
+
 ### GitHub Actions による自動デプロイ
 
 `main` ブランチへの push 時に自動デプロイが実行されます。

@@ -1100,3 +1100,31 @@ export function clerkKeyKind(key: string | undefined): ClerkKeyKind | null {
 export function isUnsafeForProduction(key: string | undefined): boolean {
 	return clerkKeyKind(key) !== "production";
 }
+
+/**
+ * 本番の入口となる Web のオリジン（#98）。
+ *
+ * ここが唯一の宣言。以前は同じ URL が web / api / CI / README の 12 箇所に
+ * 直接書かれており、デプロイ先を変えるたびに全部を手で追う必要があった。
+ * 実際 `ALLOWED_ORIGINS` には「Web のデプロイ先を変えたときはここも必ず
+ * 更新すること」という申し送りが書かれている。更新が漏れると書き込みが 403 に
+ * なる（CORS だけの頃と違い、Origin 検証で完全に遮断されるため）。
+ *
+ * `emaker.dev` は他のサービス（reactions.emaker.dev）と共有しているゾーン。
+ * このサービスが育ったら独立したドメインへ移す想定で、そのとき書き換えるのは
+ * ここだけで済むようにしてある。
+ */
+export const PRODUCTION_WEB_ORIGIN = "https://issues.emaker.dev";
+
+/**
+ * 切り替え前から使っている入口（#98）。
+ *
+ * 独自ドメインへ移したあとも消さない。DNS の伝播中（最大 48 時間）は
+ * どちらからも来るし、旧 URL のブックマークや貼られたリンクも残る。
+ * 「新しい方は動くのに古い方からは書き込めない」という分かりにくい壊れ方を
+ * 避けるため、完全に移り終えたと判断できるまでは許可し続ける。
+ */
+export const LEGACY_WEB_ORIGINS = [
+	"https://world-issue-tracker-web.mktoho.workers.dev",
+	"https://world-issue-tracker.pages.dev",
+] as const;

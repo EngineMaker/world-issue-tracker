@@ -1,5 +1,9 @@
 import { env } from "cloudflare:test";
 import { getAuth } from "@hono/clerk-auth";
+import {
+	LEGACY_WEB_ORIGINS,
+	PRODUCTION_WEB_ORIGIN,
+} from "@world-issue-tracker/shared";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 
@@ -55,6 +59,74 @@ describe("clerkAuth middleware", () => {
 
 		// 設定不備を 401 として隠す形になるため、ログには必ず残ること
 		expect(consoleError).toHaveBeenCalled();
+		consoleError.mockRestore();
+	});
+
+	/*
+	 * `authorizedParties` を実際に渡していること（#98）。
+	 *
+	 * これは「同じ root ドメインの別サブドメインが侵害されたとき、そこで作られた
+	 * セッションを弾く」ための設定で、**効いていなくても正常系のテストは全部通る**。
+	 * 消えても誰も気づけない類の設定なので、渡していること自体を固定する。
+	 *
+	 * 値の中身まで見ているのは、本番オリジンが抜けると本番の認証が通らなくなり、
+	 * localhost が抜けると開発が止まるため。どちらも「気づくのはデプロイ後」になる。
+	 */
+	it("passes authorizedParties to the Clerk middleware", async () => {
+		const { clerkMiddleware } = await import("@hono/clerk-auth");
+		const spy = vi.spyOn(
+			await import("@hono/clerk-auth"),
+			"clerkMiddleware" as never,
+		);
+		void clerkMiddleware;
+
+		const app = new Hono();
+		app.get("/probe", clerkAuth(), (c) => c.json({ ok: true }));
+		await app.request("/probe", {}, envWithKeys);
+
+		expect(spy).toHaveBeenCalled();
+		const options = spy.mock.calls[0]?.[0] as
+			| { authorizedParties?: string[] }
+			| undefined;
+		expect(options?.authorizedParties).toEqual(
+			expect.arrayContaining([
+				"http://localhost:3000",
+				PRODUCTION_WEB_ORIGIN,
+				...LEGACY_WEB_ORIGINS,
+			]),
+		);
+		spy.mockRestore();
+	});
+
+	/*
+	 * オプションを渡してもキーが env から届いていること（#98）。
+	 *
+	 * `@hono/clerk-auth` は次の形でキーを解決する:
+	 *
+	 *   const { secretKey, publishableKey } = options || {
+	 *     secretKey: clerkEnv.CLERK_SECRET_KEY || "", ...
+	 *   }
+	 *
+	 * **options を渡した瞬間に env から読む経路が消える**。`authorizedParties`
+	 * だけを足すと全リクエストが「Missing Clerk Secret key」で未認証に落ちる。
+	 * 実際にこの罠を踏んで 188 件のテストが落ちた。上の正常系だけだと
+	 * 「未認証でも 200 が返る」ため見逃しうるので、認証が成立していること
+	 * （`getAuth` が AuthObject を返すこと）を明示的に固定する。
+	 */
+	it("still reads Clerk keys from env when options are passed", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+
+		const app = new Hono();
+		app.get("/probe", clerkAuth(), (c) =>
+			c.json({ resolved: getAuth(c) !== undefined }),
+		);
+
+		const res = await app.request("/probe", {}, envWithKeys);
+		expect(await res.json()).toEqual({ resolved: true });
+		// キーが届いていれば初期化は失敗しない＝エラーログは出ない
+		expect(consoleError).not.toHaveBeenCalled();
 		consoleError.mockRestore();
 	});
 

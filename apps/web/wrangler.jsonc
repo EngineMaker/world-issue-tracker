@@ -58,5 +58,26 @@
 		// ここと deploy.yml の両方に URL と帰属表示を入れる。
 		"NEXT_PUBLIC_MAP_TILE_URL": "",
 		"NEXT_PUBLIC_MAP_TILE_ATTRIBUTION": ""
-	}
+	},
+	// 本番の入口（#98）。
+	//
+	// Clerk の本番インスタンスは独自ドメインを要求する。`*.workers.dev` は
+	// 「自分では DNS を触れないドメイン」なので本番キー（pk_live_ / sk_live_）を
+	// 使えず、開発用インスタンスのまま運用するしかなかった。
+	//
+	// `custom_domain: true` にすると Cloudflare が DNS レコードと証明書を
+	// 自分で作る。**対応する CNAME を手で作ってはいけない**。既存レコードが
+	// あると Custom Domain の登録自体が弾かれる（Clerk 用の clerk.* などは
+	// 別ホスト名なので競合しない）。
+	//
+	// 値は packages/shared の PRODUCTION_WEB_ORIGIN と同じもの。あちらは
+	// CORS と authorizedParties が参照する。wrangler.jsonc は JSON なので
+	// import できず、ここだけは同じ文字列を二重に持つ。ずれると「画面は出るのに
+	// 書き込みだけ 403」という分かりにくい壊れ方をするので、変えるときは両方直すこと。
+	"routes": [
+		{
+			"pattern": "issues.emaker.dev",
+			"custom_domain": true
+		}
+	]
 }
