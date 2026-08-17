@@ -23,6 +23,10 @@
 	--accent: #1a7f5a;
 	--accent-soft: #e8f5ef;
 	--accent-line: #b8ddcb;
+	--surface-muted: #f1f5f2;
+	--surface-accent: #f3faf6;
+	--sun: #f3c76a;
+	--sun-soft: #fff4d6;
 
 	/* 状態を表す色。主役（--accent）とは別系統として扱う */
 	--danger: #b91c1c;
@@ -41,16 +45,14 @@
 	--text-xs: 0.75rem;
 
 	/*
-	 * ページ全体の見出し（h1 / h2）だけは 5 段階の外に置いている。
-	 * h1 は現在 2rem、h2 は 1.25rem で、最も近い段階（--text-xl / --text-lg）へ
-	 * 寄せると見出しが目に見えて小さくなる。#86 は「見た目を変えないこと」を
-	 * 最優先としているため、実寸は据え置いたまま値だけをここへ集約した。
-	 * 5 段階へ畳むかどうかはデザインを適用する後続の Issue で決める
+	 * 見出しは本文用の 5 段階へは畳まず、専用の 3 段階を残す（#94）。
+	 * トップページのヒーローやセクション見出しは本文と別の密度が要るため。
+	 * 既存値で変えるのは site だけで、狭い画面のヘッダを潰しにくくするために
+	 * 1.2rem から 1.0625rem へ下げた。
 	 */
 	--text-heading-page: 2rem;
 	--text-heading-section: 1.25rem;
-	/* ヘッダのサービス名。h1 だが本文中の見出しではないので別に持つ */
-	--text-heading-site: 1.2rem;
+	--text-heading-site: 1.0625rem;
 
 	/* 余白は 0.25rem 刻み */
 	--space-1: 0.25rem;
@@ -59,6 +61,29 @@
 	--space-4: 1rem;
 	--space-5: 1.25rem;
 	--space-6: 1.5rem;
+
+	/* 角丸の段階（#94） */
+	--radius-sm: 0.25rem;
+	--radius-md: 0.5rem;
+	--radius-lg: 0.75rem;
+	--radius-pill: 999px;
+
+	/* 影の段階（#94） */
+	--shadow-card: 0 8px 24px rgba(28, 36, 32, 0.08);
+	--shadow-card-hover: 0 12px 28px rgba(28, 36, 32, 0.12);
+	--shadow-button: 0 4px 16px rgba(26, 127, 90, 0.18);
+	--shadow-marker: 0 0 0 1px rgba(0, 0, 0, 0.4);
+
+	/* 行間と字送り（#94） */
+	--leading-tight: 1.2;
+	--leading-snug: 1.4;
+	--leading-normal: 1.6;
+	--tracking-tight: -0.01em;
+	--tracking-normal: 0;
+
+	/* 遷移（#94） */
+	--transition-fast: 160ms ease;
+	--transition-base: 240ms ease;
 }
 
 *,
@@ -71,7 +96,7 @@
 
 body {
 	font-family: system-ui, -apple-system, sans-serif;
-	line-height: 1.6;
+	line-height: var(--leading-normal);
 	color: var(--ink);
 	max-width: 800px;
 	margin: 0 auto;
@@ -108,6 +133,10 @@ a {
 	color: var(--accent);
 	/* 色だけに頼らない。色覚特性のある人にもリンクだと分かる必要がある */
 	text-decoration: underline;
+	transition:
+		color var(--transition-fast),
+		background-color var(--transition-fast),
+		box-shadow var(--transition-base);
 }
 
 /*
@@ -143,11 +172,14 @@ a:focus-visible {
 
 h1 {
 	font-size: var(--text-heading-page);
+	line-height: var(--leading-tight);
+	letter-spacing: var(--tracking-tight);
 	margin-bottom: var(--space-2);
 }
 
 h2 {
 	font-size: var(--text-heading-section);
+	line-height: var(--leading-snug);
 	margin-top: var(--space-6);
 	margin-bottom: var(--space-2);
 }
@@ -163,7 +195,7 @@ li {
 	/* タグの下地。元は無彩色の #f0f0f0 で、色味の無い --ground が最も近い */
 	background: var(--ground);
 	padding: var(--space-1) var(--space-3);
-	border-radius: 4px;
+	border-radius: var(--radius-sm);
 	font-size: var(--text-sm);
 }
 
@@ -237,7 +269,7 @@ main p {
 	color: inherit;
 	padding: 0.375rem var(--space-2);
 	border: 1px solid var(--line);
-	border-radius: 4px;
+	border-radius: var(--radius-sm);
 	background: var(--surface);
 }
 
@@ -302,29 +334,44 @@ main p {
 .button-primary {
 	font: inherit;
 	cursor: pointer;
-	border-radius: 4px;
+	border-radius: var(--radius-sm);
 	background: var(--accent);
 	color: var(--surface);
 	border: 1px solid var(--accent);
 	padding: var(--space-2) var(--space-5);
 	font-weight: 600;
+	box-shadow: var(--shadow-button);
+	transition:
+		transform var(--transition-fast),
+		box-shadow var(--transition-base),
+		background-color var(--transition-fast),
+		border-color var(--transition-fast);
 }
 
 /* 補助操作（現在地から入力・サインイン）。押しても主要操作ではないと分かる見た目 */
 .button-secondary {
 	font: inherit;
 	cursor: pointer;
-	border-radius: 4px;
+	border-radius: var(--radius-sm);
 	background: var(--surface);
 	color: var(--accent);
 	border: 1px solid var(--line);
 	padding: 0.375rem 0.875rem;
+	transition:
+		transform var(--transition-fast),
+		box-shadow var(--transition-base),
+		background-color var(--transition-fast),
+		border-color var(--transition-fast),
+		color var(--transition-fast);
 }
 
 .button-primary:disabled,
 .button-secondary:disabled {
 	cursor: default;
 	opacity: 0.6;
+	transform: none;
+	box-shadow: none;
+	transition: none;
 }
 
 /* 1 項目のまとまり。ラベル・補助テキスト・入力欄の間より、項目間を広く取る */
@@ -356,8 +403,12 @@ main p {
 
 /* 場所に関する項目のまとまり。狭い画面では緯度・経度を縦に積む */
 .location {
+	box-shadow: var(--shadow-card);
+	transition:
+		box-shadow var(--transition-base),
+		transform var(--transition-fast);
 	border: 1px solid var(--line);
-	border-radius: 4px;
+	border-radius: var(--radius-md);
 	padding: var(--space-3) var(--space-4);
 	margin-bottom: var(--space-5);
 }
@@ -384,10 +435,14 @@ main p {
 }
 
 .issue-map-view {
+	box-shadow: var(--shadow-card);
+	transition:
+		box-shadow var(--transition-base),
+		transform var(--transition-fast);
 	position: relative;
 	overflow: hidden;
 	border: 1px solid var(--line);
-	border-radius: 4px;
+	border-radius: var(--radius-md);
 	/* タイルが読み込めないときに、枠だけが残って中身が抜けて見えないように */
 	background-color: var(--line);
 	max-width: 100%;
@@ -434,7 +489,7 @@ main p {
 	 * 統一先に指定している値
 	 */
 	background-color: var(--danger);
-	box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+	box-shadow: var(--shadow-marker);
 }
 
 /* 帰属表示は隠さないことがタイル配信元の利用条件に含まれる */
@@ -521,8 +576,12 @@ main p {
 
 /* Issue 1 件のカード。公開一覧と自分の一覧が同じ見た目を使う */
 .issue-card {
+	box-shadow: var(--shadow-card);
+	transition:
+		box-shadow var(--transition-base),
+		transform var(--transition-fast);
 	border: 1px solid var(--line);
-	border-radius: 6px;
+	border-radius: var(--radius-md);
 	padding: var(--space-3) var(--space-4);
 	margin-bottom: var(--space-3);
 	list-style: none;
@@ -565,8 +624,12 @@ main p {
  */
 
 .issue-filters {
+	box-shadow: var(--shadow-card);
+	transition:
+		box-shadow var(--transition-base),
+		transform var(--transition-fast);
 	border: 1px solid var(--line);
-	border-radius: 6px;
+	border-radius: var(--radius-md);
 	padding: var(--space-3) var(--space-4);
 	margin-bottom: var(--space-4);
 }
@@ -593,8 +656,12 @@ main p {
 
 /* コメント 1 件。カードと似た枠だが、下の余白と本文の扱いが違う */
 .comment-card {
+	box-shadow: var(--shadow-card);
+	transition:
+		box-shadow var(--transition-base),
+		transform var(--transition-fast);
 	border: 1px solid var(--line);
-	border-radius: 6px;
+	border-radius: var(--radius-md);
 	padding: var(--space-3) var(--space-4);
 	margin-bottom: var(--space-2);
 	list-style: none;
@@ -655,6 +722,7 @@ main p {
 .site-header-title {
 	margin: 0;
 	font-size: var(--text-heading-site);
+	line-height: var(--leading-snug);
 	white-space: nowrap;
 }
 
@@ -745,6 +813,442 @@ main p {
  * 優先する」という判断で、特定の端末の実寸に合わせたものではない
  * （どの見た目を目指すかは #94 / #95 で決まる。ここは破綻を止める範囲）。
  */
+
+@media (hover: hover) {
+	.button-primary:hover,
+	.button-secondary:hover {
+		transform: translateY(-1px);
+	}
+
+	.button-secondary:hover {
+		background: var(--surface-accent);
+		border-color: var(--accent-line);
+	}
+
+	.issue-card:hover,
+	.comment-card:hover,
+	.issue-filters:hover,
+	.location:hover,
+	.issue-map-view:hover {
+		box-shadow: var(--shadow-card-hover);
+	}
+}
+
+/* #94 の承認済み見本をリポジトリ内で確認するためのページ */
+.design-direction-page {
+	max-width: 72rem;
+	padding: var(--space-6) 0;
+}
+
+.design-direction-hero,
+.design-screen,
+.design-empty-card,
+.design-loading-card,
+.design-token-table-wrap,
+.design-heading-decision,
+.design-mock-card,
+.design-detail-panel,
+.design-filter-panel,
+.design-map-card,
+.design-photo-card,
+.design-hero-art-frame {
+	background: var(--surface);
+	border: 1px solid var(--line);
+	box-shadow: var(--shadow-card);
+}
+
+.design-direction-hero {
+	display: grid;
+	grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 1fr);
+	gap: var(--space-6);
+	padding: var(--space-6);
+	border-radius: var(--radius-lg);
+	background: linear-gradient(180deg, var(--surface-accent), var(--surface));
+}
+
+.design-direction-copy,
+.design-hero-panel,
+.design-home-copy,
+.design-home-rail,
+.design-stack,
+.design-photo-stack,
+.design-section-heading {
+	display: grid;
+	gap: var(--space-3);
+}
+
+.design-kicker,
+.design-screen-kicker {
+	font-size: var(--text-sm);
+	line-height: var(--leading-snug);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--ink-soft);
+}
+
+.design-lead {
+	font-size: var(--text-lg);
+	line-height: var(--leading-snug);
+	max-width: 42rem;
+}
+
+.design-action-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	align-items: center;
+}
+
+.design-button-primary,
+.design-button-secondary {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--space-2) var(--space-4);
+	border-radius: var(--radius-pill);
+	font-weight: 600;
+	text-decoration: none;
+}
+
+.design-button-primary {
+	background: var(--accent);
+	color: var(--surface);
+	box-shadow: var(--shadow-button);
+}
+
+.design-button-secondary {
+	background: var(--surface);
+	color: var(--accent);
+	border: 1px solid var(--accent-line);
+}
+
+.design-decision-list {
+	display: grid;
+	gap: var(--space-3);
+}
+
+.design-decision-list div {
+	padding: var(--space-3) var(--space-4);
+	border-radius: var(--radius-md);
+	background: var(--surface-muted);
+}
+
+.design-decision-list dt {
+	font-weight: 700;
+	margin-bottom: var(--space-1);
+}
+
+.design-hero-art-frame,
+.design-photo-card,
+.design-map-card {
+	border-radius: var(--radius-lg);
+	overflow: hidden;
+}
+
+.design-hero-art-frame {
+	padding: var(--space-3);
+	background: linear-gradient(180deg, var(--sun-soft), var(--surface));
+}
+
+.design-hero-note,
+.design-photo-caption,
+.design-filter-summary,
+.design-mock-meta,
+.design-footnote,
+.design-back-link {
+	color: var(--ink-soft);
+	font-size: var(--text-sm);
+}
+
+.design-section {
+	margin-top: calc(var(--space-6) * 2);
+	display: grid;
+	gap: var(--space-4);
+}
+
+.design-screen-grid,
+.design-state-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--space-4);
+}
+
+.design-screen {
+	border-radius: var(--radius-lg);
+	padding: var(--space-5);
+	display: grid;
+	gap: var(--space-4);
+}
+
+.design-screen-header,
+.design-detail-header {
+	display: grid;
+	gap: var(--space-2);
+}
+
+.design-screen h3,
+.design-heading-decision h3 {
+	font-size: var(--text-xl);
+	line-height: var(--leading-tight);
+	letter-spacing: var(--tracking-tight);
+}
+
+.design-screen h4,
+.design-empty-title {
+	font-size: var(--text-lg);
+	line-height: var(--leading-snug);
+}
+
+.design-screen-body,
+.design-home-mock {
+	display: grid;
+	gap: var(--space-3);
+}
+
+.design-home-mock {
+	grid-template-columns: minmax(0, 1.1fr) minmax(16rem, 1fr);
+	align-items: start;
+}
+
+.design-home-rail {
+	grid-column: 1 / -1;
+}
+
+.design-band,
+.design-scope-pill,
+.design-status-pill,
+.design-input-chip,
+.design-status-flow > li {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	width: fit-content;
+	padding: 0.375rem 0.75rem;
+	border-radius: var(--radius-pill);
+	font-size: var(--text-sm);
+	line-height: var(--leading-snug);
+}
+
+.design-band {
+	background: var(--surface-accent);
+	color: var(--accent);
+}
+
+.design-scope-pill {
+	background: var(--surface-muted);
+	color: var(--ink);
+}
+
+.design-status-flow,
+.design-filter-row,
+.design-mock-meta-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+
+.design-status-pill {
+	background: var(--surface-muted);
+	border: 1px solid transparent;
+}
+
+.design-status-open {
+	color: var(--ink-soft);
+	border-color: var(--line);
+}
+
+.design-status-triaged {
+	color: var(--warning);
+	border-color: var(--warning);
+}
+
+.design-status-progress,
+.design-status-review,
+.design-status-resolved,
+.design-status-closed {
+	color: var(--accent);
+	border-color: var(--accent-line);
+}
+
+.design-photo-card {
+	padding: var(--space-2);
+	background: linear-gradient(180deg, var(--surface-accent), var(--surface));
+}
+
+.design-photo-card-tall {
+	min-height: 18rem;
+}
+
+.design-mock-card,
+.design-detail-panel,
+.design-filter-panel,
+.design-empty-card,
+.design-loading-card,
+.design-heading-decision,
+.design-map-card {
+	border-radius: var(--radius-md);
+	padding: var(--space-4);
+}
+
+.design-mock-card p:last-child,
+.design-detail-panel p:last-child,
+.design-empty-card p:last-child,
+.design-loading-card p:last-child {
+	margin-bottom: 0;
+}
+
+.design-detail-layout {
+	grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+	align-items: start;
+}
+
+.design-map-card {
+	background: linear-gradient(180deg, var(--surface-muted), var(--surface));
+}
+
+.design-map-grid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: var(--space-1);
+	aspect-ratio: 1;
+}
+
+.design-map-grid > span {
+	display: block;
+	border-radius: var(--radius-sm);
+	background: var(--surface-accent);
+	border: 1px solid var(--accent-line);
+	min-height: 4.5rem;
+}
+
+.design-map-marker {
+	background: var(--danger);
+	box-shadow: var(--shadow-marker);
+}
+
+.design-empty-card {
+	gap: var(--space-3);
+	display: grid;
+}
+
+.design-empty-card-warm {
+	background: linear-gradient(180deg, var(--sun-soft), var(--surface));
+}
+
+.design-loading-card {
+	display: grid;
+	gap: var(--space-2);
+	background: var(--surface-muted);
+}
+
+.design-skeleton,
+.design-skeleton-pill {
+	background: var(--surface);
+	border-radius: var(--radius-sm);
+	height: 0.875rem;
+}
+
+.design-skeleton-wide {
+	width: 72%;
+}
+
+.design-skeleton-pill {
+	width: 36%;
+	height: 2.25rem;
+	border-radius: var(--radius-pill);
+}
+
+.design-token-table-wrap {
+	border-radius: var(--radius-lg);
+	overflow: hidden;
+}
+
+.design-token-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.design-token-table th,
+.design-token-table td {
+	padding: var(--space-3) var(--space-4);
+	border-bottom: 1px solid var(--line);
+	text-align: left;
+	vertical-align: top;
+}
+
+.design-token-table thead {
+	background: var(--surface-muted);
+}
+
+.design-heading-decision {
+	background: var(--surface-accent);
+}
+
+.design-hero-illustration {
+	display: block;
+	width: 100%;
+	height: auto;
+}
+
+.design-art-sun-soft {
+	fill: var(--sun-soft);
+}
+
+.design-art-sun {
+	fill: var(--sun);
+}
+
+.design-art-accent-soft {
+	fill: var(--accent-soft);
+}
+
+.design-art-surface {
+	fill: var(--surface);
+}
+
+.design-art-ink {
+	fill: var(--ink);
+}
+
+.design-art-line,
+.design-art-accent,
+.design-art-surface-stroke {
+	fill: none;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	stroke-width: 8;
+}
+
+.design-art-line {
+	stroke: var(--accent-line);
+}
+
+.design-art-accent {
+	stroke: var(--accent);
+}
+
+.design-art-surface-stroke {
+	stroke: var(--surface);
+}
+
+@media (max-width: 768px) {
+	.design-direction-hero,
+	.design-screen-grid,
+	.design-state-grid,
+	.design-home-mock,
+	.design-detail-layout {
+		grid-template-columns: 1fr;
+	}
+
+	.design-direction-hero,
+	.design-screen {
+		padding: var(--space-4);
+	}
+}
+
 @media (max-width: 480px) {
 	body {
 		padding: var(--space-4);
