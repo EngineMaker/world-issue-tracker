@@ -15,6 +15,7 @@ import {
 	IssueStatusError,
 	updateIssueStatus,
 } from "../../lib/issue-status";
+import { StatusPill } from "./StatusPill";
 
 /**
  * ステータス欄。起票者かどうかを自分で確かめてから `StatusControl` を出す。
@@ -126,9 +127,12 @@ export function StatusUnavailable({
 	const messages = getUiMessages(locale);
 
 	return (
-		<section aria-labelledby="issue-status-heading">
+		<section className="status-control" aria-labelledby="issue-status-heading">
 			<h2 id="issue-status-heading">{messages.statusControl.heading}</h2>
-			<p>{ISSUE_STATUS_LABELS[locale][status]}</p>
+			{/* 変えられなくても現在の状態は読める。一覧・詳細と同じピルで出す（#95） */}
+			<p className="status-control-current">
+				<StatusPill status={status} locale={locale} />
+			</p>
 			<p className="text-warning">{messages.statusControl.unavailable}</p>
 		</section>
 	);
@@ -180,9 +184,14 @@ export function StatusControl({
 	// （何が起きているかは、変えられない人にとっても Issue の情報の一部）
 	if (!viewerIsOwner) {
 		return (
-			<section aria-labelledby="issue-status-heading">
+			<section
+				className="status-control"
+				aria-labelledby="issue-status-heading"
+			>
 				<h2 id="issue-status-heading">{messages.statusControl.heading}</h2>
-				<p>{statusLabels[status]}</p>
+				<p className="status-control-current">
+					<StatusPill status={status} locale={locale} />
+				</p>
 			</section>
 		);
 	}
@@ -215,17 +224,25 @@ export function StatusControl({
 	};
 
 	return (
-		<section aria-labelledby="issue-status-heading">
+		/*
+		 * `status-control` は入力欄のスタイルを届かせるためのスコープでもある
+		 * （#95）。ここは `.issue-form` の外にあり、select に枠線も
+		 * `:focus-visible` のアウトラインも当たっていなかった。
+		 * キーボードで辿るとフォーカス位置が見えない状態だった
+		 */
+		<section className="status-control" aria-labelledby="issue-status-heading">
 			<h2 id="issue-status-heading">{messages.statusControl.heading}</h2>
 
-			<p>
-				{messages.statusControl.current} <strong>{statusLabels[status]}</strong>
+			<p className="status-control-current">
+				{messages.statusControl.current}{" "}
+				{/* 一覧・詳細と同じピルで出して、同じ Issue が同じ見た目で続くようにする */}
+				<StatusPill status={status} locale={locale} />
 			</p>
 
-			<p>
-				<label htmlFor="issue-status-select">
+			<p className="status-control-form">
+				<label htmlFor="issue-status-select" className="field-label">
 					{messages.statusControl.changeTo}
-				</label>{" "}
+				</label>
 				<select
 					id="issue-status-select"
 					value={selected}
@@ -243,13 +260,15 @@ export function StatusControl({
 							{statusLabels[option]}
 						</option>
 					))}
-				</select>{" "}
+				</select>
 				<button
 					type="button"
 					className="button-primary"
 					onClick={handleSubmit}
 					// 同じ値への更新は `updated_at` だけが動く無意味な往復になる
 					disabled={isSubmitting || !isLoaded || selected === status}
+					// 押した直後に何が起きているかを読み上げにも伝える（#95）
+					aria-busy={isSubmitting}
 				>
 					{isSubmitting
 						? messages.statusControl.submitting

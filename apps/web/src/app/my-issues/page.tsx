@@ -28,11 +28,10 @@ export default async function MyIssuesPage() {
 		<main>
 			<h1>{messages.myIssuesPage.heading}</h1>
 			<MyIssueList result={result} locale={locale} />
-			<p>
+			{/* ページ末尾の導線。区切りは CSS の余白が持つ（#95） */}
+			<p className="page-nav">
 				<Link href="/issues/new">{messages.myIssuesPage.writeIssue}</Link>
-				{" / "}
 				<Link href="/issues">{messages.myIssuesPage.viewAll}</Link>
-				{" / "}
 				<Link href="/">{messages.myIssuesPage.backToHome}</Link>
 			</p>
 		</main>

@@ -117,12 +117,23 @@ describe("IssueList", () => {
 				});
 				const visibleText = html.replace(/<[^>]*>/g, "");
 
-				// 「含まれているか」だけを見ると、スコープとステータスを
-				// 逆の位置に出す実装を見逃す（どちらのラベルも画面には出るため）。
-				// 並び順まで固定する
-				expect(visibleText).toContain(
-					`${expectedScopeLabels[scope].label} / ${expectedStatusLabels[status]} /`,
-				);
+				/*
+				 * 「含まれているか」だけを見ると、スコープとステータスを
+				 * 逆の位置に出す実装を見逃す（どちらのラベルも画面には出るため）。
+				 * 並び順まで固定する。
+				 *
+				 * #95 で区切り文字（" / "）を廃止し、ステータスをピルにして
+				 * 先頭へ移した（一覧を眺めたときに進み具合が読み取れるように）。
+				 * 区切り文字が消えても順序の検証は落とさないよう、
+				 * 可視テキスト上の出現位置を比べる形に変えている
+				 */
+				const statusAt = visibleText.indexOf(expectedStatusLabels[status]);
+				const scopeAt = visibleText.indexOf(expectedScopeLabels[scope].label);
+
+				expect(statusAt, `${status} のラベルが出ていない`).toBeGreaterThan(-1);
+				expect(scopeAt, `${scope} のラベルが出ていない`).toBeGreaterThan(-1);
+				// ステータスが先、スコープが後
+				expect(statusAt).toBeLessThan(scopeAt);
 			}
 		}
 	});

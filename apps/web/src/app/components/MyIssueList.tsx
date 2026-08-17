@@ -5,6 +5,7 @@ import {
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import type { FetchMyIssuesResult } from "../../lib/issues";
+import { EmptyState } from "./EmptyState";
 import { IssueCard } from "./IssueList";
 
 /**
@@ -54,11 +55,19 @@ export function MyIssueList({
 	}
 
 	if (result.issues.length === 0) {
+		/*
+		 * 0 件（#95）。以前は本文と導線が空白も挟まずに繋がっていて
+		 * 「まだ Issue を起票していません。最初の 1 件を書いてみる」が
+		 * 1 つの文のように見えていた。まとまりを分けて、次の一歩を
+		 * 独立した導線として示す
+		 */
 		return (
-			<p className="text-soft">
-				{messages.myIssueList.empty}
-				<Link href="/issues/new">{messages.myIssueList.writeFirst}</Link>
-			</p>
+			<EmptyState
+				message={messages.myIssueList.empty}
+				action={
+					<Link href="/issues/new">{messages.myIssueList.writeFirst}</Link>
+				}
+			/>
 		);
 	}
 

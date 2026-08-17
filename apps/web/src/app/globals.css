@@ -45,13 +45,21 @@
 	--text-xs: 0.75rem;
 
 	/*
-	 * 見出しは本文用の 5 段階へは畳まず、専用の 3 段階を残す（#94）。
-	 * トップページのヒーローやセクション見出しは本文と別の密度が要るため。
-	 * 既存値で変えるのは site だけで、狭い画面のヘッダを潰しにくくするために
-	 * 1.2rem から 1.0625rem へ下げた。
+	 * 見出しの段階（#94 の結論）。
+	 *
+	 * #86 は「5 段階へ畳むかどうかは後続の Issue で決める」として実寸を
+	 * 据え置いていた。#94 の結論は **5 段階には畳まず、見出し専用に
+	 * 3 段階を持つ**。見出しと本文は用途が違い、同じ物差しに乗せると
+	 * どちらかが不自然な大きさになるため。
+	 *
+	 * ただし --text-heading-site だけは 1.2rem → 1.0625rem に変更する。
+	 * サイト名が本文より大きい必要はなく、狭い画面でヘッダが崩れる一因でも
+	 * あるため（#93 で折り返しは直したが、大きさそのものは残っていた）。
+	 * **#94 が認めた既存値の変更はこの 1 つだけ。**
 	 */
 	--text-heading-page: 2rem;
 	--text-heading-section: 1.25rem;
+	/* ヘッダのサービス名。h1 だが本文中の見出しではないので別に持つ */
 	--text-heading-site: 1.0625rem;
 
 	/* 余白は 0.25rem 刻み */
@@ -61,6 +69,13 @@
 	--space-4: 1rem;
 	--space-5: 1.25rem;
 	--space-6: 1.5rem;
+	/*
+	 * 節と節の間に使う大きい余白（#94）。0.25rem 刻みを続けると
+	 * --space-7 / --space-8 と番号だけが増えて使い分けの基準が失われるので、
+	 * 「まとまりの区切り」という用途の名前で 2 段階だけ持つ
+	 */
+	--space-section: 2rem;
+	--space-page: 3rem;
 
 	/* 角丸の段階（#94） */
 	--radius-sm: 0.25rem;
@@ -84,6 +99,32 @@
 	/* 遷移（#94） */
 	--transition-fast: 160ms ease;
 	--transition-base: 240ms ease;
+
+	/*
+	 * ライフサイクル 6 段階の色（#95）。#94 の見本には無かったので
+	 * ここで新しく足す（見本側の語彙とは衝突しない）。
+	 *
+	 * 進むほど --accent（緑）に近づく並びにして、色そのものが
+	 * 「直っていく道筋」を示す。open は未着手を表す中立な灰、
+	 * closed は役目を終えたことを示すため彩度を落とす。
+	 *
+	 * **色だけに頼らない。** 各段階には形（●）も併せて持たせており
+	 * （.status-pill-mark。進むほど塗りが増える）、色が見分けにくい人にも
+	 * 順序が伝わる。
+	 * 文字色は下地に対して本文と同じ 4.5:1 以上を確保している
+	 */
+	--status-open: #55605a;
+	--status-open-soft: #eef1ef;
+	--status-triaged: #7a5f14;
+	--status-triaged-soft: #fbf3de;
+	--status-in-progress: #1f6f8b;
+	--status-in-progress-soft: #e4f1f6;
+	--status-review: #2a6f5c;
+	--status-review-soft: #e6f2ee;
+	--status-resolved: #146b4c;
+	--status-resolved-soft: #e8f5ef;
+	--status-closed: #5d6763;
+	--status-closed-soft: #f2f4f3;
 }
 
 *,
@@ -94,8 +135,22 @@
 	padding: 0;
 }
 
+/*
+ * 面の色を敷く（#94）。これまで background の指定が無く、ブラウザ既定の
+ * 白のままだった。--surface（白）を使うカードや入力欄が同じ白の上に載り、
+ * まとまりの境界が枠線 1px でしか伝わらない状態だった。
+ *
+ * `body` ではなく `html` に敷いている。`body` は `max-width: 800px` で
+ * 中央に寄せてあるため、そちらに敷くと本文の幅の外（左右）だけが
+ * ブラウザ既定の白のまま残り、地の色が帯状に切れて見える
+ */
+html {
+	background: var(--ground);
+}
+
 body {
 	font-family: system-ui, -apple-system, sans-serif;
+	/* 本文の行間はトークンから引く（#94）。見出しは下で別に上書きする */
 	line-height: var(--leading-normal);
 	color: var(--ink);
 	max-width: 800px;
@@ -170,6 +225,18 @@ a:focus-visible {
 	outline-offset: 2px;
 }
 
+/*
+ * 見出しの行間は本文と分ける（#94）。--leading-body（1.7）のままだと
+ * 字の大きい見出しほど行が離れて、2 行に折り返したときに 1 つの見出しに
+ * 見えなくなる。折り返しは日本語と英語で起きる位置が違うので、
+ * どちらの言語でも成立させるにはここを分ける必要がある
+ */
+h1,
+h2,
+h3 {
+	line-height: var(--leading-snug);
+}
+
 h1 {
 	font-size: var(--text-heading-page);
 	line-height: var(--leading-tight);
@@ -180,8 +247,12 @@ h1 {
 h2 {
 	font-size: var(--text-heading-section);
 	line-height: var(--leading-snug);
-	margin-top: var(--space-6);
-	margin-bottom: var(--space-2);
+	/*
+	 * 節の見出しの上は「まとまりの区切り」なので --space-section を使う（#95）。
+	 * --space-6 では前の節の本文と近すぎて、どこで話が変わったのか読めなかった
+	 */
+	margin-top: var(--space-section);
+	margin-bottom: var(--space-3);
 }
 
 ul {
@@ -192,8 +263,13 @@ ul {
 }
 
 li {
-	/* タグの下地。元は無彩色の #f0f0f0 で、色味の無い --ground が最も近い */
-	background: var(--ground);
+	/*
+	 * タグの下地。以前は地の色と同じ --ground だったが、#94 で地の色そのものを
+	 * --ground にしたため、そのままではタグが背景に溶けて見えなくなる。
+	 * 白い面と枠でタグの輪郭を作る
+	 */
+	background: var(--surface);
+	border: 1px solid var(--line);
 	padding: var(--space-1) var(--space-3);
 	border-radius: var(--radius-sm);
 	font-size: var(--text-sm);
@@ -201,6 +277,136 @@ li {
 
 main p {
 	margin-bottom: var(--space-3);
+}
+
+/*
+ * トップページのヒーロー（Issue #95、見本は #94）。
+ *
+ * 文字を絵の上に重ねず**隣に置く**。重ねると絵ごとに読みやすさが変わり、
+ * 差し替えのたびに文字色や影の調整が要る。素材写真を入れる場合も
+ * .hero-figure の中身を差し替えるだけで済む形にしてある。
+ *
+ * 段組みは grid の auto-fit。日本語と英語で見出しの長さが変わるので、
+ * 幅を数値で切る @media ではなく「入る幅があれば 2 列」にしている
+ */
+.hero {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+	gap: var(--space-5);
+	align-items: center;
+	background: var(--sun-soft);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	padding: var(--space-5);
+	margin-bottom: var(--space-section);
+}
+
+/*
+ * ヒーローの文字側。絵と横に並ぶが、狭い画面では grid が 1 列に落ちて
+ * 縦に積む。そのとき文字が先に来るよう、DOM の順序も文字を先にしてある
+ */
+.hero-body {
+	/* 絵の側と縦位置を揃える。中身は上から順に積む */
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+}
+
+.hero-heading {
+	/*
+	 * ヒーローの見出しは h1 の既定より一段抑える。--text-heading-page（2rem）の
+	 * ままだと、日本語の見出し（22 文字）が狭い画面で 4 行に折り返して
+	 * ヒーローだけで画面が埋まる
+	 */
+	font-size: var(--text-xl);
+	margin-bottom: var(--space-3);
+}
+
+.hero-lead {
+	color: var(--ink-soft);
+	margin-bottom: var(--space-4);
+}
+
+.hero-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-3) var(--space-4);
+	/* main p の下余白は要らない。ヒーロー自身が下余白を持っている */
+	margin-bottom: 0;
+}
+
+/*
+ * 絵の置き場所。#94 は素材写真をここに置くと決めたが、素材の選定
+ * （ライセンス一覧）が済んでいない。写真が入るまでの間も成立するよう、
+ * 外部素材に依存しないインライン SVG を置いている
+ */
+.hero-figure {
+	display: flex;
+	justify-content: center;
+}
+
+.hero-figure-art {
+	width: 100%;
+	/* 絵が主役になりすぎないよう頭打ちにする。主役は投稿された困りごと */
+	max-width: 16rem;
+	height: auto;
+}
+
+.hero-art-sun {
+	fill: var(--sun);
+	/* 暖色をそのまま面で置くと文字より強くなるので、薄く敷く */
+	opacity: 0.18;
+}
+
+.hero-art-ground {
+	fill: var(--accent-soft);
+}
+
+.hero-art-steps circle {
+	fill: var(--accent);
+}
+
+.hero-art-path {
+	fill: none;
+	stroke: var(--accent);
+	stroke-width: 2;
+	stroke-linecap: round;
+}
+
+/*
+ * リンクを主要操作の見た目で見せる（#95）。
+ *
+ * `.button-primary` は `<button>` 用で、`<a>` に付けると下線と
+ * リンク色（`a { color: var(--accent) }`）が勝って中途半端な見た目になる。
+ * ヒーローの「困りごとを書く」は遷移なので要素は `<a>` のまま、
+ * 見た目だけをボタンに寄せる
+ */
+.button-link {
+	display: inline-block;
+	background: var(--accent);
+	color: var(--surface);
+	border: 1px solid var(--accent);
+	border-radius: var(--radius-sm);
+	padding: var(--space-2) var(--space-5);
+	font-weight: 600;
+	text-decoration: none;
+	transition:
+		background var(--transition-fast),
+		box-shadow var(--transition-fast);
+}
+
+/* `a:visited` が --accent を指しているので、白い文字を明示的に取り戻す */
+.button-link:visited {
+	color: var(--surface);
+}
+
+@media (hover: hover) {
+	.button-link:hover {
+		/* a:hover の --accent-soft（薄緑）が当たると白文字が読めなくなる */
+		background: var(--accent);
+		box-shadow: var(--shadow-card-hover);
+	}
 }
 
 /*
@@ -216,6 +422,8 @@ main p {
 .actions li,
 .scopes li {
 	background: none;
+	/* 上の li が枠を持つようになったので、こちらも併せて打ち消す（#94） */
+	border: none;
 	padding: 0;
 	font-size: var(--text-base);
 	margin-bottom: var(--space-2);
@@ -225,17 +433,146 @@ main p {
 	font-size: var(--text-lg);
 }
 
-/* ステータスは順序のある流れなので、矢印で繋いだタグとして見せる */
+/*
+ * トップページの導線（#94）。「Issue を見る」「困りごとを書く」の 2 つを
+ * 押せる面として見せる。以前はリンク 1 行と説明文が同じ行に流れていて、
+ * どこを押すのかが下線の有無でしか伝わらなかった
+ */
+.actions {
+	display: grid;
+	/*
+	 * 2 列に置けるだけの幅があれば 2 列、無ければ 1 列。数値を境に
+	 * 切り替える @media と違い、日本語と英語で文字数が変わっても
+	 * 入る幅のときだけ 2 列になる（#94 の「どちらでも崩れない」）
+	 */
+	grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+	gap: var(--space-3);
+	margin-bottom: var(--space-section);
+}
+
+.actions li {
+	margin-bottom: 0;
+}
+
+/* 面そのものを押せる場所にする。中のリンクを面いっぱいに広げる */
+.action-card {
+	display: block;
+	background: var(--surface);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-card);
+	padding: var(--space-4);
+	height: 100%;
+	/* 面全体が押せることを示すので、文字の下線は外す */
+	text-decoration: none;
+	color: var(--ink);
+	transition:
+		box-shadow var(--transition-fast),
+		border-color var(--transition-fast),
+		transform var(--transition-base);
+}
+
+@media (hover: hover) {
+	.action-card:hover {
+		/*
+		 * リンクの既定（a:hover の --accent-soft）はここでは使わない。
+		 * 面が丸ごと薄緑になると押した後の状態のように見えるため、
+		 * 持ち上がりで応える
+		 */
+		background: var(--surface);
+		border-color: var(--accent-line);
+		box-shadow: var(--shadow-card-hover);
+		transform: translateY(-1px);
+	}
+}
+
+.action-card-title {
+	display: block;
+	font-size: var(--text-lg);
+	font-weight: 600;
+	color: var(--accent);
+	margin-bottom: var(--space-1);
+}
+
+.action-card-hint {
+	display: block;
+	font-size: var(--text-sm);
+	color: var(--ink-soft);
+}
+
+/*
+ * スコープの階段（#94）。5 段階を昇る形で見せる。
+ * 個人と世界が同じ物差しの上にあることを、順序と字下げの両方で示す。
+ *
+ * 字下げは `--depth`（0〜4）から算出する。段数は
+ * `IssueScope.options` の並びで決まるので、CSS 側に段数を書かない
+ * （スコープが増えたときに CSS を直し忘れて階段が途切れるのを防ぐ）
+ */
+.scopes {
+	counter-reset: scope-step;
+	margin-bottom: var(--space-section);
+}
+
+.scopes li {
+	counter-increment: scope-step;
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-3);
+	background: var(--surface);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-sm);
+	padding: var(--space-2) var(--space-3);
+	margin-bottom: var(--space-2);
+	/*
+	 * 段が上がるほど左に寄せる。狭い画面では字下げの分だけ本文が細くなるので
+	 * min() で頭打ちにする（幅 360px でも 1 段あたり 4px 以下に収まる）
+	 */
+	margin-left: calc(var(--depth, 0) * min(var(--space-3), 2vw));
+}
+
+/* 何段目かを数字で示す。色に頼らず順序が伝わる手がかり */
+.scopes li::before {
+	content: counter(scope-step);
+	flex: none;
+	display: inline-block;
+	min-width: 1.5rem;
+	text-align: center;
+	font-size: var(--text-sm);
+	font-weight: 600;
+	color: var(--accent);
+	background: var(--accent-soft);
+	border-radius: var(--radius-pill);
+	padding: 0 var(--space-1);
+}
+
+.scope-name {
+	font-weight: 600;
+}
+
+.scope-description {
+	color: var(--ink-soft);
+	font-size: var(--text-sm);
+}
+
+/* ステータスは順序のある流れなので、矢印で繋いだピルとして見せる */
 .statuses {
 	list-style: none;
 	display: flex;
 	flex-wrap: wrap;
 	gap: var(--space-2);
 	align-items: center;
+	margin-bottom: var(--space-section);
+}
+
+.statuses li {
+	/* ピル自身が下地と枠を持つので、素の li の装飾は外す */
+	background: none;
+	border: none;
+	padding: 0;
 }
 
 .statuses li:not(:last-child) {
-	/* 矢印はタグの外に置きたいので、右余白を空けてそこに描く */
+	/* 矢印はピルの外に置きたいので、右余白を空けてそこに描く */
 	position: relative;
 	margin-right: 1rem;
 }
@@ -250,34 +587,151 @@ main p {
 }
 
 /*
- * ここから下は起票フォーム（/issues/new）のスタイル。
+ * ライフサイクルの段階を表すピル（#94）。
+ *
+ * 色は段階ごとに変わるが、**色だけに頼らない**。先頭の ● は
+ * 段階が進むほど塗りが増える（後述の .status-pill-mark）ので、
+ * 色が見分けにくい人にも進み具合が伝わる。
+ *
+ * 色そのものは `--status-<段階>` を各段階のクラスから与える。
+ * ここでは配置と形だけを決めて、色は変数の参照に留める
+ */
+.status-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	/* 文字が縦に潰れないよう、ピルの中は行間を詰める */
+	line-height: var(--leading-snug);
+	font-size: var(--text-sm);
+	font-weight: 600;
+	white-space: nowrap;
+	border-radius: var(--radius-pill);
+	padding: var(--space-1) var(--space-3);
+	color: var(--status-color, var(--ink-soft));
+	background: var(--status-surface, var(--ground));
+	border: 1px solid currentColor;
+}
+
+/*
+ * 段階を示す印。塗りの量で進み具合を表す。
+ * `currentColor` を使うので、ピルの色を変えれば印も追従する
+ */
+.status-pill-mark {
+	flex: none;
+	width: 0.5rem;
+	height: 0.5rem;
+	border-radius: var(--radius-pill);
+	border: 1px solid currentColor;
+	/*
+	 * 塗りの割合を --fill（0〜1）で受ける。左からその割合だけ塗る。
+	 * 進むほど印が満ちていく形で、色を見分けられなくても順序が読める
+	 */
+	background: linear-gradient(
+		to right,
+		currentColor calc(var(--fill, 0) * 100%),
+		transparent calc(var(--fill, 0) * 100%)
+	);
+}
+
+/*
+ * 各段階の色。--status-color / --status-surface に代入する形にして、
+ * .status-pill 側は変数を読むだけにしている。段階が増えてもここに
+ * 1 ブロック足すだけで済む
+ */
+.status-pill-open {
+	--status-color: var(--status-open);
+	--status-surface: var(--status-open-soft);
+}
+
+.status-pill-triaged {
+	--status-color: var(--status-triaged);
+	--status-surface: var(--status-triaged-soft);
+}
+
+.status-pill-in_progress {
+	--status-color: var(--status-in-progress);
+	--status-surface: var(--status-in-progress-soft);
+}
+
+.status-pill-review {
+	--status-color: var(--status-review);
+	--status-surface: var(--status-review-soft);
+}
+
+.status-pill-resolved {
+	--status-color: var(--status-resolved);
+	--status-surface: var(--status-resolved-soft);
+}
+
+.status-pill-closed {
+	--status-color: var(--status-closed);
+	--status-surface: var(--status-closed-soft);
+}
+
+/*
+ * ここから下は入力欄のスタイル。
  * ブラウザ既定のままだと、緯度の入力欄と説明文の入力欄が同じ幅で並び、
  * どちらも同じ重みに見えてしまう。項目のまとまりと、入力の長さの
  * 見当がつくようにする。
  *
- * 入力要素には要素セレクタ（`input { ... }`）を使わず、`.issue-form` の
- * 中だけに閉じている。globals.css は全ページに効くため、素の要素セレクタは
- * Clerk のモーダル（同じ document に描画される）や Header の
- * サインインボタンにも当たってしまう。上の ul / li が .actions / .scopes で
- * 打ち消す羽目になっているのと同じ問題を繰り返さないための措置。
+ * 入力要素には要素セレクタ（`input { ... }`）を使わず、入力欄を持つ
+ * まとまりのクラスの中だけに閉じている。globals.css は全ページに効くため、
+ * 素の要素セレクタは Clerk のモーダル（同じ document に描画される）や
+ * Header のサインインボタンにも当たってしまう。上の ul / li が
+ * .actions / .scopes で打ち消す羽目になっているのと同じ問題を
+ * 繰り返さないための措置。
+ *
+ * #95 で対象を .issue-form 以外にも広げた。絞り込みフォーム
+ * （.issue-filters）とステータス変更（.status-control）は入力欄を
+ * 持ちながら .issue-form の外にあり、**枠線も :focus-visible の
+ * アウトラインも当たっていなかった**。キーボードで辿ると
+ * フォーカス位置が見えない状態で、Issue の受け入れ条件に反する。
+ *
+ * セレクタを並べる形にしているのは、共通の親クラスを導入すると
+ * すべての呼び出し側に手を入れることになるため。ここに 1 行足すだけで
+ * 新しいまとまりを仲間に入れられる
  */
 
 .issue-form input,
 .issue-form textarea,
-.issue-form select {
+.issue-form select,
+.issue-filters input,
+.issue-filters select,
+.status-control select {
 	font: inherit;
 	color: inherit;
 	padding: 0.375rem var(--space-2);
 	border: 1px solid var(--line);
 	border-radius: var(--radius-sm);
 	background: var(--surface);
+	/* 触れたときに枠が反応する。押せる場所であることの手がかり */
+	transition:
+		border-color var(--transition-fast),
+		box-shadow var(--transition-fast);
+}
+
+/*
+ * 入力中は枠を主役の色にする。アウトライン（下）は Tab で辿ったときだけ
+ * 出るので、マウスやタッチで入力している間の手がかりが別に要る
+ */
+.issue-form input:focus,
+.issue-form textarea:focus,
+.issue-form select:focus,
+.issue-filters input:focus,
+.issue-filters select:focus,
+.status-control select:focus {
+	border-color: var(--accent);
 }
 
 .issue-form input:focus-visible,
 .issue-form textarea:focus-visible,
 .issue-form select:focus-visible,
+.issue-filters input:focus-visible,
+.issue-filters select:focus-visible,
+.status-control select:focus-visible,
 .button-primary:focus-visible,
-.button-secondary:focus-visible {
+.button-secondary:focus-visible,
+.button-link:focus-visible {
 	outline: 2px solid var(--accent);
 	outline-offset: 1px;
 }
@@ -292,9 +746,22 @@ main p {
  * 確認軸（「入力欄が本文の幅いっぱいに広がる — 一覧の絞り込みを含む 3 箇所」）を
  * 満たしていなかった（レビュー指摘）。
  */
+/*
+ * `.issue-filters input` も同じ幅の扱いに入れる（#95）。ブラウザ既定の
+ * `size` 由来の幅のままだと、キーワード欄が 20 文字分しかなく、入れた語が
+ * 読めない（#93 の実機確認で「入力欄が狭い」として挙がっていた症状）。
+ *
+ * `.issue-filters select` は含めない。下の `select` の指定（#96）が
+ * 「幅は伸ばさず上限だけ与える」と決めており、そちらに従う。
+ *
+ * セレクタの列の途中にコメントを挟まないこと。`.issue-form textarea` の
+ * 直後に `width` があることを見ているテストがあり、間に文字が入ると
+ * 届かなくなる（apps/api/test/node/web-issue-form-guidance.test.ts）
+ */
 .issue-form input[type="text"],
 .issue-form input[type="search"],
-.issue-form textarea {
+.issue-form textarea,
+.issue-filters input {
 	width: 100%;
 	/*
 	 * `width: 100%` でも、textarea は既定の `cols` 由来の最小幅を持つため
@@ -482,7 +949,8 @@ main p {
 	height: 14px;
 	margin: -7px 0 0 -7px;
 	border: 2px solid var(--surface);
-	border-radius: 50%;
+	/* 円。--radius-pill は「丸め切る」段階なので、正方形に当てると円になる */
+	border-radius: var(--radius-pill);
 	/*
 	 * 地点を指す印。エラーではないが「ここだ」と一点を強く示す用途なので、
 	 * 状態色の --danger を借りる。以前の赤と揃える形で #86 が
@@ -574,34 +1042,94 @@ main p {
 	padding: var(--space-2) 0;
 }
 
-/* Issue 1 件のカード。公開一覧と自分の一覧が同じ見た目を使う */
+/*
+ * Issue 1 件のカード。公開一覧と自分の一覧が同じ見た目を使う。
+ *
+ * 面を持たせた（#95）。以前は地の色の上に枠線 1px だけで、カードの
+ * 区切りが枠でしか伝わらなかった。地を --ground にしたので、
+ * 白い面がそのまま「1 件のまとまり」を示す
+ */
 .issue-card {
+	background: var(--surface);
 	box-shadow: var(--shadow-card);
-	transition:
-		box-shadow var(--transition-base),
-		transform var(--transition-fast);
 	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
 	padding: var(--space-3) var(--space-4);
 	margin-bottom: var(--space-3);
 	list-style: none;
+	transition:
+		box-shadow var(--transition-base),
+		border-color var(--transition-fast),
+		transform var(--transition-fast);
+}
+
+/*
+ * 触れたときに持ち上げる。カード自体はリンクではないが、
+ * 中のタイトルが詳細への入口なので、どのカードを見ているかを示す
+ */
+@media (hover: hover) {
+	.issue-card:hover {
+		border-color: var(--accent-line);
+		box-shadow: var(--shadow-card-hover);
+	}
 }
 
 .issue-card-title {
-	margin: 0 0 var(--space-1);
-	font-size: var(--text-base);
+	margin: 0 0 var(--space-2);
+	/*
+	 * カードの中で最も強い要素にする。以前は --text-base（本文と同じ）で、
+	 * 説明文と同じ重みに見えていた
+	 */
+	font-size: var(--text-lg);
+}
+
+.issue-card-title a {
+	/* 一覧はタイトルが並ぶ画面なので、下線が並ぶと縞模様になって読みにくい */
+	text-decoration: none;
+}
+
+@media (hover: hover) {
+	.issue-card-title a:hover {
+		text-decoration: underline;
+		/* 面はカード側が変えるので、リンクの下地（--accent-soft）は出さない */
+		background: none;
+	}
 }
 
 .issue-card-description {
-	margin: 0 0 var(--space-2);
+	margin: 0 0 var(--space-3);
 	color: var(--ink-soft);
+	/*
+	 * 説明文は 5000 字まで入る。一覧で全文を出すとカード 1 枚が画面を
+	 * 埋めて「並べて眺める」ことができなくなるので 2 行で打ち切る
+	 */
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	overflow: hidden;
 }
 
-/* スコープ・ステータス・カテゴリ・日時を 1 行に並べた補助情報 */
+/*
+ * スコープ・ステータス・カテゴリ・日時を並べた補助情報。
+ *
+ * ステータスがピルになった（#95）ので、文字と同じ行に並べると
+ * ベースラインがずれる。flex にして縦位置を揃え、狭い画面では
+ * 折り返す（以前は 1 行に流れて画面からはみ出していた）
+ */
 .issue-meta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2) var(--space-3);
 	margin: 0;
 	font-size: var(--text-sm);
 	color: var(--ink-soft);
+}
+
+/* 補助情報の 1 項目。中の語が途中で割れないようにする */
+.issue-meta-item {
+	white-space: nowrap;
 }
 
 /* 一覧の「N 件中 M 件を表示」 */
@@ -623,15 +1151,27 @@ main p {
  * 前後との間隔だけを与える（どの見た目を目指すかは #94 / #95 で決まる）。
  */
 
+/*
+ * 絞り込みフォーム（Issue #95）。
+ *
+ * クラスは付いていたが globals.css に定義が無く、スタイルが何も
+ * 当たっていなかった。入力欄はブラウザ既定の見た目のまま、
+ * 5 項目が縦に間延びして一覧そのものが画面の下に押しやられていた。
+ *
+ * 面としてまとめ、項目は入る幅があれば横に並べる。
+ * 「絞り込みは一覧の付属物である」ことが幅で伝わるようにする。
+ * 浮きと遷移は #94 が足したもの
+ */
 .issue-filters {
+	background: var(--surface);
 	box-shadow: var(--shadow-card);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	padding: var(--space-4);
+	margin-bottom: var(--space-5);
 	transition:
 		box-shadow var(--transition-base),
 		transform var(--transition-fast);
-	border: 1px solid var(--line);
-	border-radius: var(--radius-md);
-	padding: var(--space-3) var(--space-4);
-	margin-bottom: var(--space-4);
 }
 
 /*
@@ -654,8 +1194,9 @@ main p {
 	margin: 0;
 }
 
-/* コメント 1 件。カードと似た枠だが、下の余白と本文の扱いが違う */
+/* コメント 1 件。カードと似た面だが、下の余白と本文の扱いが違う */
 .comment-card {
+	background: var(--surface);
 	box-shadow: var(--shadow-card);
 	transition:
 		box-shadow var(--transition-base),
@@ -689,6 +1230,146 @@ main p {
 .section-lead {
 	color: var(--ink-soft);
 	font-size: var(--text-sm);
+}
+
+/* fieldset の既定の枠は要らない。囲いは .issue-filters が持っている */
+.issue-filters fieldset {
+	border: none;
+}
+
+.issue-filters legend {
+	font-weight: 600;
+	margin-bottom: var(--space-3);
+}
+
+/*
+ * 項目を並べる。日本語と英語でラベルの長さが変わるので、
+ * 数値で列数を切らず「入る幅があれば並ぶ」形にする
+ */
+.issue-filters-fields {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+	gap: var(--space-3) var(--space-4);
+}
+
+/* 並べた中では項目間の余白を grid の gap が持つので、個別の下余白は要らない */
+.issue-filters-fields .form-field {
+	margin-bottom: 0;
+}
+
+/* 実行・クリアの並び。狭い画面では折り返す */
+.issue-filters-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-3) var(--space-4);
+	margin-top: var(--space-4);
+	margin-bottom: 0;
+}
+
+/*
+ * ページ送り（Issue #95）。
+ *
+ * ここもクラスだけあって定義が無かった。「前へ / N / M ページ / 次へ」が
+ * 本文と同じ見た目で 1 行に流れ、一覧の続きの文章に見えていた
+ */
+.issue-pagination {
+	margin-top: var(--space-5);
+}
+
+.issue-pagination-inner {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-2) var(--space-4);
+	margin-bottom: 0;
+}
+
+/* 現在位置。前後の送りより弱くして、送り先が主役だと分かるようにする */
+.issue-pagination-position {
+	font-size: var(--text-sm);
+	color: var(--ink-soft);
+	white-space: nowrap;
+}
+
+/*
+ * 何も無いことを伝えるまとまり（#94 の「空の状態」）。
+ *
+ * これまで 0 件は本文と同じ `<p>` が 1 行あるだけで、読み込みに失敗した
+ * のか本当に無いのかが見分けにくかった。面を持たせて「これが答えだ」と
+ * 示す。暖色（--sun）を使うのはヒーローとここだけで、
+ * 「悪いことではない」ことを色で伝える
+ */
+.empty-state {
+	background: var(--sun-soft);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	padding: var(--space-5);
+	text-align: center;
+	color: var(--ink-soft);
+}
+
+.empty-state-message {
+	margin-bottom: var(--space-2);
+	color: var(--ink);
+}
+
+/* 空のときにこそ次の一歩を示す。何も無い画面で行き止まりにしない */
+.empty-state-action {
+	margin-bottom: 0;
+}
+
+/*
+ * ページ末尾の導線（Issue #95）。
+ *
+ * これまで「Issue を書く / トップへ戻る」を文字の「/」で区切っていた。
+ * 狭い画面では区切りの位置で折り返して、区切り文字だけが行頭に残る。
+ * 読み上げでも「スラッシュ」が読まれる。余白で区切る形にして、
+ * 折り返しても意味が壊れないようにする
+ */
+.page-nav {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2) var(--space-4);
+	margin-top: var(--space-section);
+	/* main p の下余白は要らない。ページの終わりなので */
+	margin-bottom: 0;
+	padding-top: var(--space-4);
+	border-top: 1px solid var(--line);
+}
+
+/*
+ * ステータスの変更（Issue #95）。
+ *
+ * `.status-control` は入力欄のスタイルを届かせるためのスコープも兼ねる
+ * （上の入力欄の節を参照）。ここは `.issue-form` の外にあり、select に
+ * 枠線も `:focus-visible` のアウトラインも当たっていなかった
+ */
+.status-control-current {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+/*
+ * ラベル・選択・実行を 1 行に置く。狭い画面や英語表示で入りきらないときは
+ * 折り返す（英語のラベルは日本語より長くなる）
+ */
+.status-control-form {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2) var(--space-3);
+}
+
+/* 「手伝います」の操作と、その補足。折り返しても縦位置が揃うようにする */
+.help-offer-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2) var(--space-3);
 }
 
 /* 起票フォームのように、内容の幅を絞って読みやすくするページ */
@@ -800,6 +1481,69 @@ main p {
 .issue-photo {
 	max-width: 100%;
 	height: auto;
+	/*
+	 * 高さの上限（Issue #95、#94 の見本で決めた点）。
+	 *
+	 * これまで高さを制限しておらず、縦長の写真が画面の高さいっぱいを占めて
+	 * 説明文に辿り着けなかった（#93 の実機確認で挙がった症状）。写真は主役だが、
+	 * 「写真と説明が同時に目に入る」ことの方が先。上限に当たった写真は
+	 * 縮小されるだけで、押し込まれて歪むことはない（`height: auto` のまま）。
+	 *
+	 * `vh` ではなく `rem` にしているのは、`vh` だとブラウザの UI バーの
+	 * 出入りで高さが変わり、スクロール中に写真の大きさが動いて見えるため
+	 */
+	max-height: 28rem;
+	/* 面としてまとめる。地の色の上に画像が直に載ると縁が曖昧になる */
+	border-radius: var(--radius-md);
+	border: 1px solid var(--line);
+}
+
+/*
+ * 定義リスト（Issue #95）。
+ *
+ * クラスが無く、ブラウザ既定の `dd` の字下げだけで対を示していた。
+ * 幅があるときは項目名を左の列に置いて、名前と値の対応を横並びで見せる。
+ * 狭い画面では 1 列に落として、名前の下に値を積む
+ */
+.detail-list {
+	display: grid;
+	/*
+	 * 項目名の列は内容の幅に合わせる。日本語の「ステータス」と
+	 * 英語の "Last updated" では必要な幅が違うので、数値で固定しない
+	 */
+	grid-template-columns: auto 1fr;
+	gap: var(--space-2) var(--space-4);
+	align-items: baseline;
+}
+
+.detail-list dt {
+	font-weight: 600;
+	color: var(--ink-soft);
+	font-size: var(--text-sm);
+	white-space: nowrap;
+}
+
+.detail-list dd {
+	margin: 0;
+	/* 長い値（座標・カテゴリ）が列を押し広げないように */
+	min-width: 0;
+}
+
+/*
+ * 狭い画面では 2 列に収まらない。項目名を値の上に積む。
+ * 分岐を 30rem に置いているのは、項目名の列（最長で "Last updated"）と
+ * 値が同じ行に並ぶための最小限の幅がこの辺りのため
+ */
+@media (max-width: 30rem) {
+	.detail-list {
+		grid-template-columns: 1fr;
+		gap: var(--space-1);
+	}
+
+	/* 1 列に積んだときは、項目のまとまりの間を空けて対を読みやすくする */
+	.detail-list dd:not(:last-child) {
+		margin-bottom: var(--space-3);
+	}
 }
 
 /*

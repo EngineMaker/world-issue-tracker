@@ -15,6 +15,7 @@ import {
 	postComment,
 	validateCommentBody,
 } from "@/lib/comments";
+import { EmptyState } from "./EmptyState";
 import { formatCreatedAt } from "./IssueList";
 
 /**
@@ -93,8 +94,12 @@ export function CommentSection({
 				</div>
 			)}
 
+			{/*
+			  コメント 0 件（#95）。次の一歩（`action`）は渡していない。
+			  すぐ下に入力欄があるので、導線を重ねると同じことを 2 回言うことになる
+			*/}
 			{initialResult.ok && comments.length === 0 && (
-				<p className="text-soft">{messages.comments.empty}</p>
+				<EmptyState message={messages.comments.empty} />
 			)}
 
 			{comments.length > 0 && (
@@ -169,10 +174,16 @@ export function CommentSection({
 					</output>
 				)}
 
+				{/*
+				  送信中は `aria-busy` を立てる（#95）。文言（「送信中…」）は
+				  目で見れば分かるが、読み上げでは押した直後に何が起きているかが
+				  伝わらない。#94 が挙げた「押した手応えが無い」への対応
+				*/}
 				<button
 					type="submit"
 					className="button-primary"
 					disabled={isSubmitting}
+					aria-busy={isSubmitting}
 				>
 					{isSubmitting ? messages.common.submitting : messages.comments.submit}
 				</button>

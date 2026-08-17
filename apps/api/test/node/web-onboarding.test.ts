@@ -22,6 +22,12 @@ const readRepoFile = (relativePath: string) =>
 const homePage = readRepoFile("apps/web/src/app/page.tsx");
 
 /**
+ * ステータスのピル（#95）。トップ・一覧・詳細が共通で使う。
+ * ラベルを辞書から引く責任がここへ移ったので、照合先として読む
+ */
+const statusPill = readRepoFile("apps/web/src/app/components/StatusPill.tsx");
+
+/**
  * page.tsx から JSX のコメントと行コメントを落とした本文。
  * コメントに文字列を書いただけで通ってしまうのを防ぐ
  */
@@ -30,10 +36,24 @@ const homePageBody = homePage
 	.replace(/\/\*[\s\S]*?\*\//g, "")
 	.replace(/^\s*\/\/.*$/gm, "");
 
+/**
+ * `<Link ... href="<パス>">` があるかを見る。
+ *
+ * 以前は `/<Link\s+href="..."/ ` と、`href` が最初の属性であることを
+ * 前提にしていた。#95 で `<Link className="button-link" href="/issues/new">`
+ * のように属性を足したところ、導線は存在するのにテストだけが落ちた。
+ * 見たいのは「その遷移先への Link があるか」であって属性の順序ではないので、
+ * `<Link` から `>` までの間に該当の `href` があるかで照合する。
+ */
+const hasLinkTo = (source: string, path: string): boolean =>
+	[...source.matchAll(/<Link\s[^>]*>/g)].some((m) =>
+		m[0].includes(`href="${path}"`),
+	);
+
 describe("トップページの導線", () => {
 	it("Issue 一覧と起票への Link を持つ", () => {
-		expect(homePageBody).toMatch(/<Link\s+href="\/issues"/);
-		expect(homePageBody).toMatch(/<Link\s+href="\/issues\/new"/);
+		expect(hasLinkTo(homePageBody, "/issues")).toBe(true);
+		expect(hasLinkTo(homePageBody, "/issues/new")).toBe(true);
 	});
 
 	it("リンク先のページが実在し、404 にならない", () => {
@@ -106,8 +126,8 @@ describe("トップページの導線", () => {
 		// キーごと消せばここが落ちる
 		expect(main).toContain("messages.home.aboutBody1");
 		expect(main).toContain("messages.home.aboutBody2");
-		expect(main).toMatch(/<Link\s+href="\/issues"/);
-		expect(main).toMatch(/<Link\s+href="\/issues\/new"/);
+		expect(hasLinkTo(main ?? "", "/issues")).toBe(true);
+		expect(hasLinkTo(main ?? "", "/issues/new")).toBe(true);
 	});
 });
 
@@ -118,7 +138,18 @@ describe("トップページの表示ラベル", () => {
 		expect(homePageBody).not.toMatch(/\{status\}<\/li>/);
 		// ラベル辞書を参照していること（変数名は問わない）
 		expect(homePageBody).toMatch(/ISSUE_SCOPE_LABELS|getIssueScopeLabel/);
-		expect(homePageBody).toMatch(/ISSUE_STATUS_LABELS|getIssueStatusLabel/);
+		/*
+		 * ステータスは #95 で `StatusPill` に切り出した（一覧・詳細と同じ
+		 * ピルを使うため）。page.tsx から辞書の参照は消えたが、ラベル経由で
+		 * 描いていることは変わらないので、描画を担う側を見る。
+		 * ここを page.tsx だけに限ると、切り出しただけで落ちるテストになる
+		 */
+		expect(statusPill).toMatch(/ISSUE_STATUS_LABELS|getIssueStatusLabel/);
+		/*
+		 * 切り出し先を見るだけだと、page.tsx がそれを使っていなくても通る。
+		 * 実際に描画に使っていることまで見る
+		 */
+		expect(homePageBody).toMatch(/<StatusPill\b/);
 	});
 
 	it("ユーザー向けの語彙でない in_progress を直接書いていない", () => {

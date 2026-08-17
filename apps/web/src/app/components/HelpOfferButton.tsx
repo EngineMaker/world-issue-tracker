@@ -95,7 +95,12 @@ export function HelpOfferButton({
 		<section aria-labelledby="help-offers-heading">
 			<h2 id="help-offers-heading">{messages.helpOffer.heading}</h2>
 
-			<p>
+			{/*
+			  表明の件数（#95）。0 件のときも他の空の状態と同じ弱さで出す。
+			  以前はここだけクラスが無く、本文と同じ濃さで「まだ誰も…」と
+			  出ていて、数がある場合との区別が付かなかった
+			*/}
+			<p className={summary.total === 0 ? "text-soft" : undefined}>
 				{summary.total === 0
 					? messages.helpOffer.none
 					: messages.helpOffer.count(summary.total)}
@@ -107,16 +112,16 @@ export function HelpOfferButton({
 			  （起票フォームと同じ方針）。
 			*/}
 			{isLoaded && !isSignedIn ? (
-				<p>
+				<p className="help-offer-actions">
 					<SignInButton mode="modal">
 						<button type="button" className="button-primary">
 							{messages.helpOffer.offer}
 						</button>
 					</SignInButton>
-					<span>{messages.helpOffer.signInHint}</span>
+					<span className="text-soft">{messages.helpOffer.signInHint}</span>
 				</p>
 			) : (
-				<p>
+				<p className="help-offer-actions">
 					<button
 						type="button"
 						className={
@@ -124,6 +129,8 @@ export function HelpOfferButton({
 						}
 						onClick={handleClick}
 						disabled={isSubmitting || !isLoaded}
+						// 押した直後に何が起きているかを読み上げにも伝える（#95）
+						aria-busy={isSubmitting}
 					>
 						{isSubmitting
 							? messages.common.submitting
@@ -132,7 +139,7 @@ export function HelpOfferButton({
 								: messages.helpOffer.offer}
 					</button>
 					{summary.viewerOffered && (
-						<span>{messages.helpOffer.youOffered}</span>
+						<span className="text-soft">{messages.helpOffer.youOffered}</span>
 					)}
 				</p>
 			)}
