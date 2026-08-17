@@ -568,7 +568,7 @@ export async function fetchMyIssues({
 	if (!token) {
 		return {
 			ok: false,
-			error: "サインインが必要です",
+			error: "ログインが必要です",
 			unauthorized: true,
 		};
 	}

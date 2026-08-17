@@ -134,7 +134,7 @@ function messageFromErrorBody(body: unknown, status: number): string {
 			return "この Issue は見つかりませんでした。削除された可能性があります。";
 		}
 		if (error === "Unauthorized") {
-			return "ログインが必要です。サインインし直してから送信してください。";
+			return "ログインが必要です。ログインし直してから送信してください。";
 		}
 		if (error === "Forbidden") {
 			return "この操作は許可されていません。";
@@ -156,7 +156,7 @@ function messageFromErrorBody(body: unknown, status: number): string {
 	}
 
 	if (status === 401) {
-		return "ログインが必要です。サインインし直してから送信してください。";
+		return "ログインが必要です。ログインし直してから送信してください。";
 	}
 	if (status === 404) {
 		return "この Issue は見つかりませんでした。削除された可能性があります。";
@@ -192,7 +192,7 @@ export async function postComment(
 ): Promise<PublicComment> {
 	if (!token) {
 		throw new PostCommentError(
-			"ログインが必要です。サインインしてから送信してください。",
+			"ログインが必要です。ログインしてから送信してください。",
 			401,
 		);
 	}

@@ -25,6 +25,7 @@ import "./helpers/mock-navigation";
 import { afterEach, describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { IssueStatus } from "@world-issue-tracker/shared";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LocaleSwitcher } from "../src/app/components/LocaleSwitcher";
 import { clearTestLocation, setTestLocation } from "./helpers/mock-navigation";
@@ -358,5 +359,159 @@ describe("狭い画面で横スクロールが出ない", () => {
 		const blocks = rulesFor(".issue-form input[type='text']");
 		const alt = rulesFor('.issue-form input[type="text"]');
 		expect([...blocks, ...alt].join("\n")).toContain("width: 100%");
+	});
+});
+
+/**
+ * ヘッダの見た目（A4 / A7 / A8）。
+ *
+ * どれも「ブラウザ既定のまま残っていた」ことによる崩れなので、
+ * 当たっているべき宣言があるかどうかで見る。
+ */
+describe("ヘッダの見た目（A4 / A7 / A8）", () => {
+	// A8: サービス名はワードマーク。下線が付くと素のリンクに見える
+	it("ロゴに下線を付けない", () => {
+		const rules = rulesFor(".site-header-title a").join("\n");
+
+		expect(rules, ".site-header-title a の定義が無い").not.toBe("");
+		expect(rules, "ロゴに下線が付いている").toContain("text-decoration: none");
+	});
+
+	/*
+	 * A4: Clerk のログインは中身が `<button>` なので、class を当てないと
+	 * ブラウザ既定の四角い灰枠が出る。他のヘッダ項目と同じ字面に揃える
+	 */
+	it("ログインボタンからブラウザ既定の枠と下地を外す", () => {
+		const rules = rulesFor(".site-header-signin").join("\n");
+
+		expect(rules, ".site-header-signin の定義が無い").not.toBe("");
+		expect(rules, "既定の枠が残っている").toContain("border: none");
+		expect(rules, "既定の下地が残っている").toContain("background: none");
+	});
+
+	// class を書いても当てる先が無ければ意味が無いので、部品の側からも見る
+	it("Header がログインボタンにその class を付けている", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../src/app/components/Header.tsx"),
+			"utf8",
+		);
+
+		expect(source, "ログインボタンに class が付いていない").toContain(
+			'className="site-header-signin"',
+		);
+	});
+
+	/*
+	 * A7: ログイン中はナビの項目が 1 つ増える（アバター）。折り返したときに
+	 * 既定の `flex-start` だと、溢れた項目だけが画面の左端に単独で置かれ、
+	 * 右上に並ぶ他の項目から切り離されて見える
+	 */
+	it("ナビが折り返しても右端に揃う", () => {
+		const rules = rulesFor(".site-header-nav").join("\n");
+
+		expect(rules, ".site-header-nav の定義が無い").not.toBe("");
+		expect(rules, "折り返した項目が左端に落ちる").toContain(
+			"justify-content: flex-end",
+		);
+	});
+});
+
+/**
+ * 語中での改行（A1 / A2）。
+ *
+ * 日本語の既定の折り返しは文字単位なので、「みんなで可/視化して」
+ * 「コミュニテ/ィ」のように語の途中で行が変わる。`word-break: keep-all`
+ * が当たっているかを、宣言の側から見る。
+ */
+describe("語の途中で改行しない（A1 / A2）", () => {
+	it.each([
+		["見出し", "h1"],
+		["見出し", "h2"],
+		["見出し", "h3"],
+		["スコープ名", ".scope-name"],
+	])("%s（%s）に keep-all が当たっている", (_label, selector) => {
+		const rules = rulesFor(selector).join("\n");
+
+		expect(rules, `${selector} の定義が無い`).not.toBe("");
+		expect(rules, `${selector} が語中で折り返す`).toContain(
+			"word-break: keep-all",
+		);
+		// keep-all だけだと、1 語が画面幅を超えたときに逃げ場が無く溢れる
+		expect(rules, `${selector} に溢れたときの逃げ場が無い`).toContain(
+			"overflow-wrap: break-word",
+		);
+	});
+});
+
+/**
+ * ステータスの流れの矢印（A6）。
+ *
+ * 狭い画面で折り返したとき、行末に矢印だけが残って次に続く先が無い、
+ * という症状だった。矢印を後続のピルと同じ折り返し単位に入れることで
+ * 「矢印は要素**間**にのみ描かれる」を満たしている。
+ *
+ * ここで見るのは、その仕掛けが壊れていないこと:
+ * 矢印は必ず段階と同じ li の中にあり、その li は途中で折り返さない。
+ */
+describe("ステータスの矢印は段階の間にだけ出る（A6）", () => {
+	it("矢印は後続の段階と同じ折り返し単位に入っている", () => {
+		const html = renderToStaticMarkup(
+			<ol className="statuses">
+				<li className="status-step">
+					<span className="status-arrow" aria-hidden="true">
+						→
+					</span>
+				</li>
+			</ol>,
+		);
+
+		// 矢印が li の外（.statuses の直下）に出ていると、ピルとは別に
+		// 折り返せてしまい、矢印自身が行末に残る経路が復活する
+		expect(html).toContain('class="status-step"');
+		expect(html).toContain('class="status-arrow"');
+	});
+
+	it(".status-step が矢印とピルを 1 つの塊として折り返す", () => {
+		const rules = rulesFor(".status-step").join("\n");
+
+		expect(rules, ".status-step の定義が無い").not.toBe("");
+		// この中で折り返せると、矢印とピルが別々の行に分かれる
+		expect(rules, "矢印とピルが別の行に分かれうる").toContain(
+			"white-space: nowrap",
+		);
+	});
+
+	/*
+	 * 先頭の段階には前に繋ぐ相手がいないので、矢印を持つのは 2 つ目以降だけ。
+	 * トップページ（`app/page.tsx`）は API を呼ぶ Server Component なので、
+	 * ここでは同じ組み立て方を再現して構造だけを見る
+	 */
+	it("先頭の段階には矢印を付けない", () => {
+		const html = renderToStaticMarkup(
+			<ol className="statuses">
+				{IssueStatus.options.map((status, index) => (
+					<li className="status-step" key={status}>
+						{index > 0 ? (
+							<span className="status-arrow" aria-hidden="true">
+								→
+							</span>
+						) : null}
+						<span>{status}</span>
+					</li>
+				))}
+			</ol>,
+		);
+
+		const steps = html.split('<li class="status-step">').slice(1);
+		expect(steps, "段階が描かれていない").toHaveLength(
+			IssueStatus.options.length,
+		);
+		expect(steps[0], "先頭の段階に矢印が付いている").not.toContain(
+			"status-arrow",
+		);
+		// 2 つ目以降はすべて矢印を持つ（＝段階と段階の間が必ず繋がる）
+		for (const step of steps.slice(1)) {
+			expect(step, "途中の段階に矢印が無い").toContain("status-arrow");
+		}
 	});
 });

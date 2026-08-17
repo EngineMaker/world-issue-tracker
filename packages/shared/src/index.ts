@@ -350,7 +350,7 @@ const JA_UI_MESSAGES = {
 		htmlLang: "ja",
 		unexpectedError:
 			"予期しないエラーが発生しました。時間をおいて再度お試しください。",
-		signIn: "サインイン",
+		signIn: "ログイン",
 		submitting: "送信中…",
 	},
 
@@ -358,9 +358,19 @@ const JA_UI_MESSAGES = {
 	header: {
 		newIssue: "Issue を起票",
 		myIssues: "自分の Issue",
-		/** Clerk のサインインボタン。他の「サインイン」と文言を分けているのは、
-		    既存の表示が英語の "Sign In" で、変えると見た目の変更になるため */
-		signIn: "Sign In",
+		/**
+		 * Clerk のログインボタン（A3）。
+		 *
+		 * 以前は「既存の表示を変えない」ことを理由に、日本語ロケールでもここだけ
+		 * 英語の "Sign In" のままだった。日本語で読んでいる人にはヘッダの中で
+		 * ここだけが英語に見えるので、日本語にする。
+		 *
+		 * 日本語側は「ログイン」で統一している（`common.signIn` も同じ）。
+		 * 同じ操作が画面によって「ログイン」「サインイン」と呼び分けられていると、
+		 * 別の操作だと思わせる。キーが `signIn` のままなのは英語側の語に
+		 * 由来する名前だからで、日本語の表記とは別の話
+		 */
+		signIn: "ログイン",
 	},
 
 	/** 言語切り替え（Issue #82） */
@@ -419,9 +429,14 @@ const JA_UI_MESSAGES = {
 
 	/** 自分が起票した Issue の一覧（`MyIssueList`） */
 	myIssueList: {
-		signInRequired: "自分が起票した Issue を見るにはサインインが必要です。",
+		signInRequired: "自分が起票した Issue を見るにはログインが必要です。",
+		/*
+		 * 「画面右上の〇〇から」と場所を名指しするので、ヘッダのボタンの
+		 * 文言（`header.signIn`）と綴りを揃える必要がある。ここが「Sign In」の
+		 * ままだと、画面には無い言葉を探させることになる
+		 */
 		signInHint:
-			"画面右上の「Sign In」からサインインすると、ここに表示されます。",
+			"画面右上の「ログイン」からログインすると、ここに表示されます。",
 		empty: "まだ Issue を起票していません。",
 		writeFirst: "最初の 1 件を書いてみる",
 	},
@@ -528,7 +543,7 @@ const JA_UI_MESSAGES = {
 		count: (total: number) => `${total} 人が「手伝います」と表明しています。`,
 		offer: "手伝います",
 		withdraw: "表明を取り消す",
-		signInHint: " — 表明するにはサインインが必要です",
+		signInHint: " — 表明するにはログインが必要です",
 		youOffered: " — あなたはこの Issue に手を挙げています",
 		offerersHeading: "表明した人",
 		you: "あなた",
@@ -544,7 +559,7 @@ const JA_UI_MESSAGES = {
 		fetchFailed:
 			"コメントを取得できませんでした。時間をおいて再度お試しください。",
 		empty: "まだコメントがありません。最初の一言を書いてみてください。",
-		signInRequired: "コメントの投稿にはサインインが必要です。",
+		signInRequired: "コメントの投稿にはログインが必要です。",
 		label: "コメント",
 		lengthHint: (max: number) => `${max} 文字以内。`,
 		placeholder:
@@ -556,7 +571,7 @@ const JA_UI_MESSAGES = {
 	newIssue: {
 		heading: "Issue を起票する",
 		lead: "気づいた「地球のバグ」を登録します。",
-		signInRequired: "投稿にはサインインが必要です。",
+		signInRequired: "投稿にはログインが必要です。",
 		title: "タイトル",
 		titleHint:
 			"何が起きているかを一文で。場所と、いつから続いているかまで書くと伝わります。",

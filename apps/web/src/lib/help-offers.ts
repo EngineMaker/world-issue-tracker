@@ -152,7 +152,7 @@ export class HelpOfferError extends Error {
  */
 function messageFromStatus(status: number, action: string): string {
 	if (status === 401) {
-		return "ログインが必要です。サインインし直してからお試しください。";
+		return "ログインが必要です。ログインし直してからお試しください。";
 	}
 	if (status === 403) {
 		return "この操作は許可されていません。";
@@ -180,7 +180,7 @@ async function sendHelpOffer(
 ): Promise<void> {
 	if (!token) {
 		throw new HelpOfferError(
-			"ログインが必要です。サインインしてからお試しください。",
+			"ログインが必要です。ログインしてからお試しください。",
 			401,
 		);
 	}

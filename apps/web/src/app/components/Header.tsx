@@ -33,8 +33,15 @@ export function Header({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 					<Link href="/my-issues">{messages.header.myIssues}</Link>
 				</SignedIn>
 				<SignedOut>
+					{/*
+					  Clerk が中身に <button> を求めるので要素はボタンだが、
+					  役割は隣のリンクと同じ導線なので見た目もリンクに揃える（A4）。
+					  class が無いとブラウザ既定の灰枠が出て、ここだけが浮く
+					*/}
 					<SignInButton mode="modal">
-						<button type="button">{messages.header.signIn}</button>
+						<button type="button" className="site-header-signin">
+							{messages.header.signIn}
+						</button>
 					</SignInButton>
 				</SignedOut>
 				<SignedIn>

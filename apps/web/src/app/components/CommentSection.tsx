@@ -15,8 +15,12 @@ import {
 	postComment,
 	validateCommentBody,
 } from "@/lib/comments";
+import {
+	formatCreatedAt,
+	toDateTimeTooltip,
+	toIsoDateTime,
+} from "@/lib/datetime";
 import { EmptyState } from "./EmptyState";
-import { formatCreatedAt } from "./IssueList";
 
 /**
  * Issue 詳細ページのコメント欄。
@@ -109,8 +113,11 @@ export function CommentSection({
 							{/* 改行を含む本文をそのまま読めるようにする */}
 							<p className="comment-body">{comment.body}</p>
 							<p className="comment-date">
-								<time dateTime={comment.created_at}>
-									{formatCreatedAt(comment.created_at)}
+								<time
+									dateTime={toIsoDateTime(comment.created_at)}
+									title={toDateTimeTooltip(comment.created_at, locale)}
+								>
+									{formatCreatedAt(comment.created_at, locale)}
 								</time>
 							</p>
 						</li>

@@ -7,6 +7,11 @@ import {
 	type Locale,
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
+import {
+	formatCreatedAt,
+	toDateTimeTooltip,
+	toIsoDateTime,
+} from "../../lib/datetime";
 import type { FetchIssuesResult, PublicIssue } from "../../lib/issues";
 import { EmptyState } from "./EmptyState";
 import { StatusPill } from "./StatusPill";
@@ -30,25 +35,13 @@ export const scopeLabels = ISSUE_SCOPE_LABELS[DEFAULT_LOCALE];
 export const statusLabels = ISSUE_STATUS_LABELS[DEFAULT_LOCALE];
 
 /**
- * API が返す `created_at` を表示用の文字列にする。
+ * 日時の整形は `lib/datetime` に移した（A5）。
  *
- * 値は SQLite の `strftime('%Y-%m-%d %H:%M:%f', 'now')`（UTC、`apps/api/src/routes/issues.ts`）
- * で、タイムゾーン指定が付いていない。そのまま `new Date()` に渡すと処理系によって
- * ローカル時刻と解釈され 9 時間ずれるため、`T` と `Z` を補って明示的に UTC として読む。
- *
- * 表示は UTC 固定にしている。サーバーとブラウザでタイムゾーンが違うと
- * ハイドレーション時に文言が食い違うため、Server Component 側で決め切る。
- *
- * 日付の書式のロケール対応は Issue #82 の範囲外（別途判断）。
+ * 元はこのファイルに置いていたが、詳細ページ・コメント欄からも
+ * 名前で参照されていて、一覧の部品がその置き場になっていた。
+ * ここから再輸出しているのは、既存の import を壊さないため。
  */
-export function formatCreatedAt(createdAt: string): string {
-	const date = new Date(`${createdAt.replace(" ", "T")}Z`);
-	if (Number.isNaN(date.getTime())) {
-		// 想定外の書式でも「Invalid Date」を出さない
-		return createdAt;
-	}
-	return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
-}
+export { formatCreatedAt } from "../../lib/datetime";
 
 /**
  * Issue 1 件のカード。
@@ -98,8 +91,17 @@ export function IssueCard({
 				{issue.category ? (
 					<span className="issue-meta-item">{issue.category}</span>
 				) : null}
-				<time className="issue-meta-item" dateTime={issue.created_at}>
-					{formatCreatedAt(issue.created_at)}
+				{/*
+				  読む人向けの文字列は相対表記（A5）。機械可読な値は
+				  `dateTime` に ISO 8601 で残し、人が読める正確な日時は
+				  `title` に入れる（相対表記だけだと何月何日か確かめられない）
+				*/}
+				<time
+					className="issue-meta-item"
+					dateTime={toIsoDateTime(issue.created_at)}
+					title={toDateTimeTooltip(issue.created_at, locale)}
+				>
+					{formatCreatedAt(issue.created_at, locale)}
 				</time>
 				{/*
 				  起票者が名乗っているかどうか（#88）。実際の表示名はまだ出せない

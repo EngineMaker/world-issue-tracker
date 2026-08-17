@@ -153,7 +153,7 @@ export class IssueStatusError extends Error {
  */
 function messageFromStatus(status: number): string {
 	if (status === 401) {
-		return "ログインが必要です。サインインし直してからお試しください。";
+		return "ログインが必要です。ログインし直してからお試しください。";
 	}
 	if (status === 403) {
 		return "ステータスを変更できるのは、この Issue を起票した人だけです。";
@@ -192,7 +192,7 @@ export async function updateIssueStatus(
 ): Promise<PublicIssue> {
 	if (!token) {
 		throw new IssueStatusError(
-			"ログインが必要です。サインインしてからお試しください。",
+			"ログインが必要です。ログインしてからお試しください。",
 			401,
 		);
 	}

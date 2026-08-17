@@ -142,9 +142,24 @@ export default async function Home() {
 			<section>
 				<h2>{messages.home.statusesHeading}</h2>
 				<p>{messages.home.statusesBody}</p>
+				{/*
+				  段階の流れ（A6）。矢印は「前の段階から続いてくる線」なので、
+				  自分より前ではなく**後ろのピルと同じ塊**に入れる。
+				  こうすると折り返しは必ず「矢印＋ピル」の手前で起き、
+				  行末に矢印だけが取り残されない（詳細は globals.css の .status-step）。
+
+				  矢印は順序を目で見せるためだけの記号で、同じ情報は ol の
+				  並び順が既に持っている。読み上げに「右矢印」が挟まると
+				  段階の名前が続けて読めなくなるので `aria-hidden` で外す
+				*/}
 				<ol className="statuses">
-					{IssueStatus.options.map((status) => (
-						<li key={status}>
+					{IssueStatus.options.map((status, index) => (
+						<li className="status-step" key={status}>
+							{index > 0 ? (
+								<span className="status-arrow" aria-hidden="true">
+									→
+								</span>
+							) : null}
 							<StatusPill status={status} locale={locale} />
 						</li>
 					))}

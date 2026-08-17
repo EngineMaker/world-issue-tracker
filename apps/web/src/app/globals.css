@@ -235,6 +235,17 @@ h1,
 h2,
 h3 {
 	line-height: var(--leading-snug);
+	/*
+	 * 語の途中で改行させない（A1）。既定の日本語の折り返しは文字単位なので、
+	 * 「みんなで可/視化して」のように熟語の真ん中で行が変わる。
+	 * `keep-all` は日本語でも単語（文節）を割らずに折り返す指定。
+	 *
+	 * `overflow-wrap: break-word` を併せて置くのは、`keep-all` だけだと
+	 * 1 語が画面幅を超えたときに折り返し先が無くなって溢れるため。
+	 * 「どこでも割ってよい」ではなく「他に手が無ければ割る」の保険として効く
+	 */
+	word-break: keep-all;
+	overflow-wrap: break-word;
 }
 
 h1 {
@@ -547,11 +558,20 @@ main p {
 
 .scope-name {
 	font-weight: 600;
+	/*
+	 * スコープ名を語の途中で割らせない（A2）。狭い画面では
+	 * 「コミュニテ / ィ」のように 1 文字だけが次の行に落ちていた。
+	 * 見出しと同じ理由（h1, h2, h3 の指定を参照）
+	 */
+	word-break: keep-all;
+	overflow-wrap: break-word;
 }
 
 .scope-description {
 	color: var(--ink-soft);
 	font-size: var(--text-sm);
+	word-break: keep-all;
+	overflow-wrap: break-word;
 }
 
 /* ステータスは順序のある流れなので、矢印で繋いだピルとして見せる */
@@ -571,19 +591,37 @@ main p {
 	padding: 0;
 }
 
-.statuses li:not(:last-child) {
-	/* 矢印はピルの外に置きたいので、右余白を空けてそこに描く */
-	position: relative;
-	margin-right: 1rem;
+/*
+ * 段階と段階をつなぐ矢印（A6）。
+ *
+ * 元は右余白を空けて `position: absolute` で矢印を描いていた。1 行に
+ * 収まるうちは繋がって見えるが、折り返すと行末の項目にも矢印が残り、
+ * 続く先が無いまま宙に浮く。狭い画面では「対応中 →」で行が終わっていた。
+ *
+ * 矢印を独立した項目にするだけでは直らない。矢印がピルと別々に折り返せる
+ * ようになるので、今度は矢印そのものが行末に来る（＝症状が同じ）。
+ *
+ * 「矢印は要素**間**にのみ描く」を満たすには、矢印を**次のピルと同じ
+ * 折り返し単位**に入れる必要がある。矢印と後続のピルを 1 つの li にまとめ、
+ * その li の中では折り返させない。こうすると:
+ * - 行が変わるのは必ず「矢印＋ピル」の手前なので、行末に矢印が残らない
+ * - 矢印は常に前後のピルに挟まれた位置に出る
+ *
+ * 先頭の段階だけは前に繋ぐ相手がいないので、矢印を持たない li になる
+ */
+.status-step {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	/* 矢印とピルを 1 つの塊として折り返させる（この中では改行させない） */
+	white-space: nowrap;
 }
 
-.statuses li:not(:last-child)::after {
-	content: "→";
-	position: absolute;
-	right: -1rem;
-	width: 1rem;
-	text-align: center;
+.status-arrow {
+	flex: none;
 	color: var(--ink-faint);
+	/* 読み上げ対象から外している装飾なので、選択もさせない */
+	user-select: none;
 }
 
 /*
@@ -1407,12 +1445,84 @@ main p {
 	white-space: nowrap;
 }
 
+/*
+ * サービス名はワードマークとして扱う（A8）。
+ *
+ * 素のリンクのままだと下線が付き、ヘッダの中で「押せる文字列の 1 つ」に
+ * 見える。サービス名は本文中のリンクではなく、この画面が何であるかの
+ * 名乗りなので、下線は外して色も本文の墨に揃える。
+ *
+ * 押せること自体は失わせない。hover の下線と focus の輪郭は残すので、
+ * 辿れる場所であることは操作すれば分かる
+ */
+.site-header-title a {
+	text-decoration: none;
+	color: var(--ink);
+	font-weight: 700;
+	/* 名乗りなので、字間はわずかに詰めて 1 つの塊に見せる */
+	letter-spacing: var(--tracking-tight);
+}
+
+@media (hover: hover) {
+	.site-header-title a:hover {
+		text-decoration: underline;
+		/* 面はヘッダが持つので、リンクの下地（--accent-soft）は出さない */
+		background: none;
+	}
+}
+
+/*
+ * ヘッダのログインボタン（A4）。
+ *
+ * Clerk の `SignInButton` は中身に `<button>` を要求するため、見た目は
+ * ボタンでも役割はヘッダの他の項目と並ぶ導線でしかない。class が無いまま
+ * だとブラウザ既定の灰色の角枠が出て、ヘッダの中でここだけが浮いていた。
+ *
+ * `.button-secondary` を当てないのは、それが「押すと何かが起きる補助操作」の
+ * 見た目で、隣の「Issue を起票」「自分の Issue」がただのリンクである以上、
+ * ログインだけが枠を持つ理由が無いため。ボタンの既定の装飾を全部外して、
+ * 同じ行のリンクと同じ字面に揃える
+ */
+.site-header-signin {
+	font: inherit;
+	cursor: pointer;
+	/* ブラウザ既定の枠・下地・余白を落とす */
+	background: none;
+	border: none;
+	padding: 0;
+	color: var(--accent);
+	text-decoration: underline;
+}
+
+@media (hover: hover) {
+	.site-header-signin:hover {
+		background: var(--accent-soft);
+	}
+}
+
+.site-header-signin:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
 .site-header-nav {
 	display: flex;
 	flex-wrap: wrap;
 	/* 折り返した行同士がくっつかないよう、行間にも余白を取る */
 	gap: var(--space-2) var(--space-4);
 	align-items: center;
+	/*
+	 * 折り返したときに右へ寄せる（A7）。
+	 *
+	 * ログイン中はナビの項目が 1 つ増える（アバター）。狭い画面では
+	 * そのアバターだけが 2 行目に落ちるが、既定の `flex-start` だと
+	 * 画面の左端に単独で置かれ、右上に並ぶ他の項目と切り離されて
+	 * 「何かがはみ出した」ように見えていた。
+	 *
+	 * `justify-content` を右寄せにすると、溢れた項目は上の行の項目と
+	 * 同じ右端に揃う。列として繋がって見えるので、落ちても孤立しない
+	 */
+	justify-content: flex-end;
 }
 
 /*
