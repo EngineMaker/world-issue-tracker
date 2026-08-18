@@ -233,6 +233,40 @@ describe("起票者とコメント投稿者の表示名（#67）", () => {
 			expect(getUserListCalls()[0]).toEqual(["user_same"]);
 		});
 
+		// 「Clerk へ送らない」だけでは匿名を守り切れない。同じ人が匿名の Issue と
+		// 名乗った Issue を両方持っていると、その user_id は名乗った側のために
+		// Clerk へ送られ、表示名が手元に載る。返す直前の匿名判定
+		// （`withAuthorNames` の `issue.is_anonymous || ...`）が無いと、
+		// そこで匿名側にも名前が入る。
+		//
+		// 送信 ID の filter とレスポンス組み立ての 2 段構えのうち、
+		// 2 段目だけを消しても他のテストは全部通ってしまうため、この形で押さえる。
+		it("同じ人が匿名と実名の Issue を持っていても、匿名側に名前が漏れない", async () => {
+			await insertIssue("i-anon", "user_same", true, "2026-01-01 00:00:01.000");
+			await insertIssue(
+				"i-named",
+				"user_same",
+				false,
+				"2026-01-01 00:00:02.000",
+			);
+			setMockClerkUsers([clerkUser("user_same", "花子", "山田")]);
+
+			const body = await readBody(await app.request("/issues", {}, env));
+			expect(body.data).toHaveLength(2);
+
+			const anon = body.data.find((issue: Body) => issue.id === "i-anon");
+			const named = body.data.find((issue: Body) => issue.id === "i-named");
+
+			// 名乗った側には出る（前提が成立していることの確認。ここが null だと
+			// 「そもそも引けていないだけ」で下の assertion が通ってしまう）
+			expect(named.display_name).toBe("花子 山田");
+			expect(anon.display_name).toBeNull();
+		});
+
+		// 詳細ページも同じ経路を通るが、こちらは 1 件しか読まないので
+		// 「他の行のために引いた名前が混ざる」ことは起きない。
+		// 代わりに、匿名の 1 件だけを読んだときに Clerk を叩かないことを見る
+		// （上のテストと合わせて、匿名側は送りも受けもしないことになる）。
 		it("詳細（GET /issues/:id）でも同じ規則が働く", async () => {
 			await insertIssue("i1", "user_named", false);
 			await insertIssue("i2", "user_anon", true);

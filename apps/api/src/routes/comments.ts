@@ -44,12 +44,6 @@ type PublicComment = Pick<CommentRow, (typeof PUBLIC_COMMENT_COLUMNS)[number]>;
 type CommentRowLike = PublicComment & Partial<CommentRow>;
 
 /**
- * レスポンスに載せるカラムだけを並べた SELECT / RETURNING 句。
- * `SELECT *` にすると、カラムを追加した瞬間にそれが公開されてしまう。
- */
-export const PUBLIC_COMMENT_SELECT = PUBLIC_COMMENT_COLUMNS.join(", ");
-
-/**
  * DB の行から公開してよいカラムだけを取り出す。
  * SELECT で絞ったうえで返す直前にも通す二段構え（issues.ts と同じ方針）。
  */
@@ -70,14 +64,21 @@ const INTERNAL_AUTHOR_COLUMNS = [
 	"user_id",
 ] as const satisfies readonly (keyof CommentRow)[];
 
-/** 一覧の読み出しで使う SELECT 句。公開カラムに `user_id` を足したもの。 */
+/**
+ * 行を読む SELECT / RETURNING 句。公開カラムに `user_id` を足したもの。
+ *
+ * `SELECT *`・`RETURNING *` にすると、カラムを追加した瞬間にそれが
+ * 公開されてしまう（`issues.ts` の `PUBLIC_SELECT` と同じ方針）。
+ * ここで読む `user_id` は表示名を引くためのもので、返す直前に
+ * `toPublicComment` が落とす。
+ */
 const READ_SELECT = [
 	...PUBLIC_COMMENT_COLUMNS,
 	...INTERNAL_AUTHOR_COLUMNS,
 ].join(", ");
 
 /**
- * 一覧に載るコメント。公開カラムに投稿者の表示を重ねたもの（#67）。
+ * 読み出しで返るコメント。公開カラムに投稿者の表示を重ねたもの（#67）。
  *
  * `help-offers.ts` の `PublicHelpOfferWithName` と同じ構造で、
  * `PUBLIC_COMMENT_COLUMNS` の外側に足している。
@@ -92,9 +93,9 @@ const READ_SELECT = [
  * `is_anonymous` で 1 つ目を見分け、残りをまとめて「名前未設定の方」と出す
  * （`packages/shared` の `getAuthorLabel`）。
  *
- * 投稿する POST のレスポンスには足していない。作成直後の 1 件は自分が
- * 書いたものだと分かっており、一覧の取り直しで揃うため
- * （`help-offers.ts` の POST と同じ判断）。
+ * 一覧だけでなく投稿の POST もこの形で返す。理由は POST 側のコメントを参照
+ * （`help-offers.ts` は POST に足していないが、あちらは作成直後の 1 件が
+ * 画面上「あなた」と表示され、名前を引く必要が無いという違いがある）。
  */
 type PublicCommentWithAuthor = PublicComment & {
 	is_anonymous: boolean;
