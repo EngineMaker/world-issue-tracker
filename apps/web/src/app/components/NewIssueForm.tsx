@@ -7,6 +7,7 @@ import {
 	ISSUE_SCOPE_LABELS,
 	IssueScope,
 	type Locale,
+	roundIssueCoordinate,
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
 import { useState } from "react";
@@ -41,6 +42,18 @@ const INITIAL_VALUES: IssueFormValues = {
 
 /** 現在地の取得状態。押しても何も起きないように見える時間を作らないため */
 type GeolocationState = "idle" | "loading" | "failed";
+
+/**
+ * 座標を入力欄に入れられる文字列へ直す（#124）。
+ *
+ * 丸めてから入れるので、欄に出る値・送る値・保存される値が揃う。
+ * 座標にならない値（NaN）は空欄に倒す。`String(null)` の `"null"` が
+ * 欄に残ると、消すまで送信できない状態になる。
+ */
+function coordinateFieldValue(value: number): string {
+	const rounded = roundIssueCoordinate(value);
+	return rounded === null ? "" : String(rounded);
+}
 
 /**
  * 選ばれた写真の状態（#65）。
@@ -118,6 +131,12 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 	 * 失敗しても手入力できるため、送信を妨げるエラーとしては扱わず、
 	 * ボタンの近くに状態として出す。送信エラーの表示を上書きすると、
 	 * 直前の失敗理由が読めなくなるため場所を分けている。
+	 *
+	 * **欄に入れる前に丸める（#124）。** ブラウザが返す座標は小数点以下が
+	 * 十数桁あり、そのまま欄へ入れると生の値がネットワークにもリクエストの
+	 * ログにも乗る。保存されるのはどのみち 3 桁なので、ここで落としても
+	 * 失われる情報は無い。欄に出る値・送る値・保存される値が揃うので、
+	 * 「入力したのと違う場所が出ている」という食い違いも起きない。
 	 */
 	const fillCurrentPosition = () => {
 		if (!navigator.geolocation) {
@@ -129,8 +148,11 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 			(position) => {
 				setValues((current) => ({
 					...current,
-					latitude: String(position.coords.latitude),
-					longitude: String(position.coords.longitude),
+					// `roundIssueCoordinate` は座標にならない値（NaN など）に
+					// null を返す。`String(null)` は `"null"` になり、欄に
+					// その 4 文字が残るので、空欄（＝位置なし）に倒す
+					latitude: coordinateFieldValue(position.coords.latitude),
+					longitude: coordinateFieldValue(position.coords.longitude),
 				}));
 				setGeolocation("idle");
 			},
@@ -480,19 +502,24 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 							{geolocation === "loading"
 								? messages.newIssue.locating
 								: messages.newIssue.useCurrentPosition}
-						</button>{" "}
+						</button>
 						{/*
 						  入力した位置を取り消す（#124）。何も入っていないときは
-						  押しても意味が無いので出さない
+						  押しても意味が無いので出さない。先頭の空白は 2 つの
+						  ボタンが地の文で繋がって見えないようにするためで、
+						  ボタンごと消えるときは空白も一緒に消す
 						*/}
 						{(values.latitude !== "" || values.longitude !== "") && (
-							<button
-								type="button"
-								className="button-secondary"
-								onClick={clearLocation}
-							>
-								{messages.newIssue.clearLocation}
-							</button>
+							<>
+								{" "}
+								<button
+									type="button"
+									className="button-secondary"
+									onClick={clearLocation}
+								>
+									{messages.newIssue.clearLocation}
+								</button>
+							</>
 						)}
 					</p>
 

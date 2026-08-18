@@ -101,6 +101,14 @@ const COORDINATE_SCALE = 10 ** ISSUE_COORDINATE_PRECISION;
  * `Math.round(value * 1000) / 1000` は「整数 ÷ 1000」なので、
  * 結果の 10 進表現は必ず 3 桁以内に収まる（倍精度の最短表現が
  * 元の 3 桁小数へ戻るため）。JSON に 13 桁が復活することはない。
+ *
+ * 半端値（ちょうど 0.0005）の丸め方向は SQLite の `ROUND` と一致しない。
+ * `Math.round` は +∞ 側へ、SQLite は 0 から遠い側へ倒すので、負の座標で
+ * 1 桁分（0.001 = 約 100m）ずれることがある。既存行を丸めたマイグレーション
+ * （`0010_coarsen_location.sql`）とここで、同じ入力から違う値が出るのは
+ * その範囲。**どちらも 3 桁に収まるので、隠したい精度は同じだけ落ちる。**
+ * 揃えるために片方へ寄せる処理は入れていない（丸めの目的は値の一致ではなく
+ * 精度を落とすことで、境界のちょうど半端値は実データにまず現れない）。
  */
 export function roundIssueCoordinate(
 	value: number | null | undefined,

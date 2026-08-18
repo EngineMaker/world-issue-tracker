@@ -712,7 +712,11 @@ describe("/map ページ", () => {
 		});
 
 		// 全件が位置なしのとき。`fitViewToIssues([])` は既定の視界へ倒れるので
-		// 地図自体は描けるが、マーカーは 0 件になる
+		// 地図自体は描けるが、マーカーは 0 件になる。
+		//
+		// このとき「条件に合う Issue はありませんでした」は**出さない**。
+		// 該当する Issue はあって、地図に出せないだけ。両方出すと
+		// 「無い」と「N 件ある」が同じ画面に並んで矛盾する
 		it("位置のある Issue が 1 件も無くても壊れない", async () => {
 			process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
 			process.env.NEXT_PUBLIC_MAP_TILE_URL = TEMPLATE;
@@ -726,9 +730,25 @@ describe("/map ページ", () => {
 			const element = await MapPage({ searchParams: Promise.resolve({}) });
 			const html = renderToStaticMarkup(element);
 
-			expect(html).toContain(getUiMessages("ja").mapPage.noIssues);
+			expect(html).not.toContain(getUiMessages("ja").mapPage.noIssues);
 			expect(html).toContain(getUiMessages("ja").mapPage.withoutLocation(1));
 			expect(html).not.toContain("NaN");
+		});
+
+		// 絞り込みに 1 件も合わないときは、これまでどおり「該当なし」を出す。
+		// 上の変更で「該当なし」が二度と出なくなっていないことの裏取り
+		it("本当に 0 件のときは「該当なし」を出す", async () => {
+			process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
+			process.env.NEXT_PUBLIC_MAP_TILE_URL = TEMPLATE;
+			globalThis.fetch = stubListFetch([]);
+
+			const element = await MapPage({ searchParams: Promise.resolve({}) });
+			const html = renderToStaticMarkup(element);
+
+			expect(html).toContain(getUiMessages("ja").mapPage.noIssues);
+			expect(html).not.toContain(
+				getUiMessages("ja").mapPage.withoutLocation(0),
+			);
 		});
 	});
 });

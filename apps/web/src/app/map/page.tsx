@@ -243,7 +243,14 @@ export default async function MapPage({
 					*/}
 					<section>
 						<h2>{messages.mapPage.listHeading}</h2>
-						{plotted.length === 0 ? (
+						{/*
+						  「該当なし」は、絞り込みに合う Issue が本当に 0 件の
+						  ときだけ出す。位置なしの Issue があるのに
+						  「条件に合う Issue はありませんでした」と書くと、
+						  直後に出る「位置情報のない Issue が N 件あります」と
+						  同じ画面で矛盾する（#124）
+						*/}
+						{plotted.length === 0 && issues.length === 0 ? (
 							<p className="map-notice">{messages.mapPage.noIssues}</p>
 						) : (
 							<ul className="map-issue-list">

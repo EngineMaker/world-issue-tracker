@@ -25,11 +25,15 @@ describe("Existing coordinates are coarsened by the migration", () => {
 	);
 
 	/**
-	 * Issue #124 に載っていた実際の値。小数点以下 13 桁で、
-	 * 緯度の 1e-13 度はミリメートル未満の分解能にあたる。
+	 * 小数点以下 13 桁の座標。緯度の 1e-13 度はミリメートル未満の分解能で、
+	 * Issue #124 で問題になった値と同じ精度にしてある。
+	 *
+	 * **値そのものは架空のもの。** 実際に問題になった座標は匿名で投稿した
+	 * 人の生活圏で、このリポジトリは公開されている。DB から消しても、
+	 * 同じ値をテストに書けば git 履歴に残り続ける。
 	 */
-	const RAW_LATITUDE = 35.8140866596896;
-	const RAW_LONGITUDE = 140.4131622629284;
+	const RAW_LATITUDE = 35.4062938174615;
+	const RAW_LONGITUDE = 139.7461829365072;
 
 	beforeAll(async () => {
 		// 番号で切った部分集合が空だと、以降の検査が「何も無い DB を
@@ -63,6 +67,30 @@ describe("Existing coordinates are coarsened by the migration", () => {
 			)
 			.run();
 
+		// 子テーブルの行も**マイグレーションの前に**作る。
+		//
+		// ここが後回しだと、`issues` を作り直す過程でこれらが消えても
+		// テストは緑のままになる（後から入れた行は当然生き残る）。
+		// 実際、最初に書いたマイグレーションは `DROP TABLE issues` の
+		// 暗黙の DELETE が `ON DELETE CASCADE` を発火させ、**本番の
+		// コメント・「手伝います」・リアクションを全部消す**ものだった。
+		// それを捕まえるのがこの 3 行。
+		await env.DB.prepare(
+			"INSERT INTO comments (id, issue_id, user_id, body) VALUES (?, ?, ?, ?)",
+		)
+			.bind("legacy-comment", "legacy-anonymous", "user_1", "移行前のコメント")
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO help_offers (id, issue_id, user_id) VALUES (?, ?, ?)",
+		)
+			.bind("legacy-help-offer", "legacy-anonymous", "user_1")
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO reactions (id, issue_id, user_id) VALUES (?, ?, ?)",
+		)
+			.bind("legacy-reaction", "legacy-anonymous", "user_1")
+			.run();
+
 		// 入った時点では細かいままであること。ここが最初から丸まっていると、
 		// このあとの検査は何も証明しない
 		const before = await env.DB.prepare(
@@ -75,6 +103,14 @@ describe("Existing coordinates are coarsened by the migration", () => {
 		// ここで 0010 が走る
 		await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 	});
+
+	/** テーブルの行数。移行で消えていないことを見るために使う */
+	async function countRows(table: string): Promise<number> {
+		const row = await env.DB.prepare(
+			`SELECT COUNT(*) AS total FROM ${table}`,
+		).first<{ total: number }>();
+		return row?.total ?? 0;
+	}
 
 	async function readIssue(id: string) {
 		return env.DB.prepare(
@@ -94,8 +130,8 @@ describe("Existing coordinates are coarsened by the migration", () => {
 	it("rounds the coordinates of rows that already existed", async () => {
 		const row = await readIssue("legacy-anonymous");
 
-		expect(row?.latitude).toBe(35.814);
-		expect(row?.longitude).toBe(140.413);
+		expect(row?.latitude).toBe(35.406);
+		expect(row?.longitude).toBe(139.746);
 	});
 
 	// 匿名の行だけを丸めると、匿名と記名を後から切り替える機能が入った
@@ -103,7 +139,7 @@ describe("Existing coordinates are coarsened by the migration", () => {
 	it("rounds named rows too", async () => {
 		const row = await readIssue("legacy-named");
 
-		expect(row?.latitude).toBe(35.814);
+		expect(row?.latitude).toBe(35.406);
 		expect(row?.is_anonymous).toBe(0);
 	});
 
@@ -131,6 +167,50 @@ describe("Existing coordinates are coarsened by the migration", () => {
 		const row = await readIssue("no-location");
 		expect(row?.latitude).toBeNull();
 		expect(row?.longitude).toBeNull();
+	});
+
+	/*
+	 * **移行前からある子テーブルの行が、移行後も残っていること。**
+	 *
+	 * `issues` を作り直すと、`DROP TABLE` の前に SQLite が走らせる暗黙の
+	 * `DELETE FROM` が `ON DELETE CASCADE` を発火させ、コメントも
+	 * 「手伝います」もリアクションも消える。`PRAGMA defer_foreign_keys` は
+	 * 制約違反の**検査**を遅らせるだけで、CASCADE という**アクション**は
+	 * 遅延しない。D1 では `PRAGMA foreign_keys = OFF` も
+	 * `PRAGMA legacy_alter_table = ON` も効かない。
+	 *
+	 * これは一度実際に書いてしまった欠陥で、本番へ出れば
+	 * **これまでに書かれた全コメントが失われる**。目に見える形で壊れず、
+	 * 「位置情報の丸めは効いている」ので気づくのが遅れる種類の事故でもある。
+	 *
+	 * 0010 が子テーブルを退避して書き戻すのはそのため。この 1 件が
+	 * その手当てを見張る唯一のテストなので、消さないこと。
+	 */
+	it("keeps rows in the child tables that existed before the migration", async () => {
+		expect(await countRows("comments"), "コメントが消えた").toBe(1);
+		expect(await countRows("help_offers"), "「手伝います」が消えた").toBe(1);
+		expect(await countRows("reactions"), "リアクションが消えた").toBe(1);
+
+		// 件数だけでなく中身も写っていること。空の行で埋めても件数は合う
+		const comment = await env.DB.prepare(
+			"SELECT issue_id, user_id, body FROM comments WHERE id = ?",
+		)
+			.bind("legacy-comment")
+			.first<{ issue_id: string; user_id: string; body: string }>();
+		expect(comment?.issue_id).toBe("legacy-anonymous");
+		expect(comment?.user_id).toBe("user_1");
+		expect(comment?.body).toBe("移行前のコメント");
+	});
+
+	// 退避に使ったテーブルを残したまま終わらない。
+	// 残ると、次にスキーマを読む人が「これは何か」を判断できず、
+	// 移行前のデータ（＝丸める前の座標を含む行）も居座り続ける
+	it("leaves no scratch tables behind", async () => {
+		const { results } = await env.DB.prepare(
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '%_pre_0010'",
+		).all<{ name: string }>();
+
+		expect(results.map((row) => row.name)).toEqual([]);
 	});
 
 	// 作り直したテーブルを、他のテーブルの外部キーが正しく参照できること。

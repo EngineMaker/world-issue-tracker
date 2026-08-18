@@ -25,15 +25,41 @@
 -- 変えても残る）。名前を出すことと、自宅を指されることは別の話でもある。
 --
 -- SQLite は `ALTER TABLE` で NOT NULL を外せないため、テーブルを作り直す。
--- 手順は SQLite / D1 の定石どおり「新テーブル → コピー → 差し替え」。
 --
--- `defer_foreign_keys` を立てているのは、`comments` / `help_offers` /
--- `reactions` が `REFERENCES issues(id) ON DELETE CASCADE` を持つため。
--- `DROP TABLE issues` の時点で参照先が一時的に消えるので、外部キーの
--- 検査をこのトランザクションの終わりまで遅らせる。`ALTER TABLE ... RENAME`
--- で `issues` が戻った時点で参照は元通りになる（参照している側の
--- REFERENCES 句は名前で解決されるため、書き換えは要らない）。
+-- ---------------------------------------------------------------------
+-- **`issues` を素直に作り直すと、子テーブルの行が全部消える。**
+-- ---------------------------------------------------------------------
+--
+-- `comments` / `help_offers` / `reactions` は
+-- `REFERENCES issues(id) ON DELETE CASCADE` を持つ。SQLite は外部キーが
+-- 有効なとき `DROP TABLE` の前に暗黙の `DELETE FROM` を走らせ、**それが
+-- CASCADE を発火させる**。`issues` の全行が「削除された」ことになり、
+-- 子テーブルが空になる。
+--
+-- `PRAGMA defer_foreign_keys` が遅らせるのは**制約違反の検査**だけで、
+-- CASCADE という**アクションは遅延されない**。D1 では
+-- `PRAGMA foreign_keys = OFF` も `PRAGMA legacy_alter_table = ON` も
+-- 効かない（受け付けられるが無視される）。この 3 つはどれも回避策に
+-- ならないことを、実際の D1（vitest-pool-workers）で確かめた。
+--
+-- そこで**子テーブルの中身を退避してから作り直し、あとで書き戻す**。
+-- 退避先は外部キーを持たない素のテーブル（`CREATE TABLE ... AS SELECT`）
+-- なので、`issues` が消えても道連れにならない。
+--
+-- 書き戻しはカラム名を明示する。`SELECT *` に頼ると、退避元と書き戻し先で
+-- カラムの並びがずれたときに黙って別の列へ入る。
+--
+-- 退避テーブルを落とすのは最後。途中で失敗したときに、子テーブルの中身が
+-- `*_pre_0010` に残っていれば手で戻せる（消えたきり戻せない状態を作らない）。
+--
+-- **この消失は普通のテストでは見つからない。** 子行をマイグレーション後に
+-- 作るテストは、当然ながら生き残る。`test/location-migration.test.ts` は
+-- **0010 を適用する前に**子行を作り、適用後に残っていることを見ている。
 PRAGMA defer_foreign_keys = TRUE;
+
+CREATE TABLE comments_pre_0010 AS SELECT * FROM comments;
+CREATE TABLE help_offers_pre_0010 AS SELECT * FROM help_offers;
+CREATE TABLE reactions_pre_0010 AS SELECT * FROM reactions;
 
 -- カラムの並びは**現在のテーブルと同じ順**にする。`0002` / `0007` / `0008`
 -- の `ALTER TABLE ADD COLUMN` で後ろに足された 4 つは、ここでも末尾に置く。
@@ -83,11 +109,29 @@ DROP TABLE issues;
 
 ALTER TABLE issues_new RENAME TO issues;
 
+-- 子テーブルを書き戻す。ここまで来れば `issues` は元の名前で存在するので、
+-- 外部キーの参照先は揃っている。
+INSERT INTO comments (id, issue_id, user_id, body, created_at)
+SELECT id, issue_id, user_id, body, created_at FROM comments_pre_0010;
+
+INSERT INTO help_offers (id, issue_id, user_id, created_at)
+SELECT id, issue_id, user_id, created_at FROM help_offers_pre_0010;
+
+INSERT INTO reactions (id, issue_id, user_id, created_at)
+SELECT id, issue_id, user_id, created_at FROM reactions_pre_0010;
+
+DROP TABLE comments_pre_0010;
+DROP TABLE help_offers_pre_0010;
+DROP TABLE reactions_pre_0010;
+
 -- インデックスは作り直す。`DROP TABLE` で元のテーブルと一緒に消えるため、
 -- ここで作らないと 6 本すべてが失われる（一覧の並び順もカーソルページングも
 -- 全行走査になる）。定義は `0001` / `0002` / `0003` / `0004` のものと同じで、
 -- `test/schema.test.ts` が「マイグレーションが定義するインデックスが全部ある」
 -- ことを見張っている。
+--
+-- 子テーブルのインデックスは作り直さない。あちらのテーブルは `DROP` して
+-- いないので、索引もそのまま生きている。
 CREATE INDEX idx_issues_scope ON issues(scope);
 CREATE INDEX idx_issues_status ON issues(status);
 CREATE INDEX idx_issues_location ON issues(latitude, longitude);
