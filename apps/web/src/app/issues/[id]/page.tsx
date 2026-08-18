@@ -17,9 +17,11 @@ import {
 	resolveTileAttribution,
 	resolveTileUrlTemplate,
 } from "../../../lib/map";
+import { fetchReactions } from "../../../lib/reactions";
 import { CommentSection } from "../../components/CommentSection";
 import { HelpOfferButton } from "../../components/HelpOfferButton";
 import { IssueMap } from "../../components/IssueMap";
+import { ReactionButton } from "../../components/ReactionButton";
 import { IssueStatusSection } from "../../components/StatusControl";
 import { StatusPill } from "../../components/StatusPill";
 
@@ -53,10 +55,11 @@ export default async function IssueDetailPage({
 	const messages = getUiMessages(locale);
 	const scopeLabels = ISSUE_SCOPE_LABELS[locale];
 
-	const [result, commentsResult, offers] = await Promise.all([
+	const [result, commentsResult, offers, reactions] = await Promise.all([
 		fetchIssue(id),
 		fetchComments(id),
 		fetchHelpOffers(id),
+		fetchReactions(id),
 	]);
 
 	// 存在しない ID は 404。取得に失敗しただけのときは 404 にしない
@@ -146,6 +149,22 @@ export default async function IssueDetailPage({
 				*/}
 				<p className="issue-description">{issue.description}</p>
 			</section>
+
+			{/*
+			  「私も困っている」（#112）は本文のすぐ下、ステータス変更や
+			  「手伝います」より前に置く。読み終えた直後に、最も心理的コストの
+			  低い意思表示から順に並ぶようにする（反応 → 手伝います → コメント）。
+
+			  詳細ページは API にトークンを渡していないので `viewer_reacted` は
+			  常に false で返る（Clerk のセッションは Cookie で、別オリジンの
+			  API には届かない）。「自分が反応済みか」はブラウザ側で
+			  `ReactionButton` が取り直す。件数だけは JS の実行前から読める
+			*/}
+			<ReactionButton
+				issueId={issue.id}
+				initialSummary={reactions.ok ? reactions.summary : null}
+				locale={locale}
+			/>
 
 			<section>
 				<h2>{messages.issueDetail.detailsHeading}</h2>

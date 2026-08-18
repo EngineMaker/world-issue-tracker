@@ -17,6 +17,7 @@ import { createApp } from "../src/index";
 import {
 	PUBLIC_ISSUE_COLUMNS as PUBLIC_ISSUE_COLUMNS_FOR_TEST,
 	PUBLIC_SELECT as PUBLIC_SELECT_FOR_TEST,
+	PUBLIC_SELECT_WITH_COUNTS as PUBLIC_SELECT_WITH_COUNTS_FOR_TEST,
 	toPublicIssue as toPublicIssueForTest,
 } from "../src/routes/issues";
 import { setMockUserId } from "./helpers/clerk-mock";
@@ -1377,6 +1378,35 @@ describe("Issues CRUD", () => {
 				expect(detail).toContain("idx_issues_created_at");
 				expect(detail).not.toContain("TEMP B-TREE");
 			});
+
+			// 上のテストは `SELECT id` という手書きのクエリを見ている。
+			// 実際に発行されるのは反応の件数（#112）を数える相関副問い合わせを
+			// 含んだ SELECT で、そちらのプランは見ていなかった。
+			//
+			// 副問い合わせが索引を使わないと、一覧 1 ページにつき
+			// 「limit 件 × reactions の全表スキャン」になる。公開エンドポイントで
+			// D1 は読み取り行数で課金されるため、そのままコストになる。
+			// `reactions` の UNIQUE (issue_id, user_id) が消えるとここが SCAN に戻る。
+			it("counts reactions through an index, not a scan", async () => {
+				const plan = await env.DB.prepare(
+					`EXPLAIN QUERY PLAN SELECT ${PUBLIC_SELECT_WITH_COUNTS_FOR_TEST} FROM issues WHERE (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?`,
+				)
+					.bind("2026-01-01 00:00:05.000", "2026-01-01 00:00:05.000", "x", 4)
+					.all<{ detail: string }>();
+
+				const detail = plan.results.map((row) => row.detail).join("\n");
+
+				// 外側は従来どおり created_at の索引で引けていること
+				// （副問い合わせを足したことで並び順の索引が使えなくなっていない）
+				expect(detail).toContain("idx_issues_created_at");
+				expect(detail).not.toContain("TEMP B-TREE");
+				// 内側の集計も索引で引けていること。
+				// SQLite は UNIQUE 制約の索引を `sqlite_autoindex_reactions_*` という
+				// 名前で自動生成するため、名前ではなく「reactions を SCAN していない」
+				// ことで見る
+				expect(detail).toContain("SEARCH reactions");
+				expect(detail).not.toContain("SCAN reactions");
+			});
 		});
 
 		// クエリ検証は入力チェックであると同時にリソース保護でもある。
@@ -2139,10 +2169,16 @@ describe("Issues CRUD", () => {
 			const res = await app.request("/issues/mine", {}, env);
 			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
-			// テーブルの公開カラムに加えて、行に無い派生フィールド `has_photo`
-			// （写真の有無、#65）が載る。公開一覧と同じ形であることが要点
+			// テーブルの公開カラムに加えて、行に無い派生フィールド
+			// `has_photo`（写真の有無、#65）と `reaction_count`
+			// （「私も困っている」の件数、#112）が載る。
+			// 公開一覧と同じ形であることが要点
 			expect(Object.keys(body.data[0]).sort()).toEqual(
-				[...PUBLIC_ISSUE_COLUMNS_FOR_TEST, "has_photo"].sort(),
+				[
+					...PUBLIC_ISSUE_COLUMNS_FOR_TEST,
+					"has_photo",
+					"reaction_count",
+				].sort(),
 			);
 		});
 
@@ -2195,6 +2231,10 @@ describe("Issues CRUD", () => {
 			"has_photo",
 			// 匿名で起票されたかどうか（#88）。真偽値だけで、起票者は載らない。
 			"is_anonymous",
+			// 「私も困っている」の件数（#112）。数だけで、誰が押したかは載らない。
+			// `issues` テーブルのカラムではなく、読み出しの SELECT に足した
+			// 相関副問い合わせが数えた値
+			"reaction_count",
 		];
 
 		beforeEach(async () => {
@@ -2506,7 +2546,13 @@ describe("Issues CRUD", () => {
 				// `has_photo` は行に無い派生フィールドなのでここには現れない
 				expect(Object.keys(row ?? {}).sort()).toEqual(
 					[
-						...PUBLIC_KEYS.filter((key) => key !== "has_photo"),
+						// `reaction_count`（#112）も行に無い派生フィールド。
+						// こちらは読み出し用の `PUBLIC_SELECT_WITH_COUNTS` が
+						// 相関副問い合わせで足すもので、書き込み系の RETURNING で
+						// 使う `PUBLIC_SELECT` には現れない
+						...PUBLIC_KEYS.filter(
+							(key) => key !== "has_photo" && key !== "reaction_count",
+						),
 						"photo_key",
 						"photo_content_type",
 					].sort(),

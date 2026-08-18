@@ -181,6 +181,7 @@ describe("詳細ページ", () => {
 		response: Response,
 		comments?: Response,
 		helpOffers?: Response,
+		reactions?: Response,
 	) {
 		const originalFetch = globalThis.fetch;
 		const calls: string[] = [];
@@ -189,6 +190,9 @@ describe("詳細ページ", () => {
 			calls.push(url);
 			if (url.endsWith("/comments")) {
 				return comments ?? Response.json({ data: [], total: 0 });
+			}
+			if (url.endsWith("/reactions")) {
+				return reactions ?? Response.json({ total: 0, viewer_reacted: false });
 			}
 			if (url.endsWith("/help-offers")) {
 				return (
@@ -222,11 +226,14 @@ describe("詳細ページ", () => {
 
 		// URL の id を使って API を呼んでいること
 		// （呼ばずに固定の内容を出す実装だとここで落ちる）。
-		// Issue 本体・コメント（#60）・表明（#61）で 3 本投げるので、
-		// 本体側を名指しで見る
-		expect(calls).toHaveLength(3);
+		// Issue 本体・コメント（#60）・表明（#61）・反応（#112）で
+		// 4 本投げるので、本体側を名指しで見る
+		expect(calls).toHaveLength(4);
 		const issueCalls = calls.filter(
-			(url) => !url.endsWith("/comments") && !url.endsWith("/help-offers"),
+			(url) =>
+				!url.endsWith("/comments") &&
+				!url.endsWith("/help-offers") &&
+				!url.endsWith("/reactions"),
 		);
 		expect(issueCalls).toHaveLength(1);
 		expect(issueCalls[0]).toContain(`/issues/${sampleIssue.id}`);
@@ -383,6 +390,73 @@ describe("詳細ページ", () => {
 		// 取ってきた件数が画面に反映されていること
 		// （取得しても渡していない実装だとここで落ちる）
 		expect(html).toContain("3 人が「手伝います」と表明しています。");
+	});
+
+	/**
+	 * 「私も困っている」（Issue #112）の結線。
+	 *
+	 * 「手伝います」と同じ理由で、ここでは「ページが反応を取りに行き、
+	 * その結果を渡していること」を見る。ボタン自体の表示は
+	 * `reaction-button.test.tsx` が担当する。
+	 *
+	 * これが無いと、ページから `<ReactionButton />` を外しても
+	 * どのテストも落ちない。
+	 */
+	it("反応を取りに行き、件数を画面に渡す", async () => {
+		const { html, calls } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+			undefined,
+			undefined,
+			Response.json({ total: 5, viewer_reacted: false }),
+		);
+
+		expect(calls.some((url) => url.endsWith("/reactions"))).toBe(true);
+		// 取ってきた件数が画面に反映されていること
+		expect(html).toContain("5 人が「私も困っている」と反応しています。");
+	});
+
+	// 心理的コストの低い順に並べる（#112 の決定 2）。
+	// 反応 → 手伝います → コメントの順。読み終えた直後に、最も軽い
+	// 意思表示から出会うようにする
+	it("反応を「手伝います」とコメントより前に置く", async () => {
+		const { html } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+		);
+
+		const reactionAt = html.indexOf("reactions-heading");
+		const helpOfferAt = html.indexOf("help-offers-heading");
+
+		expect(reactionAt).toBeGreaterThan(-1);
+		expect(helpOfferAt).toBeGreaterThan(-1);
+		expect(reactionAt).toBeLessThan(helpOfferAt);
+	});
+
+	// 同じ画面に 2 つのボタンが並ぶので、言葉で区別が付くこと（#112 の決定 2）
+	it("「困っている人」と「解決に動く人」が両方出る", async () => {
+		const { html } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+		);
+		const text = html.replace(/<[^>]*>/g, "");
+
+		expect(text).toContain("困っている人");
+		expect(text).toContain("解決に動く人");
+	});
+
+	// 反応が取れなくても Issue 本体は出す。取得の失敗でページ全体を落とさない
+	it("反応の取得に失敗しても Issue 本体は描画する", async () => {
+		const { html } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+			undefined,
+			undefined,
+			new Response("", { status: 500 }),
+		);
+
+		expect(html).toContain("駅前の街灯が切れている");
+		expect(html).toContain("反応を取得できませんでした");
 	});
 
 	it("読み終えたときに行き止まりにしない（一覧への導線がある）", async () => {

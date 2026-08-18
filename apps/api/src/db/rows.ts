@@ -86,3 +86,19 @@ export type HelpOfferRow = {
 	user_id: string;
 	created_at: string;
 };
+
+/**
+ * `reactions` テーブルの 1 行（`0009_create_reactions.sql`）。
+ *
+ * `help_offers` と同じ形だが、意味が違う（あちらは「動く人」、こちらは
+ * 「困っている人」の表明）。真偽値としての「反応したか」しか持たない。
+ *
+ * `user_id` は公開レスポンスに載せない（`routes/reactions.ts` 参照）。
+ * ここに書いてあるのは「DB が実際に返す姿」で、公開してよい姿ではない。
+ */
+export type ReactionRow = {
+	id: string;
+	issue_id: string;
+	user_id: string;
+	created_at: string;
+};

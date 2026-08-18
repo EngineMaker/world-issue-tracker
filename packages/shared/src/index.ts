@@ -611,6 +611,27 @@ const JA_UI_MESSAGES = {
 			`ステータスを「${statusLabel}」に更新しました。`,
 	},
 
+	/**
+	 * 「私も困っている」（`ReactionButton`、#112）。
+	 *
+	 * 「手伝います」と対にして置いている。あちらの見出しが「解決に動く人」で、
+	 * こちらが「困っている人」。言葉の対で意味の違いを伝える（同じ画面に
+	 * 2 つのボタンが並ぶため、どちらを押すべきかが文言だけで分かる必要がある）。
+	 */
+	reaction: {
+		heading: "困っている人",
+		fetchFailed: "反応を取得できませんでした。時間をおいて再度お試しください。",
+		none: "まだ誰も反応していません。",
+		count: (total: number) =>
+			`${total} 人が「私も困っている」と反応しています。`,
+		react: "私も困っている",
+		withdraw: "反応を取り消す",
+		signInHint: " — 反応するにはログインが必要です",
+		youReacted: " — あなたはこの Issue に反応しています",
+		/** 一覧のカードに出す件数（#112）。狭い場所なので数だけ */
+		cardCount: (total: number) => `困っている人 ${total}`,
+	},
+
 	/** 「手伝います」（`HelpOfferButton`） */
 	helpOffer: {
 		heading: "解決に動く人",
@@ -928,6 +949,21 @@ const EN_UI_MESSAGES: UiMessages = {
 		submit: "Update status",
 		submitting: "Updating…",
 		updated: (statusLabel: string) => `Status updated to “${statusLabel}”.`,
+	},
+
+	reaction: {
+		heading: "People affected",
+		fetchFailed: "Could not load reactions. Please try again later.",
+		none: "Nobody has reacted yet.",
+		count: (total: number) =>
+			total === 1
+				? "1 person also has this problem."
+				: `${total} people also have this problem.`,
+		react: "I have this problem too",
+		withdraw: "Undo my reaction",
+		signInHint: " — sign in to react",
+		youReacted: " — you have reacted to this issue",
+		cardCount: (total: number) => `${total} affected`,
 	},
 
 	helpOffer: {
