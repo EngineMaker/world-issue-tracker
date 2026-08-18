@@ -19,6 +19,11 @@ import IssueDetailPage from "../src/app/issues/[id]/page";
 import { createIssue } from "../src/lib/api";
 import { issuePhotoUrl, parsePublicIssue } from "../src/lib/issues";
 import { fitWithin, PHOTO_MAX_EDGE } from "../src/lib/photo";
+import {
+	defaultCommentsResponse,
+	defaultHelpOffersResponse,
+	defaultReactionsResponse,
+} from "./helpers/detail-stub";
 
 const sampleIssue = {
 	id: "ebbcf9d7680ad57cedeeb513a90d461f",
@@ -246,21 +251,24 @@ describe("createIssue — 写真の送信", () => {
 });
 
 describe("Issue 詳細ページ — 写真の表示", () => {
-	/** ページを描画する。API の応答は `fetch` を差し替えて与える。 */
+	/**
+	 * ページを描画する。API の応答は `fetch` を差し替えて与える。
+	 *
+	 * comments / reactions / help-offers は実 API 契約に沿った既定応答を
+	 * 共有ヘルパーから返す。ここを契約からずらすと web 側パーサに弾かれ、
+	 * ボタンが「取得に失敗しました」のまま描画される（#139）。
+	 */
 	async function renderDetail(issue: Record<string, unknown>): Promise<string> {
 		const original = globalThis.fetch;
 		globalThis.fetch = (async (url: string) => {
 			if (String(url).endsWith("/comments")) {
-				return new Response(JSON.stringify({ data: [], total: 0 }), {
-					status: 200,
-					headers: { "Content-Type": "application/json" },
-				});
+				return defaultCommentsResponse();
+			}
+			if (String(url).endsWith("/reactions")) {
+				return defaultReactionsResponse();
 			}
 			if (String(url).endsWith("/help-offers")) {
-				return new Response(
-					JSON.stringify({ data: [], total: 0, viewer_offered: false }),
-					{ status: 200, headers: { "Content-Type": "application/json" } },
-				);
+				return defaultHelpOffersResponse();
 			}
 			return new Response(JSON.stringify(issue), {
 				status: 200,
@@ -299,6 +307,21 @@ describe("Issue 詳細ページ — 写真の表示", () => {
 
 		expect(html).not.toContain(issuePhotoUrl(sampleIssue.id));
 		expect(html).not.toContain("<h2>写真</h2>");
+	});
+
+	// スタブが実 API 契約を再現できていること（#139）。
+	//
+	// help-offers / reactions のスタブが契約からずれると、web 側パーサに
+	// 弾かれてボタンが「取得に失敗しました」のまま描画される。写真の assert
+	// だけでは緑のままなので、両ボタンが取得成功の状態で描かれていることを
+	// ここで守る。ずれれば取得失敗の文言が出て落ちる。
+	it("表明・反応の取得に失敗した状態で描画していない", async () => {
+		const html = await renderDetail(sampleIssue);
+
+		expect(html).not.toContain("手伝いの表明を取得できませんでした");
+		expect(html).not.toContain("反応を取得できませんでした");
+		// 取得成功時に出る見出し。失敗時は出ない
+		expect(html).toContain("解決に動く人");
 	});
 });
 
