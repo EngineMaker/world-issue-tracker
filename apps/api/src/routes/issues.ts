@@ -196,8 +196,11 @@ const REACTION_COUNT_SQL =
  * 書き込み系の RETURNING では使わない。RETURNING は更新した行そのものしか
  * 見ないため副問い合わせを書けるとは限らず、そこで件数が要る場面も無い
  * （作った直後・消した直後の反応は 0 件、または画面が使わない）。
+ *
+ * export しているのはテストのため。実際に発行される句でクエリプランを
+ * 確かめないと、副問い合わせが索引を使わなくなっても気付けない。
  */
-const PUBLIC_SELECT_WITH_COUNTS = `${PUBLIC_ISSUE_COLUMNS.map((column) => `issues.${column}`).join(", ")}, ${INTERNAL_PHOTO_COLUMNS.map((column) => `issues.${column}`).join(", ")}, ${REACTION_COUNT_SQL}`;
+export const PUBLIC_SELECT_WITH_COUNTS = `${PUBLIC_ISSUE_COLUMNS.map((column) => `issues.${column}`).join(", ")}, ${INTERNAL_PHOTO_COLUMNS.map((column) => `issues.${column}`).join(", ")}, ${REACTION_COUNT_SQL}`;
 
 /**
  * DB の行から公開してよいカラムだけを取り出す。
