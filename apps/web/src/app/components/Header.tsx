@@ -23,6 +23,11 @@ export function Header({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 				  読めない言語で表示されている人が、探さずに見つけられる場所が要る
 				*/}
 				<LocaleSwitcher locale={locale} />
+				{/*
+				  地図ダッシュボード（#113）。URL を知っている人しか行けない
+				  画面は無いのとほぼ同じなので、全ページに出るヘッダに置く
+				*/}
+				<Link href="/map">{messages.header.map}</Link>
 				<Link href="/issues/new">{messages.header.newIssue}</Link>
 				<SignedIn>
 					{/*
