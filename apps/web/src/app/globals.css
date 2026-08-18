@@ -1216,16 +1216,28 @@ main p {
 }
 
 /*
- * Issue 詳細ページの地図（#63）。
+ * Issue 詳細ページの地図（#63 → #118 で MapLibre GL JS へ）。
  *
- * 3x3 のタイルを並べて中心の地点を表示領域の中央に置く。はみ出す分は
- * `overflow: hidden` で切り落とすため、コンテナに位置指定が要る。
+ * ラスタタイルを並べていた頃はタイルの段組みと、中心へずらすための
+ * 位置指定がここに要った。MapLibre は箱の中に自前のキャンバスを描くので、
+ * **こちらが決めるのは箱の大きさと枠だけ**になる。
+ *
+ * 寸法を CSS に置いているのは、以前は tsx がインライン style で渡していた
+ * ものを #86 の検査（定数のインライン style を禁じる）に合わせて移した形。
+ * MapLibre は箱の大きさに追従するので、ここを変えれば地図の大きさが変わる。
  */
 .issue-map {
 	margin: 0 0 var(--space-2);
 }
 
+/*
+ * 1 件の位置を示すだけの地図。周囲の通りが分かる程度の大きさを取る。
+ * 縦横が同じなのは、地点が中央に 1 つあるだけで方向の偏りが無いため
+ */
 .issue-map-view {
+	width: 512px;
+	height: 512px;
+	max-width: 100%;
 	box-shadow: var(--shadow-card);
 	transition:
 		box-shadow var(--transition-base),
@@ -1234,54 +1246,8 @@ main p {
 	overflow: hidden;
 	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
-	/* タイルが読み込めないときに、枠だけが残って中身が抜けて見えないように */
+	/* 地図が読み込めないときに、枠だけが残って中身が抜けて見えないように */
 	background-color: var(--line);
-	max-width: 100%;
-}
-
-.issue-map-tiles {
-	position: absolute;
-	top: 0;
-	left: 0;
-	/* タイルの継ぎ目に隙間が出ないよう、行内の余白を殺す */
-	line-height: 0;
-}
-
-.issue-map-row {
-	white-space: nowrap;
-}
-
-/*
- * 地図の上端・下端より外にはタイルが存在しない。その分の場所だけを空けて
- * おくための箱で、これが無いと端の地点で行がずれて中心がずれる。
- * タイルの `<img>` と同じ inline レイアウトに乗せる必要がある
- */
-.issue-map-blank {
-	display: inline-block;
-	vertical-align: top;
-}
-
-/*
- * 地点を指すマーカー。表示領域の中央に固定する（タイル側をずらして
- * 地点を中央に持ってきているため）
- */
-.issue-map-marker {
-	position: absolute;
-	top: 50%;
-	left: 50%;
-	width: 14px;
-	height: 14px;
-	margin: -7px 0 0 -7px;
-	border: 2px solid var(--surface);
-	/* 円。--radius-pill は「丸め切る」段階なので、正方形に当てると円になる */
-	border-radius: var(--radius-pill);
-	/*
-	 * 地点を指す印。エラーではないが「ここだ」と一点を強く示す用途なので、
-	 * 状態色の --danger を借りる。以前の赤と揃える形で #86 が
-	 * 統一先に指定している値
-	 */
-	background-color: var(--danger);
-	box-shadow: var(--shadow-marker);
 }
 
 /* 帰属表示は隠さないことがタイル配信元の利用条件に含まれる */
@@ -2535,80 +2501,50 @@ main p {
 }
 
 /*
- * 地図ダッシュボード（#113）。
+ * 地図ダッシュボード（#113 → #118 で MapLibre GL JS へ）。
  *
- * `.issue-map-*`（詳細ページの 1 件表示）とは別の部品なので、クラスも分けている。
- * あちらは固定サイズで中央に 1 点、こちらは複数点を任意の縮尺で並べる。
- * MapLibre GL JS へ移す段階でこのブロックは丸ごと置き換わる。
+ * `.issue-map-*`（詳細ページの 1 件表示）とは別の部品なので、クラスも分けて
+ * いる。あちらは固定サイズで中央に 1 点、こちらは複数点を任意の縮尺で並べる。
+ *
+ * ラスタタイルを並べていた頃はタイルの段組みとマーカーの層がここに要った。
+ * MapLibre は箱の中に自前のキャンバスを描き、マーカーの位置も自分で管理
+ * するので、**こちらが決めるのは箱の大きさと、マーカー 1 個の見た目だけ**。
  */
 .issues-map {
 	margin: 0 0 var(--space-6);
-	/* 表示領域より狭い画面では横スクロールで見せる（地図を潰さない） */
 	max-width: 100%;
-	overflow-x: auto;
 }
 
 /*
- * 表示領域の寸法。`lib/map-view.ts` の `MAP_VIEW_WIDTH` / `MAP_VIEW_HEIGHT` と
- * 同じ値でなければならない（tsx はこの寸法を前提に地点の px を算出する）。
- * 一致は `map-dashboard.test.tsx` が突き合わせている
+ * 表示領域の寸法。MapLibre は箱の大きさに追従して描くので、ここを
+ * 変えれば地図の大きさが変わる。
+ *
+ * 横長にしているのは、東西に広がる日本列島を収めるため。
+ * 狭い画面でも潰れないよう、幅は上限として指定する
+ * （#113 の頃は固定幅で横スクロールさせていたが、MapLibre は
+ * 箱に合わせて描けるので、狭い画面では地図の方を狭くする方が読める）
  */
 .issues-map-view {
-	width: 960px;
+	width: 100%;
+	max-width: 960px;
 	height: 600px;
 	position: relative;
 	overflow: hidden;
 	border: 1px solid var(--line);
 	border-radius: var(--radius-md);
-	/* タイルが読み込めないときに、枠だけが残って中身が抜けて見えないように */
+	/* 地図が読み込めないときに、枠だけが残って中身が抜けて見えないように */
 	background-color: var(--line);
 	box-shadow: var(--shadow-card);
 }
 
-.issues-map-tiles {
-	position: absolute;
-	top: 0;
-	left: 0;
-	/* タイルの継ぎ目に隙間が出ないよう、行内の余白を殺す */
-	line-height: 0;
-}
-
-.issues-map-row {
-	white-space: nowrap;
-}
-
 /*
- * 地図の上端・下端より外にはタイルが存在しない。その分の場所だけを空ける。
- * 寸法はタイル 1 枚（`lib/map.ts` の `TILE_SIZE`）と同じでなければ、
- * 端の行だけタイルがずれる
- */
-.issues-map-blank {
-	display: inline-block;
-	vertical-align: top;
-	width: 256px;
-	height: 256px;
-}
-
-/*
- * マーカーの層。タイルとは別に重ねる（ずらす量の計算を二重に持たないため）。
- * ここ自体は当たり判定を持たず、中のマーカーだけが押せる
- */
-.issues-map-markers {
-	position: absolute;
-	inset: 0;
-	margin: 0;
-	padding: 0;
-	list-style: none;
-	pointer-events: none;
-}
-
-/*
- * Issue 1 件を指すマーカー。位置は tsx が算出した px を
- * インラインで受ける（座標はデータ由来なので CSS に書けない）。
- * 中心が地点に重なるよう、自分の半分だけ戻す
+ * Issue 1 件を指すマーカー。
+ *
+ * MapLibre がこの要素を包む親に位置を当てるので、こちらは中心を
+ * 合わせる分だけずらす。リンクにしているのは、点が光るだけでは
+ * 「何が起きているか」まで辿れないため
  */
 .issues-map-marker {
-	position: absolute;
 	display: block;
 	width: 16px;
 	height: 16px;
@@ -2617,8 +2553,6 @@ main p {
 	border-radius: var(--radius-pill);
 	background-color: var(--danger);
 	box-shadow: var(--shadow-marker);
-	/* 親が pointer-events を切っているので、押せる側で戻す */
-	pointer-events: auto;
 	transition: transform var(--transition-fast);
 }
 

@@ -100,10 +100,11 @@ jobs:
           # 本番の Web が localhost:8787 を見に行って一覧が空になる。
           # 秘密ではないので secrets ではなく直接書いている
           NEXT_PUBLIC_API_URL: https://world-issue-tracker-api.mktoho.workers.dev
-          # 地図タイルの配信元（#63）。空なので詳細ページは地図を出さず、
-          # 座標の数値だけを表示する。本番用の配信元がまだ無いため空にしている
-          # （OpenStreetMap の公開タイルサーバーは本番での直接利用が
-          # 利用規約で制限されている）。配信元が決まったら、ここと
-          # apps/web/wrangler.jsonc の両方に入れる
+          # 地図の配信元（#63 → #118 で MapLibre GL JS へ）。空なので
+          # 詳細ページと /map は地図を出さず、座標の数値だけを表示する。
+          # 本番用の配信元がまだ無いため空にしている（OpenStreetMap の
+          # 公開タイルサーバーは本番での直接利用が利用規約で制限されている）。
+          # 本番は PMTiles を自前で配る形になる（#115）。準備が済んだら、
+          # ここと apps/web/wrangler.jsonc の両方に入れる
           NEXT_PUBLIC_MAP_TILE_URL: ""
           NEXT_PUBLIC_MAP_TILE_ATTRIBUTION: ""

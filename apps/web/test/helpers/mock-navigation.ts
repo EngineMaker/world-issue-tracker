@@ -25,6 +25,15 @@ import * as actual from "next/navigation";
 let pathname = "/";
 let searchParams = new URLSearchParams();
 
+/**
+ * `router.replace` に渡された URL の記録（Issue #118）。
+ *
+ * `IssuesMap` は MapLibre で地図を動かし終えたときに URL を書き換えて
+ * 「いま見ている場所」を共有できる状態を保つ。その書き換えが本当に
+ * 起きるかを見るために、呼ばれた URL を残す。
+ */
+let navigations: string[] = [];
+
 /** テストの中で現在地を差し替える。指定しなければルート・クエリ無し。 */
 export function setTestLocation(path: string, query = ""): void {
 	pathname = path;
@@ -35,10 +44,31 @@ export function setTestLocation(path: string, query = ""): void {
 export function clearTestLocation(): void {
 	pathname = "/";
 	searchParams = new URLSearchParams();
+	navigations = [];
+}
+
+/** `router.replace` / `router.push` に渡された URL を、呼ばれた順に返す。 */
+export function recordedNavigations(): readonly string[] {
+	return navigations;
 }
 
 mock.module("next/navigation", () => ({
 	...actual,
 	usePathname: () => pathname,
 	useSearchParams: () => searchParams,
+	// `useRouter` の実物はルーターコンテキストが無いと例外を投げる
+	// （`invariant expected app router to be mounted`）。`IssuesMap` が
+	// 地図の移動を URL へ反映するのに使うので、記録だけする代役を置く
+	useRouter: () => ({
+		replace: (url: string) => {
+			navigations.push(url);
+		},
+		push: (url: string) => {
+			navigations.push(url);
+		},
+		back: () => {},
+		forward: () => {},
+		refresh: () => {},
+		prefetch: () => {},
+	}),
 }));

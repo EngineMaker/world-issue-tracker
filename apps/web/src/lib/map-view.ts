@@ -186,3 +186,39 @@ export function tileYToLatitude(y: number, zoom: number): number {
 	const n = Math.PI - 2 * Math.PI * (y / 2 ** zoom);
 	return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
+
+/**
+ * 視界を載せた `/map` のクエリ文字列を組み立てる（#118）。
+ *
+ * MapLibre へ移ってドラッグとホイールで地図が動くようになったが、
+ * それだけだと「いま見ている場所」を人に渡せない。**URL で共有・
+ * ブックマークできる性質を失わないこと**が #118 の受け入れ条件なので、
+ * 動かし終えたときにこれで URL を作り直す。
+ *
+ * ページ側の `buildMapHref`（押して動かすリンク）と同じ扱いに揃えている:
+ * 絞り込みは落とさず、一覧用の `offset` は落とし、緯度経度は桁を丸める。
+ * 揃えていないと、リンクで動かしたときとドラッグで動かしたときで
+ * URL の形が変わり、片方だけ絞り込みが外れるような食い違いが起きる。
+ */
+export function buildViewQuery(
+	current: URLSearchParams,
+	view: MapView,
+): string {
+	// 元の params を書き換えない。呼び出し側（`useSearchParams` の戻り値）は
+	// React が持っている読み取り専用の値で、破壊すると次の描画と食い違う
+	const params = new URLSearchParams(current);
+
+	// 地図はページを送らない。一覧から引き継いだ `offset` を残すと、
+	// 意味の無いクエリが URL に居座り続ける
+	params.delete("offset");
+
+	// `set` は同じ名前の既存の値をすべて置き換える。`append` にすると
+	// 動かすたびに `lat` が積み増され、どれが読まれるか分からなくなる
+	params.set("zoom", String(view.zoom));
+	// 桁を落とす。丸めずに載せると URL が読めない長さになり、
+	// ドラッグのたびに末尾の桁だけが変わって履歴が汚れる
+	params.set("lat", view.centerLatitude.toFixed(4));
+	params.set("lng", view.centerLongitude.toFixed(4));
+
+	return params.toString();
+}

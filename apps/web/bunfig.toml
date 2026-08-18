@@ -13,4 +13,10 @@
 #
 # preload なら順序に関係なく必ず先に登録されるので、
 # どのファイルを単体で実行しても、全体で実行しても同じ結果になる。
-preload = ["./test/helpers/mock-cookies.ts"]
+#
+# `next/navigation` のモックも同じ理由で preload に置く（Issue #118）。
+# `IssuesMap` は MapLibre で動かした地図の位置を URL へ反映するのに
+# `useRouter` を呼ぶが、実物はルーターコンテキストが無いと
+# `invariant expected app router to be mounted` で落ちる。
+# 個別に import する形にすると、また実行順で結果が変わる状態に戻る。
+preload = ["./test/helpers/mock-cookies.ts", "./test/helpers/mock-navigation.ts"]
