@@ -28,6 +28,16 @@ import { LOCALE_COOKIE_NAME } from "../src/lib/locale";
 import { clearTestCookies, setTestCookies } from "./helpers/mock-cookies";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
+const originalTileUrl = process.env.NEXT_PUBLIC_MAP_TILE_URL;
+
+/**
+ * 地図のタイル配信元。
+ *
+ * 未設定だと `IssueMap` は箱ごと描かない（#63 からの判断）。地図の
+ * 出し分けを見るテストは、**まずここを設定してから**でないと
+ * 「配信元が無いから出ない」のか「位置が無いから出ない」のか区別が付かない。
+ */
+const TILE_TEMPLATE = "https://tiles.example.com/{z}/{x}/{y}.png";
 
 afterEach(() => {
 	// ロケールを差し替えたテストが、次のテストへ英語を持ち越さないようにする
@@ -36,6 +46,11 @@ afterEach(() => {
 		delete process.env.NEXT_PUBLIC_API_URL;
 	} else {
 		process.env.NEXT_PUBLIC_API_URL = originalApiUrl;
+	}
+	if (originalTileUrl === undefined) {
+		delete process.env.NEXT_PUBLIC_MAP_TILE_URL;
+	} else {
+		process.env.NEXT_PUBLIC_MAP_TILE_URL = originalTileUrl;
 	}
 });
 
@@ -666,6 +681,82 @@ describe("詳細ページ", () => {
 		expect(html).not.toContain(ja.helpOffer.heading);
 		expect(html).toContain(en.comments.guide);
 		expect(html).not.toContain(ja.comments.guide);
+	});
+
+	/*
+	 * 位置を出さずに起票された Issue の見せ方（#124）。
+	 *
+	 * 座標が null のまま `IssueMap` へ渡すと、地図は「緯度 null / 経度 null」
+	 * の場所を描こうとする。ページごと落ちなくても、大西洋のどこかに
+	 * ピンが立った Issue が公開される（書いた人は位置を出していないのに）。
+	 */
+	describe("位置情報を持たない Issue", () => {
+		const withoutLocation = {
+			...sampleIssue,
+			latitude: null,
+			longitude: null,
+		};
+
+		it("地図も座標も出さず、書いた人の選択として伝える", async () => {
+			// 配信元を設定したうえで確かめる。未設定のままだと、地図は
+			// どのみち出ないので「位置が無いから出ない」ことを見たことにならない
+			process.env.NEXT_PUBLIC_MAP_TILE_URL = TILE_TEMPLATE;
+			const messages = getUiMessages(DEFAULT_LOCALE);
+			const { html } = await renderDetail(
+				sampleIssue.id,
+				Response.json(withoutLocation),
+			);
+
+			// 地図の箱そのものが無いこと。空の地図を出すと、配信元の障害と
+			// 区別が付かないうえ、何も無い海が画面の真ん中に居座る
+			expect(html).not.toMatch(/class="[^"]*\bissue-map-view\b/);
+			expect(html).toContain(messages.issueDetail.locationUnset);
+			// 「未設定」と書くと入れ忘れに読め、周りが場所を尋ねる流れになる
+			expect(html).not.toContain(
+				messages.issueDetail.coordinates(0, 0).slice(0, 3),
+			);
+			// Issue 本体は普通に読めること（位置なしが画面全体を巻き込んでいない）
+			expect(html).toContain(sampleIssue.title);
+		});
+
+		it("英語でも位置なしの文言が出る", async () => {
+			setTestCookies({ [LOCALE_COOKIE_NAME]: "en" });
+			const en = getUiMessages("en");
+			const ja = getUiMessages("ja");
+
+			const { html } = await renderDetail(
+				sampleIssue.id,
+				Response.json(withoutLocation),
+			);
+
+			expect(html).toContain(en.issueDetail.locationUnset);
+			expect(html).not.toContain(ja.issueDetail.locationUnset);
+		});
+	});
+
+	// 座標があるときは、丸めてあることを断る（#124）。
+	//
+	// 断りが無いと、ピンの指す建物が現場だと読まれる。実際には約 100m の
+	// 粗さがあり、隣の家を指していることもある
+	it("座標があるときは、おおよその位置であることを添える", async () => {
+		process.env.NEXT_PUBLIC_MAP_TILE_URL = TILE_TEMPLATE;
+		const messages = getUiMessages(DEFAULT_LOCALE);
+		const { html } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+		);
+
+		expect(html).toContain(messages.issueDetail.coordinatesApproximate);
+		// 座標の数値そのものは消さない（#63 から続く判断）
+		expect(html).toContain(
+			messages.issueDetail.coordinates(
+				sampleIssue.latitude,
+				sampleIssue.longitude,
+			),
+		);
+		// 地図の箱が出ていること。これが無いと、上の「位置なしなら地図を
+		// 出さない」は「そもそも地図を出さない実装」でも通ってしまう
+		expect(html).toMatch(/class="[^"]*\bissue-map-view\b/);
 	});
 });
 

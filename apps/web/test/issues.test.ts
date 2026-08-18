@@ -624,6 +624,54 @@ describe("parsePublicIssue", () => {
 		expect(parsePublicIssue(null)).toBeNull();
 		expect(parsePublicIssue("not an object")).toBeNull();
 	});
+
+	// 位置を出さずに起票された Issue（#124）。
+	//
+	// ここで弾いてしまうと、位置を出さない選択をした人の Issue が
+	// 一覧からも詳細からも消える。書けたのに読まれない状態になる。
+	describe("位置情報を持たない Issue", () => {
+		it("緯度経度が null でも受け付ける", () => {
+			const parsed = parsePublicIssue({
+				...sampleIssue,
+				latitude: null,
+				longitude: null,
+			});
+
+			expect(parsed).not.toBeNull();
+			expect(parsed?.latitude).toBeNull();
+			expect(parsed?.longitude).toBeNull();
+		});
+
+		// 座標を返さない古い API（デプロイのズレ）から来ても、
+		// 一覧ごと失うより「位置の無い Issue」として読む方がよい
+		it("緯度経度のキーが無くても受け付け、null として読む", () => {
+			const {
+				latitude: _latitude,
+				longitude: _longitude,
+				...withoutLocation
+			} = sampleIssue;
+
+			const parsed = parsePublicIssue(withoutLocation);
+
+			expect(parsed).not.toBeNull();
+			expect(parsed?.latitude).toBeNull();
+		});
+
+		// 片方だけの座標は API が受け付けない形なので、来たら想定外。
+		// 0 に倒したり片方だけ使ったりせず、行ごと弾く
+		it("片方だけの座標は弾く", () => {
+			expect(parsePublicIssue({ ...sampleIssue, latitude: null })).toBeNull();
+			expect(parsePublicIssue({ ...sampleIssue, longitude: null })).toBeNull();
+		});
+
+		// 「位置が無い」と「壊れた値が来た」は別。後者を null に畳むと、
+		// API 側の変更が画面に静かに影響する
+		it("座標が数値でも null でもなければ弾く", () => {
+			expect(
+				parsePublicIssue({ ...sampleIssue, latitude: "35.68" }),
+			).toBeNull();
+		});
+	});
 });
 
 /**

@@ -838,6 +838,86 @@ describe("Issues CRUD", () => {
 			});
 		});
 
+		// --- 二段構えの 2 段目（返す直前の丸め）---
+		//
+		// 保存時の丸めが本体だが、それだけだと「この経路を通らずに入った行」を
+		// 守れない。手作業の SQL、別のスクリプト、移行前のバックアップからの
+		// 復元。そういう行が公開 API に出るときの最後の関門を見る。
+		//
+		// 保存側の丸めが効いていると、API 経由の起票ではこの段が効いているか
+		// どうか分からない（どちらか片方でも 3 桁になる）。**DB へ直接
+		// 細かい座標を入れて**確かめる。
+		describe("rounding on the way out", () => {
+			it("rounds a row that was inserted straight into the database", async () => {
+				await env.DB.prepare(
+					"INSERT INTO issues (id, title, description, scope, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?)",
+				)
+					.bind(
+						"raw-row",
+						"直接入れた行",
+						"移行後に細かい座標が入った行",
+						"personal",
+						RAW_LATITUDE,
+						RAW_LONGITUDE,
+					)
+					.run();
+
+				// 保存されている値は細かいまま。ここが丸まっていると、
+				// このテストは 2 段目ではなく DB の状態を見たことになる
+				const stored = await readStoredIssue("raw-row");
+				expect(stored.latitude).toBe(RAW_LATITUDE);
+
+				setMockUserId(null);
+				const detail = await readBody(
+					await app.request("/issues/raw-row", {}, env),
+				);
+				expect(detail.latitude).toBe(ROUNDED_LATITUDE);
+				expect(detail.longitude).toBe(ROUNDED_LONGITUDE);
+
+				const list = await readBody(await app.request("/issues", {}, env));
+				expect(list.data[0].latitude).toBe(ROUNDED_LATITUDE);
+			});
+
+			// 関数を直接呼ぶ。経路を通さずに、丸める責務がここにあることを固定する
+			it("rounds in toPublicIssue itself", () => {
+				const issue = toPublicIssueForTest({
+					id: "x",
+					title: "t",
+					description: "d",
+					scope: "personal",
+					status: "open",
+					latitude: RAW_LATITUDE,
+					longitude: RAW_LONGITUDE,
+					category: null,
+					created_at: "2026-08-18 00:00:00.000",
+					updated_at: "2026-08-18 00:00:00.000",
+					is_anonymous: 1,
+				});
+
+				expect(issue.latitude).toBe(ROUNDED_LATITUDE);
+				expect(issue.longitude).toBe(ROUNDED_LONGITUDE);
+			});
+
+			it("keeps null coordinates null", () => {
+				const issue = toPublicIssueForTest({
+					id: "x",
+					title: "t",
+					description: "d",
+					scope: "personal",
+					status: "open",
+					latitude: null,
+					longitude: null,
+					category: null,
+					created_at: "2026-08-18 00:00:00.000",
+					updated_at: "2026-08-18 00:00:00.000",
+					is_anonymous: 1,
+				});
+
+				expect(issue.latitude).toBeNull();
+				expect(issue.longitude).toBeNull();
+			});
+		});
+
 		// 範囲の検証は位置を任意にした後も効いていること。
 		// `nullish()` を足したときに `min`/`max` ごと外してしまうと、
 		// 検証が消えたことに気づけない
