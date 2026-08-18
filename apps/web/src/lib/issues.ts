@@ -443,6 +443,20 @@ type FetchIssuesOptions = {
 	fetchImpl?: FetchLike;
 };
 
+type FetchCommentsOptions = {
+	/** テストから差し替えるための `fetch`。通常は省略する。 */
+	fetchImpl?: FetchLike;
+	/**
+	 * Clerk のセッショントークン（#99）。
+	 *
+	 * 渡すと、どれが閲覧者自身のコメントか（`viewer_is_author`）が埋まる。
+	 * Server Component からは渡せない（Clerk のセッションは Cookie で、
+	 * 別オリジンの API には届かない）ので、削除ボタンの出し分けが要る
+	 * ブラウザ側だけが渡す。
+	 */
+	token?: string | null;
+};
+
 /**
  * API から Issue のコメント一覧を取得する。
  *
@@ -459,13 +473,18 @@ type FetchIssuesOptions = {
  */
 export async function fetchComments(
 	issueId: string,
-	{ fetchImpl = defaultFetch }: FetchIssueOptions = {},
+	{ fetchImpl = defaultFetch, token = null }: FetchCommentsOptions = {},
 ): Promise<FetchCommentsResult> {
 	const url = `${resolveApiBaseUrl()}/issues/${encodeURIComponent(issueId)}/comments`;
 
 	try {
 		// 投稿したコメントが次のアクセスで見えるよう、キャッシュしない
-		const res = await fetchImpl(url, { cache: "no-store" });
+		const res = await fetchImpl(url, {
+			cache: "no-store",
+			// トークンを渡すと `viewer_is_author` が埋まる（#99）。渡さなければ
+			// 未ログインとして扱われ、全件 false で返る
+			headers: token ? { Authorization: `Bearer ${token}` } : {},
+		});
 
 		if (res.status === 404) {
 			return { ok: true, comments: [], total: 0 };

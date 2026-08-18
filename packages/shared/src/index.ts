@@ -710,6 +710,29 @@ const JA_UI_MESSAGES = {
 		placeholder:
 			"例: 同じ場所で先週も転びそうになりました。市の窓口には〇〇という制度があるようです。",
 		submit: "コメントする",
+
+		/**
+		 * コメントの削除（#99）。自分のコメントにだけ出る。
+		 *
+		 * 削除は物理削除で元に戻せないため、押してすぐには消さず、
+		 * 同じカードの中で一度確認を挟む（`deleteConfirm`）。別画面の
+		 * ダイアログにしないのは、どのコメントを消そうとしているのかが
+		 * 目の前に残っている方が取り違えにくいため。
+		 */
+		delete: "削除",
+		deleteConfirm: "このコメントを削除しますか？ 元に戻せません。",
+		deleteConfirmYes: "削除する",
+		deleteConfirmCancel: "やめる",
+		deleting: "削除中…",
+		deleteFailed:
+			"コメントを削除できませんでした。時間をおいて再度お試しください。",
+		/**
+		 * 401 のときだけ出す文言。削除ボタンは自分のコメントにしか出ないので、
+		 * ここに来るのは権限の問題ではなくログインが切れた場合。
+		 * 「時間をおいて再度お試しください」では直らないため区別する。
+		 */
+		deleteSignInRequired:
+			"ログインの有効期限が切れている可能性があります。ログインし直してから削除してください。",
 	},
 
 	/** 起票フォーム（`/issues/new`） */
@@ -1034,6 +1057,16 @@ const EN_UI_MESSAGES: UiMessages = {
 		placeholder:
 			"e.g. I nearly tripped at the same spot last week. The city office seems to have a program for this.",
 		submit: "Post comment",
+
+		/** コメントの削除（#99）。日本語側のコメントを参照。 */
+		delete: "Delete",
+		deleteConfirm: "Delete this comment? This cannot be undone.",
+		deleteConfirmYes: "Delete",
+		deleteConfirmCancel: "Keep it",
+		deleting: "Deleting…",
+		deleteFailed: "Could not delete the comment. Please try again later.",
+		deleteSignInRequired:
+			"Your session may have expired. Sign in again, then delete.",
 	},
 
 	newIssue: {

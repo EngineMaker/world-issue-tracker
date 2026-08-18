@@ -91,6 +91,31 @@ async function postComment(
 	);
 }
 
+/** コメントを削除する。書き込み系なので Origin を付けて叩く。 */
+async function deleteComment(
+	issueId: string,
+	commentId: string,
+	init: RequestInit = {},
+): Promise<Response> {
+	return app.request(
+		`/issues/${issueId}/comments/${commentId}`,
+		{
+			method: "DELETE",
+			headers: { Origin: ALLOWED_ORIGIN },
+			...init,
+		},
+		env,
+	);
+}
+
+/** その ID のコメントが DB に残っているか。物理削除の確認に使う。 */
+async function commentExists(id: string): Promise<boolean> {
+	const row = await env.DB.prepare("SELECT id FROM comments WHERE id = ?")
+		.bind(id)
+		.first<{ id: string }>();
+	return row !== null;
+}
+
 const ISSUE_ID = "issue-0001";
 
 describe("Comments", () => {
@@ -375,12 +400,18 @@ describe("Comments", () => {
 			const list = await readBody(res);
 
 			expect(list.data[0]).not.toHaveProperty("user_id");
-			// テーブルの公開カラムに加えて、行に無い派生フィールドが 2 つ載る（#67）。
+			// テーブルの公開カラムに加えて、行に無い派生フィールドが 3 つ載る。
 			// `display_name` は Clerk から引いた投稿者の表示名、`is_anonymous` は
-			// 「この投稿者を匿名として扱うか」。どちらも生の `user_id` を
-			// 公開しない形で投稿者を出すためのもの
+			// 「この投稿者を匿名として扱うか」（#67）、`viewer_is_author` は
+			// 「これを書いたのが閲覧者本人か」（#99）。いずれも生の `user_id` を
+			// 公開しない形で投稿者を示すためのもの
 			expect(Object.keys(list.data[0]).sort()).toEqual(
-				[...PUBLIC_COMMENT_COLUMNS, "is_anonymous", "display_name"].sort(),
+				[
+					...PUBLIC_COMMENT_COLUMNS,
+					"is_anonymous",
+					"display_name",
+					"viewer_is_author",
+				].sort(),
 			);
 		});
 
@@ -392,6 +423,173 @@ describe("Comments", () => {
 
 			const res = await app.request(`/issues/${ISSUE_ID}/comments`, {}, env);
 			expect(res.status).toBe(404);
+		});
+	});
+
+	// --- viewer_is_author（#99） ---
+	//
+	// 削除ボタンを出す条件そのもの。生の `user_id` を公開しない方針（#8）の
+	// まま「これは自分のコメントか」を画面へ伝える唯一の手段なので、
+	// ここが壊れると自分のコメントを消せない（または他人のコメントに
+	// 削除ボタンが出る）。
+	describe("viewer_is_author", () => {
+		beforeEach(async () => {
+			await insertCommentAt(
+				"mine",
+				ISSUE_ID,
+				"自分の一言",
+				"2026-01-01 00:00:00.000",
+				"test-user-123",
+			);
+			await insertCommentAt(
+				"theirs",
+				ISSUE_ID,
+				"他人の一言",
+				"2026-01-02 00:00:00.000",
+				"other-user",
+			);
+		});
+
+		it("自分のコメントだけ true になる", async () => {
+			const res = await app.request(`/issues/${ISSUE_ID}/comments`, {}, env);
+			const list = await readBody(res);
+
+			const byId = new Map(
+				list.data.map((c: Body) => [c.id, c.viewer_is_author]),
+			);
+			expect(byId.get("mine")).toBe(true);
+			expect(byId.get("theirs")).toBe(false);
+		});
+
+		it("未認証ならすべて false になる", async () => {
+			setMockUserId(null);
+			const res = await app.request(`/issues/${ISSUE_ID}/comments`, {}, env);
+			const list = await readBody(res);
+
+			expect(list.data.map((c: Body) => c.viewer_is_author)).toEqual([
+				false,
+				false,
+			]);
+		});
+
+		it("投稿した本人には POST のレスポンスでも true を返す", async () => {
+			// 画面は投稿に成功したコメントを手元の一覧へ追記する。ここが false だと
+			// 書いた直後の自分のコメントにだけ削除ボタンが出ない
+			const res = await postComment(ISSUE_ID, { body: "いま書いた" });
+			expect((await readBody(res)).viewer_is_author).toBe(true);
+		});
+	});
+
+	// --- DELETE /issues/:id/comments/:commentId ---
+	describe("DELETE /issues/:id/comments/:commentId", () => {
+		beforeEach(async () => {
+			await insertCommentAt(
+				"mine",
+				ISSUE_ID,
+				"消したい一言",
+				"2026-01-01 00:00:00.000",
+				"test-user-123",
+			);
+		});
+
+		it("自分のコメントを削除し、行が実際に消える", async () => {
+			const res = await deleteComment(ISSUE_ID, "mine");
+
+			expect(res.status).toBe(204);
+			// 論理削除ではなく物理削除。行が残っていないこと（#99 の決定）
+			expect(await commentExists("mine")).toBe(false);
+		});
+
+		it("他人のコメントは 403 で、行が残る", async () => {
+			await insertCommentAt(
+				"theirs",
+				ISSUE_ID,
+				"他人の一言",
+				"2026-01-02 00:00:00.000",
+				"other-user",
+			);
+
+			const res = await deleteComment(ISSUE_ID, "theirs");
+
+			expect(res.status).toBe(403);
+			expect(await readBody(res)).toEqual({ error: "Forbidden" });
+			// 403 を返しながら DELETE だけは走る、という壊れ方を拾う
+			expect(await commentExists("theirs")).toBe(true);
+		});
+
+		it("未認証なら 401 で、行が残る", async () => {
+			setMockUserId(null);
+			const res = await deleteComment(ISSUE_ID, "mine");
+
+			expect(res.status).toBe(401);
+			expect(await readBody(res)).toEqual({ error: "Unauthorized" });
+			expect(await commentExists("mine")).toBe(true);
+		});
+
+		it("セッショントークン以外（OAuth トークン）では 401 で、行が残る", async () => {
+			setMockUserId("test-user-123", "oauth_token");
+			const res = await deleteComment(ISSUE_ID, "mine");
+
+			expect(res.status).toBe(401);
+			expect(await commentExists("mine")).toBe(true);
+		});
+
+		it("Origin ヘッダが無ければ 403 で、行が残る", async () => {
+			const res = await app.request(
+				`/issues/${ISSUE_ID}/comments/mine`,
+				{ method: "DELETE" },
+				env,
+			);
+
+			expect(res.status).toBe(403);
+			expect(await commentExists("mine")).toBe(true);
+		});
+
+		it("存在しないコメントには 404 を返す", async () => {
+			const res = await deleteComment(ISSUE_ID, "no-such-comment");
+
+			expect(res.status).toBe(404);
+			expect(await readBody(res)).toEqual({ error: "Comment not found" });
+		});
+
+		it("存在しない Issue には 404 を返し、コメントは残る", async () => {
+			const res = await deleteComment("no-such-issue", "mine");
+
+			expect(res.status).toBe(404);
+			expect(await commentExists("mine")).toBe(true);
+		});
+
+		it("別の Issue の URL からは削除できない", async () => {
+			// `:commentId` だけで消せると、親 Issue と無関係な URL でも通ってしまう。
+			// 自分のコメントであっても、指定した Issue に属していなければ 404
+			await insertIssue("issue-0002");
+			const res = await deleteComment("issue-0002", "mine");
+
+			expect(res.status).toBe(404);
+			expect(await commentExists("mine")).toBe(true);
+		});
+
+		it("削除しても同じ Issue の他のコメントは残る", async () => {
+			await insertCommentAt(
+				"mine-2",
+				ISSUE_ID,
+				"こちらは残す",
+				"2026-01-03 00:00:00.000",
+				"test-user-123",
+			);
+
+			expect((await deleteComment(ISSUE_ID, "mine")).status).toBe(204);
+
+			expect(await commentExists("mine-2")).toBe(true);
+			const res = await app.request(`/issues/${ISSUE_ID}/comments`, {}, env);
+			const list = await readBody(res);
+			expect(list.data.map((c: Body) => c.id)).toEqual(["mine-2"]);
+			expect(list.total).toBe(1);
+		});
+
+		it("二度目の削除は 404 を返す", async () => {
+			expect((await deleteComment(ISSUE_ID, "mine")).status).toBe(204);
+			expect((await deleteComment(ISSUE_ID, "mine")).status).toBe(404);
 		});
 	});
 

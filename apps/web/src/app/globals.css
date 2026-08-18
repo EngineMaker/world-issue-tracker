@@ -1055,6 +1055,7 @@ main p {
 .status-control select:focus-visible,
 .button-primary:focus-visible,
 .button-secondary:focus-visible,
+.button-danger:focus-visible,
 .button-link:focus-visible {
 	outline: 2px solid var(--accent);
 	outline-offset: 1px;
@@ -1156,8 +1157,31 @@ main p {
 		color var(--transition-fast);
 }
 
+/*
+  取り返しの付かない操作（コメントの削除の確定）。
+  補助操作と同じ見た目にすると、「やめる」と並んだときにどちらが
+  消す方なのか分からない。面を赤で塗って、押す前に気付けるようにする
+*/
+.button-danger {
+	font: inherit;
+	cursor: pointer;
+	border-radius: var(--radius-sm);
+	background: var(--danger);
+	color: var(--surface);
+	border: 1px solid var(--danger);
+	padding: 0.375rem 0.875rem;
+	font-weight: 600;
+	box-shadow: var(--shadow-button);
+	transition:
+		transform var(--transition-fast),
+		box-shadow var(--transition-base),
+		background-color var(--transition-fast),
+		border-color var(--transition-fast);
+}
+
 .button-primary:disabled,
-.button-secondary:disabled {
+.button-secondary:disabled,
+.button-danger:disabled {
 	cursor: default;
 	opacity: 0.6;
 	transform: none;
@@ -1584,6 +1608,28 @@ main p {
 	display: block;
 	padding: 0;
 	margin: 0 0 var(--space-4);
+}
+
+/*
+  自分のコメントに出る削除の操作（#99）。日時の下に置く。
+  読むときに目に入る必要は無く、消したいと思ったときに見つかればよいので、
+  本文より後ろに回している。
+
+  確認中は「本当に消すか」の問いかけと 2 つのボタンが横に並ぶ。
+  幅が足りなければ折り返す（390px でボタンが画面外へ出ない）
+*/
+.comment-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+	margin: var(--space-2) 0 0;
+}
+
+/* 削除の確認。押すと戻せないことをここで伝える */
+.comment-delete-confirm {
+	font-size: var(--text-sm);
+	color: var(--ink-soft);
 }
 
 /* コメント欄の冒頭に置く、何を書く場所かの説明 */

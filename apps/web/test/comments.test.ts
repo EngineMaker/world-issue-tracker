@@ -265,4 +265,29 @@ describe("fetchComments", () => {
 
 		expect(inits[0]?.cache).toBe("no-store");
 	});
+
+	// --- トークン（#99） ---
+
+	it("トークンを渡すと Authorization を付ける", async () => {
+		// これが無いと API から見て未ログインになり、`viewer_is_author` が
+		// 全件 false で返る＝自分のコメントにも削除ボタンが出ない
+		const { fetch, inits } = stubFetch(Response.json({ data: [], total: 0 }));
+
+		await fetchComments(sampleIssue.id, { fetchImpl: fetch, token: "tok_123" });
+
+		expect(
+			(inits[0]?.headers as Record<string, string> | undefined)?.Authorization,
+		).toBe("Bearer tok_123");
+	});
+
+	it("トークンが無ければ Authorization を付けない", async () => {
+		// Server Component からの取得がこれ。未ログイン扱いで公開分だけが返る
+		const { fetch, inits } = stubFetch(Response.json({ data: [], total: 0 }));
+
+		await fetchComments(sampleIssue.id, { fetchImpl: fetch });
+
+		expect(
+			(inits[0]?.headers as Record<string, string> | undefined)?.Authorization,
+		).toBeUndefined();
+	});
 });
