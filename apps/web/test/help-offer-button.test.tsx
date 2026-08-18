@@ -4,6 +4,7 @@ import {
 	ISSUE_ANONYMITY_LABELS,
 } from "@world-issue-tracker/shared";
 import { renderToStaticMarkup } from "react-dom/server";
+import { COMMENTS_SECTION_ID } from "../src/app/components/CommentSection";
 import type { HelpOfferSummary } from "../src/lib/help-offers";
 
 /**
@@ -66,10 +67,15 @@ function offer(
 function render(
 	summary: HelpOfferSummary | null,
 	auth: AuthState = { isLoaded: true, isSignedIn: true },
+	locale: "ja" | "en" = "ja",
 ) {
 	authState = auth;
 	return renderToStaticMarkup(
-		<HelpOfferButton issueId="issue-1" initialSummary={summary} />,
+		<HelpOfferButton
+			issueId="issue-1"
+			initialSummary={summary}
+			locale={locale}
+		/>,
 	);
 }
 
@@ -269,5 +275,69 @@ describe("表示名が無い表明者の文言", () => {
 			expect(unnamed).not.toBe("");
 			expect(unnamed).not.toBe(ISSUE_ANONYMITY_LABELS[locale].anonymous);
 		}
+	});
+});
+
+/**
+ * 手を挙げた後の導線（#114）。
+ *
+ * `#61` でボタンが入り `#108` で名前も出るようになったが、表明した後に
+ * 起票者と表明者が話を進める場所が示されていなかった。押すと
+ * 「あなたはこの Issue に手を挙げています」と出てそこで止まる。
+ *
+ * 閉じた場（DM）は作らないと決めたので（Issue #114 の方針）、
+ * 既にすぐ下にあるコメント欄へ進む導線を出すのがこの Issue の範囲。
+ * 「導線が出るか」ではなく「押した人がコメント欄へ行けるか」を見たいので、
+ * リンク先（アンカー）まで確かめる。
+ */
+describe("手を挙げた後の導線", () => {
+	const offeredSummary: HelpOfferSummary = {
+		offers: [offer(VIEWER)],
+		total: 1,
+		viewerOffered: true,
+		viewerUserId: VIEWER,
+	};
+
+	it("表明済みなら、コメント欄へ進む導線を出す", () => {
+		const html = render(offeredSummary);
+
+		expect(visibleText(html)).toContain(getUiMessages("ja").helpOffer.nextStep);
+	});
+
+	it("導線はコメント欄へのリンクになっている", () => {
+		// 文言だけ出して行き先が無いと、結局「次に何をすればいいか分からない」
+		// ままになる。詳細ページのコメント欄に付けた id を指す。
+		//
+		// アンカー名は直書きせず、行き先側が公開している定数から組み立てる。
+		// リテラルで書くと、定数を変えてリンクとアンカーが揃って追随した
+		// （＝壊れていない）ときにもここだけが落ちる。
+		// 「リンク先が実在するか」は issue-detail.test.tsx が別に見ている
+		const html = render(offeredSummary);
+
+		expect(html).toContain(`href="#${COMMENTS_SECTION_ID}"`);
+	});
+
+	it("未表明なら導線を出さない", () => {
+		// 手を挙げる前に「どう手伝えるか書いてみましょう」と出ると、
+		// 押す前から次の話をされることになり、ボタンの意味がぼやける
+		const text = visibleText(render(emptySummary));
+
+		expect(text).not.toContain(getUiMessages("ja").helpOffer.nextStep);
+	});
+
+	// 受け入れ条件の「導線の文言が ja / en 両方にある」。辞書にキーがあることは
+	// i18n.test.tsx が見ているので、ここでは**英語ロケールで描いたら英語で出るか**を見る。
+	// props のロケールを配線し忘れると、辞書に英語があっても画面は日本語のままになる
+	it("英語ロケールでは導線も英語で出る", () => {
+		const en = getUiMessages("en");
+		const text = visibleText(
+			render(offeredSummary, { isLoaded: true, isSignedIn: true }, "en"),
+		);
+
+		expect(text).toContain(en.helpOffer.nextStep);
+		expect(text).toContain(en.helpOffer.nextStepLink);
+		expect(text).not.toContain(getUiMessages("ja").helpOffer.nextStep);
+		// 導線の周辺に日本語が残っていないこと
+		expect(text).not.toMatch(/[ぁ-んァ-ヶ一-龠]/);
 	});
 });

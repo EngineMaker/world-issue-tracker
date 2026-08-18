@@ -14,6 +14,7 @@ import {
 	offerHelp,
 	withdrawHelp,
 } from "../../lib/help-offers";
+import { COMMENTS_SECTION_ID } from "./CommentSection";
 
 /**
  * 「手伝います」の表明と取り消しを行うボタン。
@@ -141,6 +142,28 @@ export function HelpOfferButton({
 					{summary.viewerOffered && (
 						<span className="text-soft">{messages.helpOffer.youOffered}</span>
 					)}
+				</p>
+			)}
+
+			{/*
+			  表明した直後に、次の一手を示す（#114）。
+			  以前はここが「あなたはこの Issue に手を挙げています」で終わっていて、
+			  手を挙げた人が次に何をすればいいか分からないまま止まっていた。
+
+			  行き先は、この節のすぐ下にあるコメント欄。閉じた場（DM）は
+			  作らないと決めているので（#114 の方針）、話す場所は公開の
+			  コメント欄一本になる。既にそこにあるものへ進んでよい、と
+			  伝えるだけで済む。
+
+			  リンクは Next.js の `Link` ではなく素の `a` にしている。
+			  同一ページ内のアンカーで、遷移も先読みも起きないため。
+			*/}
+			{summary.viewerOffered && (
+				<p className="notice help-offer-next-step">
+					{messages.helpOffer.nextStep}{" "}
+					<a href={`#${COMMENTS_SECTION_ID}`}>
+						{messages.helpOffer.nextStepLink}
+					</a>
 				</p>
 			)}
 
