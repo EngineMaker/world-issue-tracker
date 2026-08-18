@@ -2,15 +2,29 @@
  * 地図タイルの座標計算と、タイル配信元の設定。
  *
  * 起票フォームは緯度経度を必須にしているのに、その座標を地図で見せる画面が
- * 無かった（#63）。1 件の位置を示すだけなので、地図ライブラリを足さず
- * ラスタタイルの画像を並べて実現している。選定の経緯は `IssueMap.tsx` に書いた。
+ * 無かった（#63）。当初はラスタタイルの画像を並べて描いていたが、#118 で
+ * 描画そのものは MapLibre GL JS に移した（経緯は `lib/map-style.ts`）。
+ *
+ * **タイル URL の組み立てはライブラリへ渡した**（#118 の「ライブラリに
+ * 委ねられる部分は委ねてよい」）。ここに残るのは、MapLibre に委ねられない
+ * 部分だけ:
+ *
+ *  - 座標変換 — `lib/map-view.ts` が「全件が収まる視界」を求めるのに使う。
+ *    これはサーバー側（`/map` の初期表示）で決める必要があり、
+ *    ブラウザで動く MapLibre には頼めない
+ *  - 配信元の設定の読み出し — 環境変数の解釈
  *
  * ここは描画に関わらない純粋な計算だけを置く。座標変換を間違えると
  * 「地図は出るが指している場所が違う」という、見た目では気付きにくい
  * 壊れ方をするため、独立してテストできる形にしている。
  */
 
-/** 1 枚のタイル画像の一辺（px）。標準的なラスタタイルの大きさ。 */
+/**
+ * 1 枚のタイルの一辺（px）。標準的なタイルの大きさ。
+ *
+ * 描画そのものは MapLibre が持つが、「全件が収まるズーム」を求めるのに
+ * タイル 1 枚が何 px かが要る（`lib/map-view.ts` の `fitZoom`）。
+ */
 export const TILE_SIZE = 256;
 
 /**
@@ -68,35 +82,6 @@ export function latitudeToTileY(latitude: number, zoom: number): number {
 	// `Math.floor` した結果が -1 になり、存在しないタイルを指してしまうため、
 	// ここで範囲に収める
 	return Math.min(2 ** zoom, Math.max(0, y));
-}
-
-/** `{s}` を含むテンプレート用のサブドメイン候補。慣例的な a/b/c を使う。 */
-const SUBDOMAINS = ["a", "b", "c"] as const;
-
-/**
- * タイル URL のテンプレートを実際の URL に変換する。
- *
- * `{z}/{x}/{y}` は事実上の標準で、多くの配信元がこの形を取る。
- * `{s}`（サブドメイン）を使う配信元もあるため、含まれていればタイル座標から
- * 決める。乱数を使わないのは、同じタイルが常に同じ URL になった方が
- * ブラウザのキャッシュに乗るため。
- */
-export function tileUrl(
-	template: string,
-	x: number,
-	y: number,
-	zoom: number,
-): string {
-	// 剰余なので必ず範囲内に収まるが、`noUncheckedIndexedAccess` の下では
-	// 添字アクセスが `undefined` を含む型になる。既定値で受けて型を閉じる
-	const subdomain =
-		SUBDOMAINS[Math.abs(x + y) % SUBDOMAINS.length] ?? SUBDOMAINS[0];
-
-	return template
-		.replace("{s}", subdomain)
-		.replace("{z}", String(zoom))
-		.replace("{x}", String(x))
-		.replace("{y}", String(y));
 }
 
 /**

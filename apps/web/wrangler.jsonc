@@ -47,15 +47,17 @@
 	// 実行時に読む形へ移す余地を残すため。deploy.yml の値と一致させること。
 	"vars": {
 		"NEXT_PUBLIC_API_URL": "https://world-issue-tracker-api.mktoho.workers.dev",
-		// 地図タイルの配信元（#63）。空のままなので Issue 詳細ページは
-		// 地図を出さず、座標の数値だけを表示する。
+		// 地図の配信元（#63 → #118 で MapLibre GL JS へ）。空のままなので
+		// Issue 詳細ページと /map は地図を出さず、座標の数値だけを表示する。
 		//
 		// 空にしているのは本番用の配信元がまだ無いため。地図ライブラリの例で
 		// 使われる OpenStreetMap の公開タイルサーバーは、本番アプリからの
 		// 直接利用が利用規約で制限されている
 		// （https://operations.osmfoundation.org/policies/tiles/）。
-		// 自前のタイルサーバーか商用のタイル配信サービスを用意してから、
-		// ここと deploy.yml の両方に URL と帰属表示を入れる。
+		//
+		// 本番は PMTiles を自前で配る形になる（#115）。切り出しと R2 への
+		// 配置が済んだら、ここと deploy.yml の両方に `.pmtiles` の URL と
+		// 帰属表示を入れる。受け付ける値の形は .env.local.example 参照。
 		"NEXT_PUBLIC_MAP_TILE_URL": "",
 		"NEXT_PUBLIC_MAP_TILE_ATTRIBUTION": ""
 	},

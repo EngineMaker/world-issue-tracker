@@ -1,61 +1,50 @@
+"use client";
+
 import {
 	DEFAULT_LOCALE,
 	getUiMessages,
 	type Locale,
 } from "@world-issue-tracker/shared";
-import Link from "next/link";
+// MapLibre が地図の上に置く部品の見た目。理由は `IssueMap.tsx` と同じ
+import "maplibre-gl/dist/maplibre-gl.css";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useRef } from "react";
 import type { PublicIssue } from "../../lib/issues";
 import {
-	latitudeToTileY,
-	longitudeToTileX,
-	TILE_SIZE,
-	tileUrl,
-} from "../../lib/map";
+	buildIssuesMapOptions,
+	type PlottedMarker,
+} from "../../lib/map-options";
+import { canRenderMap } from "../../lib/map-style";
 import {
+	buildViewQuery,
+	clampMapZoom,
 	fitViewToIssues,
-	MAP_VIEW_HEIGHT,
-	MAP_VIEW_WIDTH,
 	type MapView,
-	projectToView,
 } from "../../lib/map-view";
+import { createMap, type MapHandle } from "../../lib/maplibre";
 
 /**
- * 複数の Issue を 1 枚の地図にプロットする（#113）。
+ * 複数の Issue を 1 枚の地図にプロットする（#113 → #118 で MapLibre へ）。
  *
- * `IssueMap` は 1 件の位置を示す部品で、ズームが固定・地点が中央に 1 つ、
- * という前提で書かれている。ここは前提が違う（地点が複数・散らばりに応じて
- * 縮尺が変わる・中心が地点と一致しない）ので、共有せず別の部品にしている。
- * 座標変換そのものは `lib/map.ts` を共有する。
+ * **MapLibre GL JS で描いている理由（#118）。** PR #117 はラスタタイルを
+ * `<img>` で並べる方式だったが、それは「この作業環境では依存を追加できない」
+ * ために選んだ暫定だと同 PR が明記している。#115 で本番の配信元を選ぼうと
+ * した結果ラスタのまま使える選択肢が無く、Protomaps（＝ベクタタイル）を
+ * 自前配信する道が残った。ベクタを描くにはライブラリが要る。
  *
- * **地図ライブラリを使っていない理由。** Issue #113 のコメントは
- * MapLibre GL JS の導入を決めているが、この作業環境では新しい依存を
- * 追加できない（`node_modules` が共有のシンボリックリンクで、`bun add` が
- * 他の作業を壊す）。依存の追加は Issue にコメントして人へ引き継いだうえで、
- * ここでは #63 と同じラスタタイルを `<img>` で並べる方式を複数地点へ
- * 広げている。受け入れ条件（複数プロット・パン・ズーム・絞り込み）は
- * この方式でも満たせる。
+ * **パン・ズームが URL に載る性質を保っている理由（#118 の受け入れ条件）。**
+ * MapLibre へ移るとドラッグとホイールで動かせるようになるが、それだけだと
+ * 「いま見ている場所」を人に渡せない。**動かし終えたときに URL を書き換えて
+ * 同期する。** 押して動かすリンク（ページ側の `map-controls`）も残してあり、
+ * JS が無効でも、ポインタが使えなくても縮尺と位置を変えられる。
  *
- * MapLibre へ移す際にこのファイルは丸ごと置き換わる。座標計算を
- * `lib/map-view.ts` に分けてあるので、置き換えの範囲はここに閉じる。
+ * URL の書き換えに `replace` を使うのは、ドラッグのたびに履歴が積まれると
+ * 「戻る」が地図の微調整の履歴で埋まり、前の画面へ戻れなくなるため。
  *
- * **パン・ズームを URL で持つ理由。** ドラッグとホイールで動かすには
- * Client Component と状態管理が要る。URL に中心とズームを載せる形なら
- * Server Component のまま動き、「いま見ている場所」がそのまま共有・
- * ブックマークできる（一覧の絞り込みが `searchParams` を使っているのと
- * 同じ考え方 — `app/issues/page.tsx` のコメント参照）。
- *
- * タイルに `next/image` ではなく `<img>` を使う理由は `IssueMap.tsx` と同じ。
+ * **地図が出る前に何も見えなくならないようにしている。** 初期 HTML には
+ * 地図の箱だけが出て、Issue の一覧はページ側が地図の下に別途描いている。
+ * WebGL が使えない環境でも、どこに何があるかは文字で読める。
  */
-
-/**
- * 表示領域を覆うのに要るタイルの枚数（一辺）。
- *
- * 表示領域より 2 枚多く並べる。中心がタイルの境界からずれる分（最大 1 枚）と、
- * 端で切れないための 1 枚。足りないと地図の縁に背景が覗く。
- */
-function tileCount(size: number): number {
-	return Math.ceil(size / TILE_SIZE) + 2;
-}
 
 export function IssuesMap({
 	issues,
@@ -76,146 +65,165 @@ export function IssuesMap({
 	view?: MapView;
 	locale?: Locale;
 }) {
-	// 配信元が決まっていないときは何も描かない（#63 と同じ判断）。
-	// 適当な既定値でタイルを取りに行くと規約違反のトラフィックを出す。
-	// 呼び出し側が Issue の一覧を別に出しているので、情報は失われない
-	if (!tileUrlTemplate) {
-		return null;
-	}
-
-	const resolved = view ?? fitViewToIssues(issues);
+	const container = useRef<HTMLDivElement>(null);
+	const map = useRef<MapHandle | null>(null);
+	const router = useRouter();
+	const searchParams = useSearchParams();
 	const messages = getUiMessages(locale);
 
-	// 表示領域の中心が乗っているタイル。ここを基準に周囲を並べる
-	const centerX = longitudeToTileX(resolved.centerLongitude, resolved.zoom);
-	const centerY = latitudeToTileY(resolved.centerLatitude, resolved.zoom);
-
-	const columns = tileCount(MAP_VIEW_WIDTH);
-	const rows = tileCount(MAP_VIEW_HEIGHT);
-
-	// タイル群の左上のタイル番号。中心のタイルから半分ずつ戻る
-	const originTileX = Math.floor(centerX) - Math.floor(columns / 2);
-	const originTileY = Math.floor(centerY) - Math.floor(rows / 2);
-
-	// タイル群をずらす量。視界の中心が表示領域の中央に来るようにする
-	const offsetX = MAP_VIEW_WIDTH / 2 - (centerX - originTileX) * TILE_SIZE;
-	const offsetY = MAP_VIEW_HEIGHT / 2 - (centerY - originTileY) * TILE_SIZE;
-
-	/** このズームで世界を覆うタイルの枚数（一辺）。番号はこの範囲にしか無い。 */
-	const worldTiles = 2 ** resolved.zoom;
+	// 配信元が決まっていないときは何も描かない（Issue 63 から続く判断で、
+	// Issue 118 の受け入れ条件にも入っている）。適当な既定値でタイルを
+	// 取りに行くと規約違反のトラフィックを出す。呼び出し側が Issue の
+	// 一覧を別に出しているので、情報は失われない
+	const renderable = canRenderMap(tileUrlTemplate);
 
 	/*
-	 * 表示領域の中に入る Issue だけを先に選ぶ。
+	 * URL を書き換えるための入れ物。
 	 *
-	 * 外にあるものを `overflow: hidden` で隠すだけだと、要素は残るので
-	 * キーボード操作の順番に見えないリンクが挟まる。件数の表示も
-	 * 「地図に見えている数」と食い違う
+	 * `moveend` のハンドラは地図を作るときに 1 回だけ登録するので、
+	 * そこから今の `searchParams` を直接読むと**登録した時点の値**を
+	 * ずっと見続ける（絞り込みを変えても、地図を動かした瞬間に
+	 * 古い条件へ戻る）。ref 越しに読んで最新を見る
 	 */
-	const visible = issues
-		.map((issue) => ({
-			issue,
-			point: projectToView(issue.latitude, issue.longitude, resolved),
-		}))
-		.filter(
-			({ point }) =>
-				point.x >= 0 &&
-				point.x <= MAP_VIEW_WIDTH &&
-				point.y >= 0 &&
-				point.y <= MAP_VIEW_HEIGHT,
+	const latestParams = useRef(searchParams);
+	latestParams.current = searchParams;
+
+	/*
+	 * 初回に映す範囲。
+	 *
+	 * 依存配列に入れていないのは、URL が変わるたびに地図を作り直さない
+	 * ため。`moveend` で URL を書き換えるので、依存に入れると
+	 * 「動かす → URL 更新 → 作り直し → 初期位置へ戻る」の輪ができて、
+	 * ドラッグした先から弾き返される
+	 */
+	const initialView = useRef(view ?? fitViewToIssues(issues));
+
+	/*
+	 * 地図を作り直す条件。
+	 *
+	 * `issues` は配列なので、ページが再描画されるたびに**中身が同じでも
+	 * 別の参照**になる。そのまま依存配列に入れると、`moveend` で URL を
+	 * 書き換える → Server Component が再実行される → 新しい配列が渡る →
+	 * 地図が作り直されて初期位置へ戻る、という輪ができる。
+	 * **ドラッグするたびに地図が跳ね返る**状態になり、操作できない。
+	 *
+	 * 中身から文字列を作って比べる。id と座標だけを見ているのは、
+	 * 地図に効くのがそれだけだから（タイトルが変わってもマーカーの
+	 * 位置は動かない）
+	 */
+	const issuesKey = issues
+		.map((issue) => `${issue.id}:${issue.latitude}:${issue.longitude}`)
+		.join(",");
+
+	// 地図を作るときに読む Issue。上の `issuesKey` が同じなら中身も同じ
+	// なので、最新の参照を ref 越しに読む（依存配列には入れない）
+	const latestIssues = useRef(issues);
+	latestIssues.current = issues;
+
+	// `issuesKey` は「Issue の集合が変わったら地図を作り直す」ための鍵で、
+	// 効果の中では直接読まない（中身は ref 経由で読む）。lint はこれを
+	// 余分な依存と見るが、外すと**絞り込みを変えてもマーカーが古いまま**
+	// になる。値そのものではなく「変わったこと」を依存にしている
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Issue の集合が変わったことを検知するための鍵
+	useEffect(() => {
+		const element = container.current;
+		if (!element) return;
+
+		// 地図の設定は `lib/map-options.ts` が組み立てる。MapLibre は WebGL を
+		// 要求してテストでは描けないので、判断を含む部分を描画の外へ出して
+		// 値として検査できる形にしている（`map-options.test.ts`）
+		const options = buildIssuesMapOptions(
+			latestIssues.current,
+			initialView.current,
+			tileUrlTemplate,
+			attribution,
 		);
-	const plotted = visible.length;
+		if (!options) return;
+
+		let disposed = false;
+		createMap({
+			...options,
+			container: element,
+			// 値としてのマーカーを、押せる DOM 要素にする
+			markers: options.markers.map((marker) => ({
+				longitude: marker.longitude,
+				latitude: marker.latitude,
+				element: createMarkerElement(marker),
+			})),
+			// 動かし終えたら URL を合わせる。これで「いま見ている場所」が
+			// そのまま共有・ブックマークできる（Issue 118 の受け入れ条件）
+			onMoveEnd: (moved) => {
+				const query = buildViewQuery(latestParams.current, {
+					centerLatitude: moved.latitude,
+					centerLongitude: moved.longitude,
+					zoom: clampMapZoom(moved.zoom),
+				});
+				router.replace(`/map?${query}`, { scroll: false });
+			},
+		}).then((handle) => {
+			if (disposed) {
+				handle?.remove();
+				return;
+			}
+			map.current = handle;
+		});
+
+		return () => {
+			disposed = true;
+			map.current?.remove();
+			map.current = null;
+		};
+	}, [tileUrlTemplate, attribution, issuesKey, router]);
+
+	if (!renderable) {
+		return null;
+	}
 
 	return (
 		<figure className="issues-map">
 			{/*
-			  表示領域の寸法は CSS に置いている（`--map-view-width` /
-			  `--map-view-height`）。`lib/map-view.ts` の定数と対で意味を持つので、
-			  片方だけ変えると地点の位置がずれる。CSS 側の値が定数と一致することは
-			  `map-dashboard.test.tsx` が突き合わせている
+			  表示領域の寸法は CSS に置いている（`.issues-map-view`）。
+			  MapLibre は箱の大きさに合わせて描くので、tsx 側は寸法を持たない
+			  （#113 の頃は tsx が px を算出していたため両方に寸法があった）
 			*/}
-			<div className="issues-map-view">
-				<div
-					className="issues-map-tiles"
-					style={{ transform: `translate(${offsetX}px, ${offsetY}px)` }}
-					aria-hidden="true"
-				>
-					{Array.from({ length: rows }, (_, row) => (
-						<div className="issues-map-row" key={`row-${originTileY + row}`}>
-							{Array.from({ length: columns }, (_, column) => {
-								// 世界は東西につながっているので、東端の先は西端に戻る
-								const x =
-									(((originTileX + column) % worldTiles) + worldTiles) %
-									worldTiles;
-								const y = originTileY + row;
-
-								// 南北はつながっていない。上端・下端より外にはタイルが
-								// 存在しないので、要求せず空白を置く（404 が並ぶのを防ぐ）
-								if (y < 0 || y >= worldTiles) {
-									return (
-										<div
-											key={`blank-${originTileX + column}`}
-											className="issues-map-blank"
-										/>
-									);
-								}
-
-								return (
-									// biome-ignore lint/performance/noImgElement: next/image はこの用途に合わない（理由はファイル冒頭）
-									<img
-										key={`${x},${y}`}
-										src={tileUrl(tileUrlTemplate, x, y, resolved.zoom)}
-										alt=""
-										width={TILE_SIZE}
-										height={TILE_SIZE}
-										loading="lazy"
-										referrerPolicy="no-referrer"
-										draggable={false}
-									/>
-								);
-							})}
-						</div>
-					))}
-				</div>
-
-				{/*
-				  マーカーはタイルとは別の層に置く。タイル側の `transform` に
-				  乗せると、ずらす量の計算を二重に持つことになる。
-				  ここでは緯度経度から表示領域内の px を直接求めて置く
-				*/}
-				<ul className="issues-map-markers">
-					{visible.map(({ issue, point }) => {
-						return (
-							<li key={issue.id}>
-								{/*
-								  マーカーそのものをリンクにする。点が光るだけでは
-								  「何が起きているか」まで辿れない
-								*/}
-								<Link
-									className="issues-map-marker"
-									href={`/issues/${issue.id}`}
-									style={{ left: `${point.x}px`, top: `${point.y}px` }}
-								>
-									{/*
-									  マーカーは見た目としては点だが、読み上げには
-									  何の Issue かが要る。視覚的には隠して文字だけ残す
-									*/}
-									<span className="visually-hidden">{issue.title}</span>
-								</Link>
-							</li>
-						);
-					})}
-				</ul>
-			</div>
+			<div className="issues-map-view" ref={container} />
 
 			{/*
-			  帰属表示は隠さないことがタイル配信元の利用条件に含まれる。
-			  併せて、いま何件が地図に乗っているかを添える。地図の外にある
-			  Issue は描かれないので、一覧の件数と食い違うことがある
+			  地図に何件載っているかを添える。MapLibre 自身も帰属表示を
+			  地図の隅に出すが、地図が読み込めなかったときに消えてしまうので
+			  こちらにも置く（配信元の利用条件）
 			*/}
 			<figcaption className="issues-map-attribution">
-				{messages.mapPage.plotted(plotted)}
+				{messages.mapPage.plotted(issues.length)}
 				{attribution ? ` — ${attribution}` : null}
 			</figcaption>
 		</figure>
 	);
+}
+
+/**
+ * マーカーとして置く DOM 要素を作る。
+ *
+ * MapLibre の既定のピンではなくリンクにしているのは、点が光るだけでは
+ * 「何が起きているか」まで辿れないため（#113 から続く形）。
+ *
+ * React の外で組み立てているのは、MapLibre の `Marker` が DOM 要素を
+ * 直接受け取る API だから。ここで `document` を触るが、この部品は
+ * `use client` かつ `useEffect` の中からしか呼ばれないので、
+ * サーバー側の描画では実行されない。
+ */
+function createMarkerElement(marker: PlottedMarker): HTMLAnchorElement {
+	const link = document.createElement("a");
+	link.className = "issues-map-marker";
+	link.href = `/issues/${marker.id}`;
+
+	// マーカーは見た目としては点だが、読み上げには何の Issue かが要る。
+	// 視覚的には隠して文字だけ残す（`textContent` に入れるので、
+	// タイトルに HTML が含まれていても要素として解釈されない）
+	const label = document.createElement("span");
+	label.className = "visually-hidden";
+	label.textContent = marker.label;
+	link.append(label);
+
+	return link;
 }

@@ -15,16 +15,15 @@
 // このテストにはリクエストスコープが要る。テスト対象より先に評価させる
 import "./helpers/mock-cookies";
 import { afterEach, describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { IssueMap } from "../src/app/components/IssueMap";
 import IssueDetailPage from "../src/app/issues/[id]/page";
 import {
 	latitudeToTileY,
 	longitudeToTileX,
-	MAP_ZOOM,
 	resolveTileUrlTemplate,
-	TILE_SIZE,
-	tileUrl,
 } from "../src/lib/map";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
@@ -151,21 +150,12 @@ describe("タイル座標の変換", () => {
 		}
 	});
 
-	it("テンプレートの {z}/{x}/{y} を実際の値で置き換える", () => {
-		expect(tileUrl(TEMPLATE, 3, 5, 7)).toBe(
-			"https://tiles.example.com/7/3/5.png",
-		);
-	});
-
-	it("{s} を含むテンプレートでも実在するサブドメインに解決する", () => {
-		const url = tileUrl(
-			"https://{s}.tiles.example.com/{z}/{x}/{y}.png",
-			3,
-			5,
-			7,
-		);
-		expect(url).toMatch(/^https:\/\/[abc]\.tiles\.example\.com\/7\/3\/5\.png$/);
-	});
+	/*
+	 * タイル URL の組み立ては #118 で MapLibre へ渡した（テンプレートを
+	 * どう埋めるかはライブラリの領分）。ここに残るのは座標変換だけで、
+	 * これは `lib/map-view.ts` が「全件が収まる視界」を求めるのに使う。
+	 * サーバー側で決める必要があるのでブラウザの MapLibre には頼めない
+	 */
 });
 
 describe("タイル配信元の設定", () => {
@@ -192,7 +182,23 @@ describe("タイル配信元の設定", () => {
 });
 
 describe("IssueMap", () => {
-	it("配信元が設定されていればタイル画像を並べる", () => {
+	/*
+	 * **ここで見られることと、見られないこと（#118）。**
+	 *
+	 * #63 の頃はラスタタイルを `<img>` で並べていたので、描いた HTML を
+	 * 読めばタイルの番号もマーカーのずれも検査できた。#118 で MapLibre へ
+	 * 移ると地図の中身は WebGL のキャンバスになり、`bun test`（DOM 無し・
+	 * 描画エンジン無し）からは一切見えない。`useEffect` も走らない。
+	 *
+	 * **見えなくなった分の検証は捨てず、`map-options.test.ts` へ移した。**
+	 * 「MapLibre に何を渡すか」を値として検査する形で、中心の座標
+	 * （[経度, 緯度] の順を取り違えていないか）・縮尺・帰属表示・
+	 * 配信元が未設定なら作らないこと、を見ている。
+	 *
+	 * ここに残すのは**サーバー側の描画で決まる部分**だけ。地図が読み込まれる
+	 * 前・JS が無効・WebGL が使えない環境で、画面がどう見えるかにあたる。
+	 */
+	it("地図を置く箱を描く", () => {
 		const html = renderToStaticMarkup(
 			<IssueMap
 				latitude={TOKYO.latitude}
@@ -203,176 +209,17 @@ describe("IssueMap", () => {
 			/>,
 		);
 
-		// 中心タイルが含まれていること（別の場所を表示していない証拠）
-		expect(html).toContain(`/${MAP_ZOOM}/29105/12903.png`);
-		// 1 枚だけでは中心の周りが切れるので、上下左右も並べる
-		expect(html).toContain(`/${MAP_ZOOM}/29104/12903.png`);
-		expect(html).toContain(`/${MAP_ZOOM}/29106/12903.png`);
-		expect(html).toContain(`/${MAP_ZOOM}/29105/12902.png`);
-		expect(html).toContain(`/${MAP_ZOOM}/29105/12904.png`);
-	});
-
-	/*
-	 * 3x3 で並べる以上、地図の端にある地点では周囲のタイルが世界の外へ
-	 * はみ出す。存在しないタイル（負の番号や 2^zoom 以上）を要求すると
-	 * 404 が並び、地図が虫食いになるうえ配信元に無駄な負荷をかける。
-	 * 緯度経度の両端はスキーマ上そのまま起票できる値なので、実際に起きうる
-	 */
-	it("世界の端にある地点でも存在しないタイルを要求しない", () => {
-		const max = 2 ** MAP_ZOOM;
-
-		for (const [latitude, longitude] of [
-			[90, 180],
-			[-90, -180],
-			[0, 180],
-			[0, -180],
-			[85.05, 0],
-			[-85.05, 0],
-		] as const) {
-			const html = renderToStaticMarkup(
-				<IssueMap
-					latitude={latitude}
-					longitude={longitude}
-					title="世界の端"
-					tileUrlTemplate={TEMPLATE}
-					attribution={null}
-				/>,
-			);
-
-			const where = `(${latitude}, ${longitude})`;
-			expect(html, `${where} で URL に Infinity/NaN が入った`).not.toMatch(
-				/Infinity|NaN/,
-			);
-
-			for (const [, x, y] of html.matchAll(
-				/tiles\.example\.com\/\d+\/(-?\d+)\/(-?\d+)\.png/g,
-			)) {
-				expect(Number(x), `${where} で x が範囲外`).toBeGreaterThanOrEqual(0);
-				expect(Number(x), `${where} で x が範囲外`).toBeLessThan(max);
-				expect(Number(y), `${where} で y が範囲外`).toBeGreaterThanOrEqual(0);
-				expect(Number(y), `${where} で y が範囲外`).toBeLessThan(max);
-			}
-		}
-	});
-
-	/*
-	 * マーカーが実際に Issue の地点を指しているかを見る。
-	 *
-	 * どのタイルを取るか（URL）が正しくても、タイル群をずらす量が間違っていれば
-	 * 「地図は出るが指している場所が違う」という、見た目では気付きにくい
-	 * 壊れ方をする。ここを押さえないとオフセットの符号を反転しても、
-	 * `TILE_RADIUS` の項を落としても、`transform` ごと消してもテストが通る。
-	 *
-	 * マーカーは CSS で表示領域の中央（VIEW_SIZE/2）に固定されているので、
-	 * 「地点がビュー内のどこに描かれるか」を HTML の transform から逆算し、
-	 * それが中央と一致することを確かめる。期待値を直接書かずに
-	 * 不変条件（地点はマーカーの真下に来る）を検証している
-	 */
-	it("地点がマーカーの位置に来るようタイルをずらす", () => {
-		const viewSize = TILE_SIZE * 2;
-
-		for (const [latitude, longitude] of [
-			[TOKYO.latitude, TOKYO.longitude],
-			[0, 0],
-			[-33.8688, 151.2093],
-			[51.5074, -0.1278],
-		] as const) {
-			const html = renderToStaticMarkup(
-				<IssueMap
-					latitude={latitude}
-					longitude={longitude}
-					title="位置の確認"
-					tileUrlTemplate={TEMPLATE}
-					attribution={null}
-				/>,
-			);
-
-			const where = `(${latitude}, ${longitude})`;
-			const moved = html.match(/translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/);
-			expect(moved, `${where} で transform が出ていない`).not.toBeNull();
-
-			const [offsetX, offsetY] = [Number(moved?.[1]), Number(moved?.[2])];
-
-			// タイル群の中で地点が置かれる位置（左上のタイルの左上からの px）。
-			// 3x3 の中央タイルなので、そのタイルの小数部に 1 枚分を足す
-			const tileX = longitudeToTileX(longitude, MAP_ZOOM);
-			const tileY = latitudeToTileY(latitude, MAP_ZOOM);
-			const withinTilesX = (tileX - Math.floor(tileX) + 1) * TILE_SIZE;
-			const withinTilesY = (tileY - Math.floor(tileY) + 1) * TILE_SIZE;
-
-			// ずらした後、地点はビューの中央（＝マーカーの位置）に来るはず
-			expect(withinTilesX + offsetX, `${where} で地点が横にずれた`).toBeCloseTo(
-				viewSize / 2,
-				6,
-			);
-			expect(withinTilesY + offsetY, `${where} で地点が縦にずれた`).toBeCloseTo(
-				viewSize / 2,
-				6,
-			);
-		}
-	});
-
-	/*
-	 * ずらした結果、3x3 のタイルがビューを隙間なく覆っているか。
-	 * オフセットが大きすぎるとタイルの外側（背景）が見えて地図が欠ける
-	 */
-	it("ずらしてもタイルがビュー全体を覆う", () => {
-		const viewSize = TILE_SIZE * 2;
-		const tilesSize = TILE_SIZE * 3;
-
-		for (const [latitude, longitude] of [
-			[TOKYO.latitude, TOKYO.longitude],
-			[0, 0],
-			[-33.8688, 151.2093],
-		] as const) {
-			const html = renderToStaticMarkup(
-				<IssueMap
-					latitude={latitude}
-					longitude={longitude}
-					title="被覆の確認"
-					tileUrlTemplate={TEMPLATE}
-					attribution={null}
-				/>,
-			);
-
-			const moved = html.match(/translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/);
-			const [offsetX, offsetY] = [Number(moved?.[1]), Number(moved?.[2])];
-			const where = `(${latitude}, ${longitude})`;
-
-			// タイル群の左上がビューの左上より右/下に来ると、そこに隙間ができる
-			expect(offsetX, `${where} で左に隙間`).toBeLessThanOrEqual(0);
-			expect(offsetY, `${where} で上に隙間`).toBeLessThanOrEqual(0);
-			// 逆にずらしすぎると右/下が足りなくなる
-			expect(offsetX + tilesSize, `${where} で右に隙間`).toBeGreaterThanOrEqual(
-				viewSize,
-			);
-			expect(offsetY + tilesSize, `${where} で下に隙間`).toBeGreaterThanOrEqual(
-				viewSize,
-			);
-		}
-	});
-
-	/*
-	 * クラス名は境界付きで照合する。`toContain("issue-map-marker")` だと
-	 * `issue-map-markerX` のような綴り違いも通ってしまい、CSS が当たらず
-	 * マーカーが消えている状態を見逃す（クラス名は CSS 側と対で意味を持つ）
-	 */
-	it("Issue の地点を指すマーカーを重ねる", () => {
-		const html = renderToStaticMarkup(
-			<IssueMap
-				latitude={TOKYO.latitude}
-				longitude={TOKYO.longitude}
-				title="駅前の街灯が切れている"
-				tileUrlTemplate={TEMPLATE}
-				attribution={null}
-			/>,
-		);
-		expect(html).toMatch(/class="[^"]*\bissue-map-marker\b[^"]*"/);
+		// MapLibre が描画先にする箱。CSS が寸法を与えているので、
+		// これが無いと地図の場所そのものが確保されない。
+		// クラス名は境界付きで照合する（`issue-map-viewX` のような
+		// 綴り違いだと CSS が当たらず、箱の大きさが 0 になる）
+		expect(html).toMatch(/class="[^"]*\bissue-map-view\b[^"]*"/);
 	});
 
 	/*
 	 * OSM の利用規約は attribution を隠さず表示することを求めている。
-	 * 設定した文言が画面に出ることを確かめる
+	 * MapLibre 自身も地図の隅に出すが、**地図が読み込めなかったときに
+	 * それごと消える**ので、こちらでも地図の直下に置く
 	 */
 	it("attribution を画面に出す", () => {
 		const html = renderToStaticMarkup(
@@ -387,7 +234,12 @@ describe("IssueMap", () => {
 		expect(html).toContain("OpenStreetMap contributors");
 	});
 
-	it("配信元が未設定なら地図を描かない（壊れた画像を並べない）", () => {
+	/*
+	 * 配信元が未設定なら地図の箱ごと出さない。#63 から続く判断で、
+	 * #118 の受け入れ条件にも入っている。箱だけ残すと、空の枠が
+	 * 壊れて見えるうえに場所も取る
+	 */
+	it("配信元が未設定なら地図を描かない", () => {
 		const html = renderToStaticMarkup(
 			<IssueMap
 				latitude={TOKYO.latitude}
@@ -397,13 +249,30 @@ describe("IssueMap", () => {
 				attribution={null}
 			/>,
 		);
-		expect(html).not.toContain("<img");
+		expect(html).toBe("");
 	});
 
 	/*
-	 * タイル画像の alt を空にしているのは、地図の情報が隣接する座標の
-	 * 数値で読めるため（画像 1 枚ごとに読み上げても意味を成さない）。
-	 * 代わりに地図全体へラベルを付ける
+	 * 判別できない配信元も同じ扱い。「たぶんラスタ」と決め打つと、
+	 * 打ち間違えた人が真っ白な地図の原因を掴めない
+	 */
+	it("判別できない配信元でも地図を描かない", () => {
+		const html = renderToStaticMarkup(
+			<IssueMap
+				latitude={TOKYO.latitude}
+				longitude={TOKYO.longitude}
+				title="駅前の街灯が切れている"
+				tileUrlTemplate="https://tiles.example.com/"
+				attribution={null}
+			/>,
+		);
+		expect(html).toBe("");
+	});
+
+	/*
+	 * 地図の中身（WebGL のキャンバス）は読み上げに使える内容を持たない。
+	 * 全体を 1 つの画像として扱い、何の場所かをラベルで伝える。
+	 * 座標の数値は呼び出し側（詳細ページの dl）に残っている
 	 */
 	it("スクリーンリーダー向けに地図全体のラベルを持つ", () => {
 		const html = renderToStaticMarkup(
@@ -444,8 +313,65 @@ describe("詳細ページの地図", () => {
 		});
 		const html = renderToStaticMarkup(element);
 
-		expect(html).toContain(`/${MAP_ZOOM}/29105/12903.png`);
-		expect(html).toContain("issue-map-marker");
+		// MapLibre が描画先にする箱。中身は WebGL のキャンバスなので
+		// ここからは見えない（何を渡しているかは `map-options.test.ts`）
+		expect(html).toMatch(/class="[^"]*\bissue-map-view\b[^"]*"/);
+		// 何の場所を指しているかがラベルとして出ていること
+		expect(html).toMatch(/aria-label="[^"]*駅前の街灯が切れている/);
+	});
+
+	it("配信元が未設定なら地図の箱ごと出さない", async () => {
+		process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
+		delete process.env.NEXT_PUBLIC_MAP_TILE_URL;
+		globalThis.fetch = stubDetailFetch();
+
+		const element = await IssueDetailPage({
+			params: Promise.resolve({ id: sampleIssue.id }),
+		});
+		const html = renderToStaticMarkup(element);
+
+		expect(html).not.toContain("issue-map-view");
+	});
+
+	/*
+	 * #118 の受け入れ条件。MapLibre は Client Component を要求するが、
+	 * **その境界を地図の部品に閉じ込める**こと。
+	 *
+	 * ページに `use client` が付くと、詳細ページの中身（Issue 本文、
+	 * コメント、座標の dl）まで全部クライアントへ配られ、サーバー側で
+	 * 描く意味が消える。同じ理由で、ページが MapLibre を直接 import
+	 * するのも駄目（境界がページまで上がる）。
+	 *
+	 * ソースを読む形にしているのは、`renderToStaticMarkup` では
+	 * Server / Client の区別が結果に現れないため（どちらも同じ HTML を出す）。
+	 */
+	it("詳細ページ自体は Client Component になっていない", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../src/app/issues/[id]/page.tsx"),
+			"utf8",
+		);
+
+		expect(
+			source.trimStart().startsWith('"use client"'),
+			"詳細ページ全体が Client Component になっている",
+		).toBe(false);
+		expect(
+			source,
+			"ページが MapLibre を直接読み込んでいる（境界がページまで上がる）",
+		).not.toContain("maplibre-gl");
+	});
+
+	/*
+	 * 地図の部品の側は Client Component であること。MapLibre は WebGL で
+	 * 描くのでブラウザでの実行が要る。付け忘れると、サーバー側で
+	 * `document` を触って落ちる
+	 */
+	it("地図の部品は Client Component になっている", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../src/app/components/IssueMap.tsx"),
+			"utf8",
+		);
+		expect(source.trimStart().startsWith('"use client"')).toBe(true);
 	});
 
 	/*

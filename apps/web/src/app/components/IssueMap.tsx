@@ -1,50 +1,43 @@
+"use client";
+
 import {
 	DEFAULT_LOCALE,
 	getUiMessages,
 	type Locale,
 } from "@world-issue-tracker/shared";
-import {
-	latitudeToTileY,
-	longitudeToTileX,
-	MAP_ZOOM,
-	TILE_SIZE,
-	tileUrl,
-} from "../../lib/map";
+// MapLibre が地図の上に置く部品（帰属表示・拡大縮小ボタン）の見た目。
+// これが無いと帰属表示が地図に重なって読めなくなる。
+// **CSS だけは静的に読む** — 動的 import の中に置くと、地図が出るまで
+// 部品の位置が定まらず、読み込みのたびに画面がずれる
+import "maplibre-gl/dist/maplibre-gl.css";
+import { useEffect, useRef } from "react";
+import { buildDetailMapOptions } from "../../lib/map-options";
+import { createMap, type MapHandle } from "../../lib/maplibre";
 
 /**
  * Issue 1 件の位置を地図で示す。
  *
- * 地図ライブラリを使っていない理由。この画面で必要なのは「1 件がどこか」を
- * 示すことだけで、パン・ズーム・複数地点の描画は要らない（一覧の地図表示や
- * ヒートマップは #63 の範囲外）。Leaflet を入れると 40KB 強の JS と CSS を
- * 全利用者に配ることになるが、得られるのは今は使わない対話機能である。
- * ラスタタイルを `<img>` で並べれば、追加の依存ゼロ・JS ゼロで同じ絵が出る。
+ * **MapLibre GL JS で描いている理由（#118）。** #63 ではラスタタイルを
+ * `<img>` で並べていた。依存ゼロで絵が出る方式だったが、#115 で本番の
+ * 配信元を選ぼうとした結果、**ラスタタイルのまま使える選択肢が無かった**
+ * （OSM 公式はポリシーが独自 User-Agent を要求するがブラウザの `<img>` には
+ * 設定できず、無料枠のある商用サービスはいずれも商用利用不可）。残ったのが
+ * Protomaps を自前配信する道で、これはベクタタイルである。ベクタを描くには
+ * ライブラリが要るので、#118 で MapLibre へ移した。
  *
- * この選択は将来を塞がない。一覧の地図表示を作る段階で、そのとき必要な
- * 対話機能を見てからライブラリを選べばよく、そのときこの部品を差し替えるだけで済む。
+ * **`use client` が付いた理由。** #63 の時点でこの部品は状態もイベントも
+ * 持たず、Server Component のまま JS を 1 バイトも配っていなかった。
+ * MapLibre は WebGL で描くのでブラウザでの実行が必須になり、その性質は
+ * 失われる。**ただし詳細ページ全体は Server Component のまま**で、
+ * Client 化はこの部品の中に閉じている（#118 の受け入れ条件）。
+ * ページが直接 MapLibre を import すると境界がページまで上がるので、
+ * 取り込み口をここ 1 箇所に留めている。
  *
- * Server Component のままでも描けるが、詳細ページ全体を Client 化しないために
- * 部品として切り出している（Issue のコメントの指示）。実際 `use client` は
- * 付けていない — 状態もイベントハンドラも持たないため、JS を配る必要がない。
- *
- * タイルは中心の 1 枚だけだと Issue の地点が端に寄ったときに周囲が切れるので、
- * 3x3 で並べて中心を画面の中央に置く。
- *
- * タイルに `next/image` ではなく `<img>` を使っている理由（lint を抑制している）。
- * 地図タイルは配信元が既に 256x256 に最適化して配っている画像で、変換しても
- * 得るものが無い（Workers では OpenNext 経由の変換コストが増えるだけ）。
- * さらに `next/image` は外部ドメインを `next.config.ts` の `remotePatterns` に
- * 列挙する必要があり、配信元を環境変数で差し替える設計と噛み合わない。
+ * **地図が出る前に何も見えなくならないようにしている。** 初期 HTML の
+ * 時点では地図の箱と帰属表示だけが出る（`useEffect` はサーバーでは
+ * 走らない）。座標の数値は呼び出し側の dl に残っているので、JS が
+ * 無効でも、WebGL が使えない環境でも、位置情報そのものは読める。
  */
-
-/** 中心タイルの周囲に何枚ずつ並べるか。1 なら 3x3。 */
-const TILE_RADIUS = 1;
-
-/** 地図の表示サイズ（px）。3x3 のタイルから、はみ出す分を切り落として使う。 */
-const VIEW_SIZE = TILE_SIZE * 2;
-
-/** このズームで世界を覆うタイルの枚数（一辺）。番号はこの範囲にしか存在しない。 */
-const WORLD_TILES = 2 ** MAP_ZOOM;
 
 export function IssueMap({
 	latitude,
@@ -65,105 +58,84 @@ export function IssueMap({
 	/** 読み上げ用ラベルの言語。地図そのものは言語に依らない */
 	locale?: Locale;
 }) {
-	// 配信元が決まっていないときは何も描かない。
-	// 適当な既定値でタイルを取りに行くと、規約違反のトラフィックを出すか、
-	// 読み込めない画像を並べることになる。呼び出し側が座標の数値を
-	// 表示し続けているので、位置情報そのものは失われない
-	if (!tileUrlTemplate) {
+	const container = useRef<HTMLDivElement>(null);
+	const map = useRef<MapHandle | null>(null);
+
+	// 地図の設定は `lib/map-options.ts` が組み立てる。MapLibre は WebGL を
+	// 要求してテストでは描けないので、**判断を含む部分を描画の外へ出して**
+	// 値として検査できる形にしている（`map-options.test.ts`）。
+	//
+	// null なら地図を出さない。配信元が未設定・判別できない場合で、
+	// Issue 63 から続く判断（適当な既定値を焼き込むと、設定を忘れたまま
+	// 本番へ出たときに規約違反のトラフィックを出し続ける）。呼び出し側が
+	// 座標の数値を表示し続けているので、位置情報そのものは失われない
+	const options = buildDetailMapOptions(
+		{ latitude, longitude },
+		tileUrlTemplate,
+		attribution,
+	);
+
+	useEffect(() => {
+		const element = container.current;
+		if (!element) return;
+
+		// 描画の中で組み立て直す。上の `options` をそのまま使うと、
+		// 毎回新しいオブジェクトになるので依存配列が毎描画で変わり、
+		// 地図が作り直され続ける
+		const created = buildDetailMapOptions(
+			{ latitude, longitude },
+			tileUrlTemplate,
+			attribution,
+		);
+		if (!created) return;
+
+		// 生成は動的 import を挟む（`lib/maplibre.ts` 参照）。完了より先に
+		// この部品が消えることがあるので、その場合は即座に捨てる
+		let disposed = false;
+		createMap({
+			...created,
+			container: element,
+			// 詳細ページは 1 件を指すだけ。マーカーに行き先は要らない
+			// （既にその Issue のページにいる）ので、既定のピンを置く
+			marker: { longitude, latitude },
+		}).then((handle) => {
+			if (disposed) {
+				handle?.remove();
+				return;
+			}
+			map.current = handle;
+		});
+
+		return () => {
+			disposed = true;
+			map.current?.remove();
+			map.current = null;
+		};
+	}, [tileUrlTemplate, attribution, latitude, longitude]);
+
+	if (!options) {
 		return null;
 	}
-
-	// 中心タイルの座標。整数部がタイル番号、小数部がタイル内の位置
-	const centerX = longitudeToTileX(longitude, MAP_ZOOM);
-	const centerY = latitudeToTileY(latitude, MAP_ZOOM);
-	const centerTileX = Math.floor(centerX);
-	const centerTileY = Math.floor(centerY);
-
-	// 3x3 のタイル群の左上を基準に、Issue の地点が表示領域の中央へ来るよう
-	// タイル全体をずらす量（px）
-	const offsetX =
-		VIEW_SIZE / 2 - (centerX - centerTileX + TILE_RADIUS) * TILE_SIZE;
-	const offsetY =
-		VIEW_SIZE / 2 - (centerY - centerTileY + TILE_RADIUS) * TILE_SIZE;
-
-	const offsets = Array.from(
-		{ length: TILE_RADIUS * 2 + 1 },
-		(_, index) => index - TILE_RADIUS,
-	);
 
 	return (
 		<figure className="issue-map">
 			{/*
-			  タイル 1 枚ごとの alt は空にしている。地図を構成する画像片には
-			  個別の意味が無く、読み上げても雑音にしかならない。
-			  代わりに地図全体へ role/aria-label を与えて 1 つの画像として扱う。
-			  座標の数値は呼び出し側（詳細ページの dl）に残っているので、
-			  地図が見えない読み手でも位置は読める
+			  地図全体を 1 つの画像として扱う。中で描かれるのは WebGL の
+			  キャンバスで、読み上げに使える内容を持たない。座標の数値は
+			  呼び出し側（詳細ページの dl）に残っているので、地図が見えない
+			  読み手でも位置は読める
 			*/}
 			<div
 				className="issue-map-view"
+				ref={container}
 				role="img"
 				aria-label={getUiMessages(locale).map.label(title, latitude, longitude)}
-				style={{ width: VIEW_SIZE, height: VIEW_SIZE }}
-			>
-				<div
-					className="issue-map-tiles"
-					style={{ transform: `translate(${offsetX}px, ${offsetY}px)` }}
-				>
-					{offsets.map((dy) => (
-						<div className="issue-map-row" key={dy}>
-							{offsets.map((dx) => {
-								// 世界は東西につながっているので、東端の先は西端に戻る。
-								// 日付変更線をまたぐ地点でも地図が途切れない
-								const x =
-									(((centerTileX + dx) % WORLD_TILES) + WORLD_TILES) %
-									WORLD_TILES;
-								const y = centerTileY + dy;
-
-								// 南北はつながっていない。地図の上端・下端より外には
-								// タイルが存在しないので、要求せず空白のまま置く
-								// （存在しない番号を投げると 404 が並び、配信元にも無駄がかかる）
-								if (y < 0 || y >= WORLD_TILES) {
-									return (
-										<div
-											key={`blank-${dx}`}
-											className="issue-map-blank"
-											style={{ width: TILE_SIZE, height: TILE_SIZE }}
-										/>
-									);
-								}
-
-								return (
-									// biome-ignore lint/performance/noImgElement: next/image はこの用途に合わない（理由はファイル冒頭）
-									<img
-										key={`${x},${y}`}
-										src={tileUrl(tileUrlTemplate, x, y, MAP_ZOOM)}
-										alt=""
-										width={TILE_SIZE}
-										height={TILE_SIZE}
-										// タイルは折りたたみの下に来ることが多く、
-										// 遅延読み込みで初期表示の帯域を空けられる
-										loading="lazy"
-										// 配信元は別オリジン。参照元 URL を渡す必要はない
-										referrerPolicy="no-referrer"
-										draggable={false}
-									/>
-								);
-							})}
-						</div>
-					))}
-				</div>
-
-				{/*
-				  マーカーは表示領域の中央に固定で置く。タイル側を
-				  ずらして地点を中央へ持ってきているため、ここは動かさない
-				*/}
-				<div className="issue-map-marker" aria-hidden="true" />
-			</div>
+			/>
 
 			{attribution ? (
-				// 帰属表示は隠さないことが OSM 系タイルの利用条件に含まれる。
-				// 地図の直下に、地図と同じ幅で置く
+				// 帰属表示は隠さないことがタイル配信元の利用条件に含まれる。
+				// MapLibre 自身も地図の隅に出すが、地図が読み込めなかったときに
+				// 消えてしまうので、こちらでも地図の直下に置く
 				<figcaption className="issue-map-attribution">{attribution}</figcaption>
 			) : null}
 		</figure>

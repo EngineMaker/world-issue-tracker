@@ -24,7 +24,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { IssuesMap } from "../src/app/components/IssuesMap";
 import MapPage from "../src/app/map/page";
 import type { PublicIssue, RawSearchParams } from "../src/lib/issues";
-import { TILE_SIZE } from "../src/lib/map";
 import {
 	clampMapZoom,
 	fitViewToIssues,
@@ -207,134 +206,80 @@ describe("複数地点を収める視界の計算", () => {
 
 describe("IssuesMap", () => {
 	/*
-	 * 全件がマーカーとして出るか。1 件でも落ちれば「見比べる」が成立しない
-	 */
-	/*
-	 * クラス名は属性値そのものと照合する。`\bissues-map-marker\b` のような
-	 * 境界付きの部分一致だと、**マーカーを 1 つも描いていなくても
-	 * コンテナの `issues-map-markers` にマッチして通る**（`\b` は
-	 * `marker` と `markers` の間に境界を認めない一方、`marker` の直後の
-	 * `s` の前で境界が成立しないため一見安全に見えるが、`[^"]*` が
-	 * `issues-map-markers` の途中まで食うことで成立してしまう）。
-	 * 実際にこの形で「0 件でも通るテスト」になっていた
-	 */
-	it("渡した Issue の数だけマーカーを描く", () => {
-		const html = renderToStaticMarkup(
-			<IssuesMap issues={THREE_CITIES} tileUrlTemplate={TEMPLATE} />,
-		);
-
-		const markers = [...html.matchAll(/class="issues-map-marker"/g)];
-		expect(markers.length).toBe(THREE_CITIES.length);
-	});
-
-	/*
-	 * マーカーが「ある」だけでは足りない。全部が同じ場所に重なっていても
-	 * 数は合う。それぞれが別の位置に、正しい相対関係で置かれているかを見る。
-	 * 札幌は東京より北（＝上）、大阪は東京より西（＝左）
-	 */
-	it("マーカーを地点ごとの位置に置く", () => {
-		const html = renderToStaticMarkup(
-			<IssuesMap issues={THREE_CITIES} tileUrlTemplate={TEMPLATE} />,
-		);
-
-		const placed = [
-			...html.matchAll(/left:\s*([\d.-]+)px;\s*top:\s*([\d.-]+)px/g),
-		];
-		expect(placed.length).toBe(THREE_CITIES.length);
-
-		const [tokyo, osaka, sapporo] = placed.map((m) => ({
-			x: Number(m[1]),
-			y: Number(m[2]),
-		}));
-		if (!tokyo || !osaka || !sapporo) throw new Error("位置が読めない");
-
-		// 大阪は東京より西
-		expect(osaka.x).toBeLessThan(tokyo.x);
-		// 札幌は東京より北 = 画面では上 = y が小さい
-		expect(sapporo.y).toBeLessThan(tokyo.y);
-		// 大阪は東京より南 = 画面では下
-		expect(osaka.y).toBeGreaterThan(tokyo.y);
-	});
-
-	/*
-	 * 地図から Issue へ辿れないと、点が光るだけで終わる
-	 */
-	/*
-	 * 視界の外にある Issue はマーカーを描かない。
+	 * **ここで見られることと、見られないこと（#118）。**
 	 *
-	 * `overflow: hidden` で見えなくはなるが、要素は残る。残ると
-	 * **キーボードで辿れる見えないリンク**が順路に挟まり、Tab を押しても
-	 * 何も起きていないように見える位置でフォーカスが止まる。
-	 * 件数の表示（「N 件を地図に表示しています」）も、見えている数と食い違う。
+	 * #113 の頃はラスタタイルを `<img>` で並べていたので、描いた HTML を
+	 * 読めばマーカーの位置もタイルの番号も検査できた。#118 で MapLibre へ
+	 * 移ると地図の中身は WebGL のキャンバスになり、`bun test`（DOM 無し・
+	 * 描画エンジン無し）からは一切見えない。`useEffect` も走らない。
 	 *
-	 * パンで視界を動かすと実際に起きる（地図の外に Issue が出る）
+	 * **見えなくなった分の検証は捨てず、`map-options.test.ts` へ移した。**
+	 * 「MapLibre に何を渡すか」を値として検査する形で、マーカーの件数・
+	 * 座標・行き先・帰属表示・配信元が未設定なら作らないこと、を見ている。
+	 *
+	 * ここに残すのは**サーバー側の描画で決まる部分**だけ。地図が読み込まれる
+	 * 前・JS が無効・WebGL が使えない環境で、画面がどう見えるかにあたる。
 	 */
-	it("視界の外にある Issue はマーカーを描かない", () => {
-		// 東京を大きく寄って映す。同じ地図に載せた札幌は画面の外に出る
+	it("地図を置く箱と帰属表示を描く", () => {
 		const html = renderToStaticMarkup(
 			<IssuesMap
 				issues={THREE_CITIES}
 				tileUrlTemplate={TEMPLATE}
-				view={{
-					centerLatitude: TOKYO.latitude,
-					centerLongitude: TOKYO.longitude,
-					zoom: 12,
-				}}
+				attribution="© OpenStreetMap contributors"
 			/>,
 		);
 
-		const markers = [...html.matchAll(/class="issues-map-marker"/g)];
-		expect(markers.length, "画面外の Issue までマーカーを描いている").toBe(1);
-		expect(html).toContain("/issues/aaaa");
-		expect(html, "画面外の札幌が残っている").not.toContain("/issues/cccc");
+		// MapLibre が描画先にする箱。CSS が寸法を与えているので、
+		// これが無いと地図の場所そのものが確保されない
+		expect(html).toMatch(/class="issues-map-view"/);
+		expect(html).toContain("OpenStreetMap contributors");
 	});
 
 	/*
-	 * 添える件数は「地図に見えている数」であること。渡された総数を出すと、
-	 * 画面には 1 件しか無いのに「3 件を表示しています」と嘘になる
+	 * 添える件数は、地図に載せた Issue の数と一致すること。
+	 * 渡された総数と別の数を出すと、画面の内容と食い違う
 	 */
-	it("件数の表示が実際に描いたマーカーの数と一致する", () => {
+	it("件数の表示が地図に載せた Issue の数と一致する", () => {
 		const html = renderToStaticMarkup(
-			<IssuesMap
-				issues={THREE_CITIES}
-				tileUrlTemplate={TEMPLATE}
-				view={{
-					centerLatitude: TOKYO.latitude,
-					centerLongitude: TOKYO.longitude,
-					zoom: 12,
-				}}
-			/>,
+			<IssuesMap issues={THREE_CITIES} tileUrlTemplate={TEMPLATE} />,
 		);
 
-		const markers = [...html.matchAll(/class="issues-map-marker"/g)].length;
 		const caption = html.match(/class="issues-map-attribution">([^<]*)/)?.[1];
 		expect(caption, "件数の表示が無い").toBeDefined();
-		expect(
-			caption,
-			`マーカー ${markers} 件に対して表示が「${caption}」`,
-		).toContain(String(markers));
-	});
-
-	it("マーカーから Issue の詳細へ辿れる", () => {
-		const html = renderToStaticMarkup(
-			<IssuesMap issues={THREE_CITIES} tileUrlTemplate={TEMPLATE} />,
-		);
-		for (const issue of THREE_CITIES) {
-			expect(html).toContain(`/issues/${issue.id}`);
-		}
+		expect(caption).toContain(String(THREE_CITIES.length));
 	});
 
 	/*
-	 * #63 と同じ判断を引き継ぐ。配信元が決まっていないのに適当な既定値で
-	 * タイルを取りに行くと、規約違反のトラフィックを出す
+	 * #63 から続く判断を引き継ぐ。配信元が決まっていないのに適当な既定値で
+	 * タイルを取りに行くと、規約違反のトラフィックを出す。
+	 * ここは箱ごと出さない（出すと空の枠だけが残って壊れて見える）
 	 */
 	it("配信元が未設定なら地図を描かない", () => {
 		const html = renderToStaticMarkup(
 			<IssuesMap issues={THREE_CITIES} tileUrlTemplate={null} />,
 		);
-		expect(html).not.toContain("<img");
+		expect(html).toBe("");
 	});
 
+	/*
+	 * 判別できない配信元も同じ扱い。「たぶんラスタ」と決め打つと、
+	 * 打ち間違えた人が真っ白な地図の原因を掴めない
+	 */
+	it("判別できない配信元でも地図を描かない", () => {
+		const html = renderToStaticMarkup(
+			<IssuesMap
+				issues={THREE_CITIES}
+				tileUrlTemplate="https://tiles.example.com/"
+			/>,
+		);
+		expect(html).toBe("");
+	});
+
+	/*
+	 * タイトルは利用者が自由に書ける。サーバー側の描画に混ざる経路が
+	 * 無いことを見る（マーカーのラベルは `textContent` で入れるので、
+	 * こちらの HTML には現れない）
+	 */
 	it("タイトルを属性へそのまま埋め込まない", () => {
 		const html = renderToStaticMarkup(
 			<IssuesMap
@@ -343,33 +288,6 @@ describe("IssuesMap", () => {
 			/>,
 		);
 		expect(html).not.toContain("<script>");
-	});
-
-	/*
-	 * 世界の端をまたぐ視界では、タイル番号が世界の外へ出る。
-	 * 存在しない番号を要求すると 404 が並んで地図が虫食いになる
-	 */
-	it("存在しないタイルを要求しない", () => {
-		const html = renderToStaticMarkup(
-			<IssuesMap
-				issues={[
-					issueAt("a", "端 1", { latitude: 85, longitude: 179.9 }),
-					issueAt("b", "端 2", { latitude: -85, longitude: -179.9 }),
-				]}
-				tileUrlTemplate={TEMPLATE}
-			/>,
-		);
-
-		expect(html).not.toMatch(/Infinity|NaN/);
-		for (const [, z, x, y] of html.matchAll(
-			/tiles\.example\.com\/(\d+)\/(-?\d+)\/(-?\d+)\.png/g,
-		)) {
-			const max = 2 ** Number(z);
-			expect(Number(x)).toBeGreaterThanOrEqual(0);
-			expect(Number(x)).toBeLessThan(max);
-			expect(Number(y)).toBeGreaterThanOrEqual(0);
-			expect(Number(y)).toBeLessThan(max);
-		}
 	});
 });
 
@@ -382,7 +300,17 @@ describe("/map ページ", () => {
 			})) as unknown as typeof globalThis.fetch;
 	}
 
-	it("複数の Issue を 1 枚の地図に出す", async () => {
+	/*
+	 * ページが地図に何件渡しているか。
+	 *
+	 * #113 の頃はマーカーが HTML に出ていたので数えられたが、MapLibre では
+	 * 地図の中身が WebGL のキャンバスになり見えない（#118）。**取得した
+	 * Issue が地図へ渡っているか**を、ページの描画から確かめられる範囲で見る。
+	 *
+	 * 実際に MapLibre へ何を渡すかは `map-options.test.ts` が
+	 * 値として検査している（件数・座標・行き先）
+	 */
+	it("取得した Issue を地図へ渡す", async () => {
 		process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
 		process.env.NEXT_PUBLIC_MAP_TILE_URL = TEMPLATE;
 		globalThis.fetch = stubListFetch(THREE_CITIES);
@@ -390,8 +318,13 @@ describe("/map ページ", () => {
 		const element = await MapPage({ searchParams: Promise.resolve({}) });
 		const html = renderToStaticMarkup(element);
 
-		const markers = [...html.matchAll(/class="issues-map-marker"/g)];
-		expect(markers.length).toBe(THREE_CITIES.length);
+		// 地図の箱が出ていること（配信元があるのに出ないなら、
+		// 地図が丸ごと落ちている）
+		expect(html).toMatch(/class="issues-map-view"/);
+		// 添える件数が取得件数と一致すること。ここが 0 なら、地図には
+		// 箱だけあって Issue が渡っていない
+		const caption = html.match(/class="issues-map-attribution">([^<]*)/)?.[1];
+		expect(caption).toContain(String(THREE_CITIES.length));
 	});
 
 	/*
@@ -510,37 +443,43 @@ describe("/map ページ", () => {
 
 	const labels = getUiMessages(DEFAULT_LOCALE).mapPage;
 
-	it("URL のズームと中心が実際の描画に反映される", async () => {
-		process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
-		process.env.NEXT_PUBLIC_MAP_TILE_URL = TEMPLATE;
-		globalThis.fetch = stubListFetch(THREE_CITIES);
-
-		// 自動で決まる視界（日本全体が入る縮尺）とは明らかに違う値を指定する
-		const element = await MapPage({
-			searchParams: Promise.resolve({
-				zoom: "12",
-				lat: String(TOKYO.latitude),
-				lng: String(TOKYO.longitude),
-			}),
+	/*
+	 * URL の zoom / lat / lng を読み捨てていないこと。
+	 *
+	 * 読み捨てると、**共有された URL を開いた人が別の場所を見る**。
+	 * リンクだけを見るテストではこれが素通りする（リンクは正しく組み立て
+	 * られるのに、開いた先で反映されない状態になる）。
+	 *
+	 * #113 の頃はタイルの番号から確かめていたが、MapLibre では地図の中身が
+	 * 見えない（#118）。ページが**視界を組み立てる過程**を、パンのリンクが
+	 * どこを起点にしているかで見る。指定した中心を無視して自動の視界を
+	 * 使っていれば、パンの行き先も自動の視界を起点にした値になる
+	 */
+	it("URL のズームと中心を読み捨てない", async () => {
+		const links = await renderControls({
+			zoom: "12",
+			lat: String(TOKYO.latitude),
+			lng: String(TOKYO.longitude),
 		});
-		const html = renderToStaticMarkup(element);
 
-		// 指定したズームのタイルを取りに行っていること。読み捨てていれば
-		// 自動の縮尺（3 都市が入る z6 前後）のタイルが並ぶ
-		const zooms = new Set(
-			[...html.matchAll(/tiles\.example\.com\/(\d+)\//g)].map((m) => m[1]),
-		);
-		expect(zooms, "URL のズームが描画に反映されていない").toEqual(
-			new Set(["12"]),
-		);
+		// 拡大は指定した 12 の 1 段上。自動の視界（3 都市が入る z5 前後）を
+		// 使っていれば、ここは 6 前後になる
+		expect(
+			Number(links.get(labels.zoomIn)?.searchParams.get("zoom")),
+			"URL のズームが読まれていない",
+		).toBe(13);
 
-		// 東京を中心にしたので、東京の Issue が表示領域の中央に来る
-		const marker = html.match(
-			/class="issues-map-marker" style="left:([\d.]+)px;top:([\d.]+)px" href="\/issues\/aaaa"/,
-		);
-		expect(marker, "東京のマーカーが描かれていない").not.toBeNull();
-		expect(Number(marker?.[1])).toBeCloseTo(MAP_VIEW_WIDTH / 2, 3);
-		expect(Number(marker?.[2])).toBeCloseTo(MAP_VIEW_HEIGHT / 2, 3);
+		// パンの起点が指定した中心であること。自動の視界の中心
+		// （3 都市の重心 = 東京より西・北寄り）からだとずれる
+		const north = links.get(labels.panNorth);
+		expect(
+			Number(north?.searchParams.get("lng")),
+			"URL の中心が読まれていない",
+		).toBeCloseTo(TOKYO.longitude, 3);
+		expect(
+			Number(north?.searchParams.get("lat")),
+			"北へ動かした緯度が中心から離れすぎている",
+		).toBeGreaterThan(TOKYO.latitude);
 	});
 
 	it("拡大は寄り、縮小は引く（向きを取り違えない）", async () => {
@@ -716,17 +655,21 @@ describe("/map ページ", () => {
 	});
 });
 
-describe("CSS と座標計算の寸法が一致している", () => {
+describe("CSS と視界の計算の寸法が一致している", () => {
 	/*
-	 * 表示領域の寸法は 2 箇所にある。tsx は `lib/map-view.ts` の定数を使って
-	 * 地点の px を算出し、実際の箱の大きさは CSS が決める。**この 2 つが
-	 * ずれると、地図は出るのにマーカーが実際の場所からずれる**という、
-	 * 見た目では気付きにくい壊れ方をする（マーカーは常に「それらしい」
-	 * 場所に出るため、ずれていても違和感が無い）。
+	 * 表示領域の寸法は 2 箇所にある。`lib/map-view.ts` の定数は
+	 * 「全件が収まる初期ズーム」の計算に使われ（`fitZoom`）、実際の箱の
+	 * 大きさは CSS が決める。
 	 *
-	 * インライン style で渡していた頃はずれようが無かったが、
-	 * 定数のインライン style を禁じる検査（#86）に合わせて CSS へ移した
-	 * ので、対応をここで縛る
+	 * #113 の頃は tsx がマーカーの px を算出していたので、ずれると
+	 * 「地図は出るのにマーカーが実際の場所からずれる」壊れ方だった。
+	 * #118 で MapLibre へ移り、マーカーの位置はライブラリが決めるように
+	 * なったので、その壊れ方は消えた。**代わりに残る食い違いは初期ズーム**で、
+	 * 定数が実寸より大きいと「全件が収まる」計算が甘くなり、
+	 * **端の Issue が最初から画面の外にいる**状態で開く。
+	 *
+	 * これは「地図は出るし、それらしく見える」ので目視では気付きにくい
+	 * （画面の外にあるものは、無いのと区別が付かない）。
 	 */
 	const css = readFileSync(
 		join(import.meta.dir, "../src/app/globals.css"),
@@ -743,7 +686,9 @@ describe("CSS と座標計算の寸法が一致している", () => {
 	}
 
 	it("表示領域の寸法が lib/map-view.ts の定数と一致する", () => {
-		expect(declaration(".issues-map-view", "width")).toBe(
+		// 幅は上限として指定している（狭い画面では地図の方を狭くする）。
+		// 初期ズームの計算はこの上限を前提にしているので、両者が一致する
+		expect(declaration(".issues-map-view", "max-width")).toBe(
 			`${MAP_VIEW_WIDTH}px`,
 		);
 		expect(declaration(".issues-map-view", "height")).toBe(
@@ -751,9 +696,20 @@ describe("CSS と座標計算の寸法が一致している", () => {
 		);
 	});
 
-	it("空白タイルの寸法がタイル 1 枚と一致する", () => {
-		expect(declaration(".issues-map-blank", "width")).toBe(`${TILE_SIZE}px`);
-		expect(declaration(".issues-map-blank", "height")).toBe(`${TILE_SIZE}px`);
+	/*
+	 * 箱に大きさが無いと、MapLibre は 0x0 のキャンバスを作って
+	 * **何も見えない**（例外は出ないので、テストもエラーにならない）。
+	 * 詳細ページの地図も同じ形なので、両方見る
+	 */
+	it("地図の箱に大きさが指定されている", () => {
+		expect(
+			declaration(".issue-map-view", "width"),
+			"詳細ページの地図に幅が無い",
+		).not.toBeNull();
+		expect(
+			declaration(".issue-map-view", "height"),
+			"詳細ページの地図に高さが無い",
+		).not.toBeNull();
 	});
 });
 
