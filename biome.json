@@ -6,7 +6,8 @@
 			"!**/dist/**",
 			"!**/.next/**",
 			"!**/.open-next/**",
-			"!**/.wrangler/**"
+			"!**/.wrangler/**",
+			"!**/public/maplibre/**"
 		]
 	},
 	"assist": {

@@ -73,6 +73,15 @@ export type CreateMapOptions = {
 let protocolRegistered = false;
 
 /**
+ * MapLibre のワーカーの置き場所。
+ *
+ * `scripts/copy-map-worker.ts` が `public/maplibre/` へ複製したものを指す。
+ * ワーカーは同じディレクトリの `maplibre-gl-shared.mjs` を相対で import するため、
+ * 2 つは必ず同じ場所に置かれている必要がある。
+ */
+const MAP_WORKER_URL = "/maplibre/maplibre-gl-worker.mjs";
+
+/**
  * ワーカーの置き場所を設定済みか。
  *
  * `setWorkerUrl` もグローバルへの設定なので、登録と同じく 1 回で済ませる。
@@ -97,23 +106,21 @@ export async function createMap(
 		// **ワーカーの置き場所を明示する。**
 		//
 		// MapLibre は自分のモジュールの隣に `maplibre-gl-worker.mjs` がある前提で
-		// `new URL("./maplibre-gl-worker.mjs", import.meta.url)` を組み立てる。
-		// ところがバンドラはファイル名にハッシュを付けて別の場所へ置くため、
-		// その URL は 404 になり、404 ページ（HTML）が返る。すると
-		// `new Worker(url, { type: "module" })` が MIME type の不一致で失敗する。
+		// URL を組み立てるが、バンドラはファイル名にハッシュを付けて別の場所へ
+		// 置くため、その URL は 404 になる。
 		//
-		// **失敗しても MapLibre の `error` には乗らない。** ワーカーが無いまま
+		// **バンドラに解決させる方法（`new URL(..., import.meta.url)`）では足りない。**
+		// ワーカー自体はハッシュ付きで出力されるが、その中にある
+		// `import "./maplibre-gl-shared.mjs"` までは解決されず、依存が 404 になる。
+		//
+		// そのため `scripts/copy-map-worker.ts` がワーカーと依存を素のまま
+		// `public/maplibre/` へ複製し、そこを指す（`dev` と `build` の前に走る）。
+		//
+		// **起動に失敗しても MapLibre の `error` には乗らない。** ワーカーが無いまま
 		// 地図は生成され、タイルを 1 枚も処理できずに描画が一度も走らない
 		// （canvas は完全に空のまま、背景レイヤの色すら出ない）。#127 はこれだった。
-		//
-		// `new URL(..., import.meta.url)` はバンドラが解決してハッシュ付きの
-		// 実際の URL に置き換える。ここを人が書いたパスにすると、ビルドの
-		// たびに変わるハッシュに追随できない。
 		if (!workerUrlConfigured) {
-			maplibre.setWorkerUrl(
-				new URL("maplibre-gl/dist/maplibre-gl-worker.mjs", import.meta.url)
-					.href,
-			);
+			maplibre.setWorkerUrl(MAP_WORKER_URL);
 			workerUrlConfigured = true;
 		}
 
