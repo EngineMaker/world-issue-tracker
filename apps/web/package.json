@@ -4,13 +4,14 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "next dev --turbopack",
-		"build": "next build",
+		"dev": "bun run copy:map-worker && next dev --turbopack",
+		"build": "bun run copy:map-worker && next build",
 		"start": "next start",
 		"check": "tsc --noEmit",
 		"lint": "biome check .",
 		"test": "bun test",
-		"deploy": "bun run scripts/check-clerk-keys.ts && opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+		"deploy": "bun run scripts/check-clerk-keys.ts && bun run copy:map-worker && opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+		"copy:map-worker": "bun run scripts/copy-map-worker.ts"
 	},
 	"dependencies": {
 		"@clerk/nextjs": "^6.39.0",

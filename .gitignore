@@ -26,3 +26,6 @@ dist/
 .idea/
 .vscode/
 *.swp
+
+# MapLibre のワーカーは scripts/copy-map-worker.ts が複製する（ライブラリ由来）
+apps/web/public/maplibre/
