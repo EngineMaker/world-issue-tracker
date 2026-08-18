@@ -46,9 +46,21 @@ export type PublicIssue = {
 	 * 匿名で起票されたかどうか（#88）。
 	 *
 	 * 真の場合は「匿名の方」として表示する。偽の場合は起票者が名乗ることを
-	 * 選んでいるが、**表示名そのものはこのレスポンスに含まれない**（#67）。
+	 * 選んでおり、表示名が `display_name` に入る。
 	 */
 	is_anonymous: boolean;
+
+	/**
+	 * 起票者の表示名（#67）。
+	 *
+	 * API が Clerk Backend API から引いた値。生の `user_id` は返らない。
+	 *
+	 * `null` は「匿名で起票された」「Clerk に表示名が登録されていない」
+	 * 「Clerk へ問い合わせられなかった」の 3 通りを表す。最初のものは
+	 * `is_anonymous` で見分けられ、残りはまとめて「名前未設定の方」になる
+	 * （文言の決定は `packages/shared` の `getAuthorLabel`）。
+	 */
+	display_name: string | null;
 
 	/**
 	 * 「私も困っている」の件数（#112）。
@@ -91,6 +103,7 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 		updated_at,
 		has_photo,
 		is_anonymous,
+		display_name,
 		reaction_count,
 	} = value;
 
@@ -131,6 +144,21 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 		return null;
 	}
 
+	// `display_name`（#67）も欠けていれば弾かず、null として読む。
+	// 表示名は「あると嬉しい」情報でしかなく、API 側がまだ返さない
+	// （デプロイのズレ）ときに一覧ごと失われるのは本末転倒。名前が
+	// 出ないだけで済ませる。
+	//
+	// 一方、文字列でも null でもない値は弾く。「無い」と「想定と違う形で
+	// 来た」は別で、後者を握り潰すと画面に想定外の値がそのまま出る。
+	if (
+		display_name !== undefined &&
+		display_name !== null &&
+		typeof display_name !== "string"
+	) {
+		return null;
+	}
+
 	// `reaction_count`（#112）も `has_photo` と同じ扱いで、欠けていれば
 	// 弾かずに 0 として読む。この値を返さない古い API に対して一覧ごと
 	// 失敗させると、件数という付加的な情報のために画面全体が失われる。
@@ -161,6 +189,7 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 		updated_at,
 		has_photo: has_photo ?? false,
 		is_anonymous: is_anonymous ?? true,
+		display_name: display_name ?? null,
 		reaction_count: reaction_count ?? 0,
 	};
 }

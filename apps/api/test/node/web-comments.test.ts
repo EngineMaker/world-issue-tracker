@@ -22,6 +22,11 @@ const VALID_COMMENT = {
 	issue_id: "i1",
 	body: "私も困っています",
 	created_at: "2026-01-01 00:00:00.000",
+	// 投稿者の表示（#67）。`is_anonymous` は「この投稿者を匿名として扱うか」で、
+	// 匿名で立てられた Issue の起票者本人のコメントだけ真になる。
+	// `display_name` は Clerk から引いた表示名（未設定・取得失敗なら null）
+	is_anonymous: false,
+	display_name: "花子 山田",
 };
 
 describe("validateCommentBody", () => {

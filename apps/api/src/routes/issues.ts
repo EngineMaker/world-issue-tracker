@@ -14,6 +14,7 @@ import {
 import { type Context, Hono } from "hono";
 import type { IssueRow } from "../db/rows";
 import type { Bindings } from "../index";
+import { fetchDisplayNames } from "../lib/display-names";
 import { requireAuth, viewerUserId } from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
 import { comments } from "./comments";
@@ -74,6 +75,22 @@ export const PUBLIC_ISSUE_COLUMNS = [
 const INTERNAL_PHOTO_COLUMNS = [
 	"photo_key",
 	"photo_content_type",
+] as const satisfies readonly (keyof IssueRow)[];
+
+/**
+ * 読み出しの SELECT には要るが、レスポンスには載せないカラム（#67）。
+ *
+ * `user_id` は起票者の表示名を Clerk から引くために読む。返すのは
+ * 引いた表示名（`display_name`）だけで、ID そのものは `toPublicIssue` が
+ * 落とす。「誰が書いたか」を伏せる方針（`PUBLIC_ISSUE_COLUMNS` の説明）は
+ * 変えていない。
+ *
+ * 書き込み系の RETURNING（`PUBLIC_SELECT`）には足していない。あちらは
+ * 作成・更新した本人へ返すもので、表示名を引く場面が無いため
+ * （`help-offers.ts` が POST のレスポンスに `display_name` を足していないのと同じ）。
+ */
+const INTERNAL_AUTHOR_COLUMNS = [
+	"user_id",
 ] as const satisfies readonly (keyof IssueRow)[];
 
 /**
@@ -200,7 +217,7 @@ const REACTION_COUNT_SQL =
  * export しているのはテストのため。実際に発行される句でクエリプランを
  * 確かめないと、副問い合わせが索引を使わなくなっても気付けない。
  */
-export const PUBLIC_SELECT_WITH_COUNTS = `${PUBLIC_ISSUE_COLUMNS.map((column) => `issues.${column}`).join(", ")}, ${INTERNAL_PHOTO_COLUMNS.map((column) => `issues.${column}`).join(", ")}, ${REACTION_COUNT_SQL}`;
+export const PUBLIC_SELECT_WITH_COUNTS = `${PUBLIC_ISSUE_COLUMNS.map((column) => `issues.${column}`).join(", ")}, ${INTERNAL_PHOTO_COLUMNS.map((column) => `issues.${column}`).join(", ")}, ${INTERNAL_AUTHOR_COLUMNS.map((column) => `issues.${column}`).join(", ")}, ${REACTION_COUNT_SQL}`;
 
 /**
  * DB の行から公開してよいカラムだけを取り出す。
@@ -231,6 +248,65 @@ export function toPublicIssue(row: IssueRowLike): PublicIssue {
 		// 「0 件」と「取れなかった」の区別が付かないレスポンスになる。
 		reaction_count: row.reaction_count ?? 0,
 	};
+}
+
+/**
+ * 読み出しで返る Issue。公開カラムに起票者の表示名を重ねたもの（#67）。
+ *
+ * `display_name` は `issues` テーブルのカラムではないので
+ * `PUBLIC_ISSUE_COLUMNS` には入れず、ここで足している
+ * （`help-offers.ts` の `PublicHelpOfferWithName` と同じ構造）。
+ *
+ * `null` は 3 通りを表す。「匿名で起票された」「Clerk に表示名が無い」
+ * 「Clerk へ問い合わせられなかった」。画面は前者を `is_anonymous` で
+ * 見分けて「匿名の方」と出し、後ろ 2 つはまとめて「名前未設定の方」になる
+ * （`packages/shared` の `getAuthorLabel`）。障害の内訳を返しても
+ * 利用者にできることが無く、可用性の状態を外へ漏らす必要も無い。
+ */
+type PublicIssueWithName = PublicIssue & {
+	display_name: string | null;
+};
+
+/**
+ * 行の一覧に起票者の表示名を重ねる（#67）。
+ *
+ * **匿名を選んだ起票者の `user_id` は Clerk へ渡さない。** 出さないだけで
+ * なく問い合わせもしないのは、匿名で書いた人の ID が「この一覧を開くたびに
+ * 引かれる ID」として外部サービス側に残るのを避けるため。
+ * `user_id` が NULL の行（認証導入前の legacy 行）も同じ扱いにする。
+ *
+ * 問い合わせは 1 回にまとめる（`fetchDisplayNames` が重複を落とし、
+ * 100 件ずつに分割する）。一覧の上限は 100 件なので通常 1 往復で収まる。
+ *
+ * 失敗しても throw しない性質は `fetchDisplayNames` 側が持っている。
+ * 引けなかった人は `display_name` が null になるだけで、一覧そのものは
+ * 必ず返る。表示名は「あると嬉しい」情報であって、Clerk が落ちている
+ * ことで困りごとの一覧が見えなくなってはいけない。
+ */
+async function withAuthorNames(
+	c: Context<IssuesEnv>,
+	rows: IssueRowLike[],
+): Promise<PublicIssueWithName[]> {
+	// 真偽値への変換を `toPublicIssue` に任せたいので、先に整形してから
+	// 元の行（`user_id` を持つ）と組にして持ち回る。
+	const shaped = rows.map((row) => ({ row, issue: toPublicIssue(row) }));
+
+	const namedUserIds = shaped
+		.filter(({ row, issue }) => !issue.is_anonymous && row.user_id)
+		.map(({ row }) => row.user_id as string);
+
+	const displayNames = await fetchDisplayNames(
+		c.env.CLERK_SECRET_KEY,
+		namedUserIds,
+	);
+
+	return shaped.map(({ row, issue }) => ({
+		...issue,
+		display_name:
+			issue.is_anonymous || !row.user_id
+				? null
+				: (displayNames.get(row.user_id) ?? null),
+	}));
 }
 
 /**
@@ -805,7 +881,9 @@ async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 	const lastRow = page.at(-1);
 
 	return c.json({
-		data: page.map(toPublicIssue),
+		// 起票者の表示名を Clerk からまとめて引いて重ねる（#67）。
+		// 匿名の Issue はここで除かれるため、Clerk へも渡らない。
+		data: await withAuthorNames(c, page),
 		// フィルタ後の総件数。ページング UI はこれを見て最終ページを決める。
 		total: countRow?.total ?? 0,
 		limit,
@@ -993,7 +1071,10 @@ issues.get("/:id", async (c) => {
 	if (!row) {
 		return c.json({ error: "Issue not found" }, 404);
 	}
-	return c.json(toPublicIssue(row));
+	// 一覧と同じ規則で表示名を重ねる（#67）。1 件でも経路を分けないのは、
+	// 詳細だけ匿名の出し分けが抜ける、といった食い違いを作らないため。
+	const [issue] = await withAuthorNames(c, [row]);
+	return c.json(issue);
 });
 
 /**

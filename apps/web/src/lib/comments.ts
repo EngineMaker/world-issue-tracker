@@ -15,6 +15,23 @@ export type PublicComment = {
 	issue_id: string;
 	body: string;
 	created_at: string;
+
+	/**
+	 * この投稿者を匿名として扱うか（#67）。
+	 *
+	 * コメント自体に匿名で投稿する経路は無いが、**匿名で立てられた Issue の
+	 * 起票者本人**のコメントだけ真になる。匿名で書いた人が自分の Issue に
+	 * 追記した瞬間だけ実名が出ると、その Issue で選んだ匿名が崩れるため。
+	 */
+	is_anonymous: boolean;
+
+	/**
+	 * 投稿者の表示名（#67）。
+	 *
+	 * API が Clerk Backend API から引いた値。生の `user_id` は返らない。
+	 * `null` の意味は `lib/issues.ts` の `PublicIssue.display_name` と同じ。
+	 */
+	display_name: string | null;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -30,14 +47,40 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function parsePublicComment(value: unknown): PublicComment | null {
 	if (!isRecord(value)) return null;
 
-	const { id, issue_id, body, created_at } = value;
+	const { id, issue_id, body, created_at, is_anonymous, display_name } = value;
 
 	if (typeof id !== "string") return null;
 	if (typeof issue_id !== "string") return null;
 	if (typeof body !== "string") return null;
 	if (typeof created_at !== "string") return null;
 
-	return { id, issue_id, body, created_at };
+	// `is_anonymous` / `display_name`（#67）は欠けていても弾かない。
+	// これらを返さない古い API に対してコメント欄ごと失敗させると、
+	// 投稿者名という付加的な情報のために会話そのものが読めなくなる。
+	//
+	// 倒す先は安全側（匿名）にする。「名乗っている」に倒すと、名乗る
+	// つもりのなかった人の名前を出しにいくことになり、取り返しが付かない
+	// （`parsePublicIssue` の `is_anonymous` と同じ判断）。
+	// 型が違う値は「無い」ではなく形の不一致として弾く。
+	if (is_anonymous !== undefined && typeof is_anonymous !== "boolean") {
+		return null;
+	}
+	if (
+		display_name !== undefined &&
+		display_name !== null &&
+		typeof display_name !== "string"
+	) {
+		return null;
+	}
+
+	return {
+		id,
+		issue_id,
+		body,
+		created_at,
+		is_anonymous: is_anonymous ?? true,
+		display_name: display_name ?? null,
+	};
 }
 
 /** `GET /issues/:id/comments` のレスポンスを検証する。合わなければ null。 */

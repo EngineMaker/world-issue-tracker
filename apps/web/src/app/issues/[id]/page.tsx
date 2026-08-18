@@ -1,5 +1,5 @@
 import {
-	getIssueAnonymityLabel,
+	getAuthorLabel,
 	getUiMessages,
 	ISSUE_SCOPE_LABELS,
 } from "@world-issue-tracker/shared";
@@ -85,6 +85,12 @@ export default async function IssueDetailPage({
 
 	const { issue } = result;
 	const scope = scopeLabels[issue.scope];
+	// 起票者の表示（#67）。同じ画面のメタ情報と「詳細」の 2 箇所に出るので、
+	// 値を一度だけ組み立てて両方で使う（片方だけ規則が変わるのを防ぐ）。
+	const authorLabel = getAuthorLabel(
+		{ isAnonymous: issue.is_anonymous, displayName: issue.display_name },
+		locale,
+	);
 
 	return (
 		<main>
@@ -117,7 +123,7 @@ export default async function IssueDetailPage({
 					{formatCreatedAt(issue.created_at, locale)}
 				</time>
 				{" / "}
-				<span>{getIssueAnonymityLabel(issue.is_anonymous, locale)}</span>
+				<span>{authorLabel}</span>
 			</p>
 
 			{/*
@@ -193,13 +199,12 @@ export default async function IssueDetailPage({
 					<dd>{issue.category ?? messages.issueDetail.categoryUnset}</dd>
 
 					{/*
-					  起票者（#88）。今は「名乗っているかどうか」しか出せない。
-					  実際の表示名は Clerk Backend API から引く必要があり、
-					  それは #67 の範囲。ここが「投稿者あり」のまま名前が
-					  出ないのは未完成なのではなく、意図した段階
+					  起票者（#88 / #67）。匿名を選んだ人は「匿名の方」のまま、
+					  名乗っている人は Clerk の表示名が出る。上のメタ情報と
+					  同じ値を出しており、同じ画面の 2 箇所で食い違わない
 					*/}
 					<dt>{messages.issueDetail.author}</dt>
-					<dd>{getIssueAnonymityLabel(issue.is_anonymous, locale)}</dd>
+					<dd>{authorLabel}</dd>
 
 					<dt>{messages.issueDetail.location}</dt>
 					{/*

@@ -1,8 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
-import {
-	getUiMessages,
-	ISSUE_ANONYMITY_LABELS,
-} from "@world-issue-tracker/shared";
+import { AUTHOR_LABELS, getUiMessages } from "@world-issue-tracker/shared";
 import { renderToStaticMarkup } from "react-dom/server";
 import { COMMENTS_SECTION_ID } from "../src/app/components/CommentSection";
 import type { HelpOfferSummary } from "../src/lib/help-offers";
@@ -273,7 +270,7 @@ describe("表示名が無い表明者の文言", () => {
 			const unnamed = getUiMessages(locale).helpOffer.unnamedOfferer;
 
 			expect(unnamed).not.toBe("");
-			expect(unnamed).not.toBe(ISSUE_ANONYMITY_LABELS[locale].anonymous);
+			expect(unnamed).not.toBe(AUTHOR_LABELS[locale].anonymous);
 		}
 	});
 });

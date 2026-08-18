@@ -251,39 +251,58 @@ export const ISSUE_STATUS_LABELS: Record<
 };
 
 /**
- * 起票者の名乗りに関する表示ラベル（#88）。
+ * 名前を出せない人の表示ラベル（#88 / #67）。
  *
- * 匿名かどうかは真偽値でしかないが、画面に `true` / `false` を出すわけには
- * いかないので、スコープやステータスと同じ流儀で対応表をここに置く。
- * 一覧・詳細で別々に文言を書くと、同じ Issue が画面ごとに違う顔になる（#59）。
+ * 画面に出る「人」は Issue の起票者・コメントの投稿者・「手伝います」の
+ * 表明者の 3 種類あり、いずれも名前が出せない場合がある。そこで別々の文言を
+ * 書くと、同じ人が画面ごとに違う顔になる（#59 と同じ理由）。対応表をここに
+ * 一つ置いて、3 箇所すべてがここを引く。
  *
- * 名乗っている側を「投稿者あり」という抽象的な表現に留めているのは、
- * 実際の表示名の取得（Clerk Backend API 連携）が #67 の範囲だから。
- * 名前が取れるようになったら、ここの `named` を実際の表示名に置き換える。
+ * `anonymous` と `unnamed` を別の言葉にしているのが要点。
  *
- * 「手伝います」の表明者だけは #108 で表示名が出るようになっている。
- * 名前が取れなかった場合の文言は `UI_MESSAGES[locale].helpOffer.unnamedOfferer`
- * で、ここの `anonymous` とは意図的に別の言葉にしている（理由はそちらのコメント）。
+ * - `anonymous` — 本人が「名前を出さない」を選んだ（#88 の `is_anonymous`）
+ * - `unnamed` — 本人は名乗ったが、Clerk に表示名が登録されていない。
+ *   Clerk への問い合わせ自体が失敗したときもこちらになる（#67 の論点 2）
+ *
+ * 後者を「匿名の方」に倒すと、名乗ることを選んだ人の意思を握り潰す。
+ * 逆に前者を「名前未設定の方」と書くと、匿名を選んだ事実が消える。
  */
-export const ISSUE_ANONYMITY_LABELS: Record<
+export const AUTHOR_LABELS: Record<
 	Locale,
-	{ anonymous: string; named: string }
+	{ anonymous: string; unnamed: string }
 > = {
 	ja: {
 		anonymous: "匿名の方",
-		named: "投稿者あり",
+		unnamed: "名前未設定の方",
 	},
 	en: {
 		anonymous: "Anonymous",
-		named: "Named author",
+		unnamed: "Name not set",
 	},
 };
 
-/** 匿名かどうかの表示ラベルを引く。ロケール省略時は既定ロケール */
-export const getIssueAnonymityLabel = (
-	isAnonymous: boolean,
+/**
+ * 画面に出す人の名前を決める（#67）。
+ *
+ * 3 箇所（起票者・コメント投稿者・表明者）で同じ規則を使うため、
+ * 出し分けの判断そのものをここに置く。呼び出し側で `??` を書き分けると、
+ * 匿名を選んだ人が別の画面で実名になる事故がいつでも起きうる。
+ *
+ * 優先順位は「匿名の選択 → 表示名 → 名前未設定」。匿名が最優先なのは、
+ * 一度表示したものを後から匿名化しても既に見られた事実は消せないため。
+ *
+ * @param author.isAnonymous 本人が匿名を選んだか
+ * @param author.displayName Clerk から引いた表示名。未設定・取得失敗なら null
+ */
+export const getAuthorLabel = (
+	author: { isAnonymous: boolean; displayName: string | null },
 	locale: Locale = DEFAULT_LOCALE,
-) => ISSUE_ANONYMITY_LABELS[locale][isAnonymous ? "anonymous" : "named"];
+): string => {
+	if (author.isAnonymous) {
+		return AUTHOR_LABELS[locale].anonymous;
+	}
+	return author.displayName ?? AUTHOR_LABELS[locale].unnamed;
+};
 
 /** スコープの表示ラベルを引く。ロケール省略時は既定ロケール */
 export const getIssueScopeLabel = (
@@ -587,7 +606,7 @@ const JA_UI_MESSAGES = {
 		status: "ステータス",
 		category: "カテゴリ",
 		categoryUnset: "未設定",
-		/** 起票者（#88）。値は `getIssueAnonymityLabel` が出す */
+		/** 起票者（#88）。値は `getAuthorLabel` が出す（#67） */
 		author: "起票者",
 		location: "場所",
 		/** 地図の下に残す座標の数値表示 */
@@ -648,7 +667,7 @@ const JA_UI_MESSAGES = {
 		/**
 		 * 表示名が取れなかった表明者の表記（#108）。
 		 *
-		 * 「匿名の方」（`ISSUE_ANONYMITY_LABELS`）とは別の文言にしている。
+		 * 「匿名の方」（`AUTHOR_LABELS.anonymous`）とは別の文言にしている。
 		 * 手伝いますの表明は本人が自分の意思で名乗り出る行為なので、
 		 * 「名乗ったが Clerk に名前が登録されていない」状態を
 		 * 「匿名を選んだ」と同じ言葉で書くと、本人の意思を取り違える。
@@ -656,8 +675,12 @@ const JA_UI_MESSAGES = {
 		 * Clerk への問い合わせ自体が失敗したときもこの文言になる。
 		 * 利用者から見ればどちらも「名前が分からない人が手を挙げている」で、
 		 * 障害の内訳を画面で説明しても次の行動が変わらないため。
+		 *
+		 * 文字列を直接書かず `AUTHOR_LABELS` を引いているのは、同じ意味の
+		 * 表記が起票者・コメント投稿者にも要るようになったため（#67）。
+		 * 3 箇所で別々に書き換えられる状態にしておくと、いつか食い違う。
 		 */
-		unnamedOfferer: "名前未設定の方",
+		unnamedOfferer: AUTHOR_LABELS.ja.unnamed,
 		/**
 		 * 表明した直後に出す、次の一手（#114）。
 		 *
@@ -944,7 +967,7 @@ const EN_UI_MESSAGES: UiMessages = {
 		status: "Status",
 		category: "Category",
 		categoryUnset: "Not set",
-		/** 起票者（#88）。値は `getIssueAnonymityLabel` が出す */
+		/** 起票者（#88）。値は `getAuthorLabel` が出す（#67） */
 		author: "Posted by",
 		location: "Location",
 		coordinates: (latitude: number, longitude: number) =>
@@ -993,7 +1016,8 @@ const EN_UI_MESSAGES: UiMessages = {
 		youOffered: " — you have raised your hand for this issue",
 		offerersHeading: "People who offered",
 		you: "You",
-		unnamedOfferer: "Name not set",
+		/** 日本語側と同じく `AUTHOR_LABELS` から引く（#67）。 */
+		unnamedOfferer: AUTHOR_LABELS.en.unnamed,
 		nextStep: "Tell everyone how you can help, in the comments below.",
 		nextStepLink: "Go to comments",
 	},
