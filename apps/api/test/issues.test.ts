@@ -2139,10 +2139,16 @@ describe("Issues CRUD", () => {
 			const res = await app.request("/issues/mine", {}, env);
 			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
-			// テーブルの公開カラムに加えて、行に無い派生フィールド `has_photo`
-			// （写真の有無、#65）が載る。公開一覧と同じ形であることが要点
+			// テーブルの公開カラムに加えて、行に無い派生フィールド
+			// `has_photo`（写真の有無、#65）と `reaction_count`
+			// （「私も困っている」の件数、#112）が載る。
+			// 公開一覧と同じ形であることが要点
 			expect(Object.keys(body.data[0]).sort()).toEqual(
-				[...PUBLIC_ISSUE_COLUMNS_FOR_TEST, "has_photo"].sort(),
+				[
+					...PUBLIC_ISSUE_COLUMNS_FOR_TEST,
+					"has_photo",
+					"reaction_count",
+				].sort(),
 			);
 		});
 
@@ -2195,6 +2201,10 @@ describe("Issues CRUD", () => {
 			"has_photo",
 			// 匿名で起票されたかどうか（#88）。真偽値だけで、起票者は載らない。
 			"is_anonymous",
+			// 「私も困っている」の件数（#112）。数だけで、誰が押したかは載らない。
+			// `issues` テーブルのカラムではなく、読み出しの SELECT に足した
+			// 相関副問い合わせが数えた値
+			"reaction_count",
 		];
 
 		beforeEach(async () => {
@@ -2506,7 +2516,13 @@ describe("Issues CRUD", () => {
 				// `has_photo` は行に無い派生フィールドなのでここには現れない
 				expect(Object.keys(row ?? {}).sort()).toEqual(
 					[
-						...PUBLIC_KEYS.filter((key) => key !== "has_photo"),
+						// `reaction_count`（#112）も行に無い派生フィールド。
+						// こちらは読み出し用の `PUBLIC_SELECT_WITH_COUNTS` が
+						// 相関副問い合わせで足すもので、書き込み系の RETURNING で
+						// 使う `PUBLIC_SELECT` には現れない
+						...PUBLIC_KEYS.filter(
+							(key) => key !== "has_photo" && key !== "reaction_count",
+						),
 						"photo_key",
 						"photo_content_type",
 					].sort(),

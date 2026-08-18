@@ -1747,7 +1747,14 @@ main p {
 }
 
 /* 「手伝います」の操作と、その補足。折り返しても縦位置が揃うようにする */
-.help-offer-actions {
+/*
+  「手伝います」（#61）と「私も困っている」（#112）のボタン行。
+  どちらもボタンと補足の一言が並ぶ同じ構造なので、指定も共通にする。
+  クラスを分けているのは、片方だけ調整したくなったときに
+  もう片方を巻き込まないため
+*/
+.help-offer-actions,
+.reaction-actions {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;

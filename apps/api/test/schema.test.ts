@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { PUBLIC_HELP_OFFER_COLUMNS } from "../src/routes/help-offers";
 import { PUBLIC_ISSUE_COLUMNS } from "../src/routes/issues";
+import { PUBLIC_REACTION_COLUMNS } from "../src/routes/reactions";
 import { applyMigrations } from "./helpers/migrate";
 
 /**
@@ -405,6 +406,83 @@ describe("Test database schema", () => {
 					"INSERT INTO help_offers (issue_id, user_id) VALUES (?, ?)",
 				)
 					.bind("schema-test-issue", "user_dup")
+					.run(),
+			).rejects.toThrow(/UNIQUE constraint failed/);
+		});
+	});
+
+	// `reactions`（0009）にも同じ検査を掛ける（#112）。
+	//
+	// このテーブルは `help_offers` と形が同じだが、公開判断が逆になる
+	// （`user_id` を公開しない）。その違いを守るのがここの主な役目。
+	describe("reactions", () => {
+		/** `reactions` テーブルのカラム名を宣言順に返す。 */
+		async function reactionColumns(): Promise<string[]> {
+			const { results } = await env.DB.prepare(
+				"PRAGMA table_info(reactions)",
+			).all<{ name: string }>();
+			return results.map((row) => row.name);
+		}
+
+		it("has the columns the migration defines, in migration order", async () => {
+			expect(await reactionColumns()).toEqual([
+				"id",
+				"issue_id",
+				"user_id",
+				"created_at",
+			]);
+		});
+
+		it("has every index the migration defines", async () => {
+			const { results } = await env.DB.prepare(
+				"SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'reactions' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+			).all<{ name: string }>();
+
+			expect(results.map((row) => row.name)).toEqual([
+				// 0009_create_reactions.sql — 「自分が反応した Issue」を引く経路用
+				"idx_reactions_user_id",
+			]);
+		});
+
+		// `help_offers` と違い、`user_id` は内部側に入る。
+		//
+		// 「私も困っている」は生活圏の露出につながりえるため、誰が押したかは
+		// 公開しない（判断の理由は `routes/reactions.ts` のコメント）。
+		// この分類は型では守れない（`user_id` は実在するカラムなので
+		// `Pick` の制約を満たしてしまう）ので、ここが唯一の見張りになる。
+		it("classifies every column as either public or explicitly internal", async () => {
+			/** 公開してはいけないカラム。追加したら意図的にここへ足す。 */
+			const INTERNAL_COLUMNS = ["issue_id", "user_id"];
+
+			expect(await reactionColumns()).toEqual(
+				expect.arrayContaining([...PUBLIC_REACTION_COLUMNS]),
+			);
+			expect([...(await reactionColumns())].sort()).toEqual(
+				[...PUBLIC_REACTION_COLUMNS, ...INTERNAL_COLUMNS].sort(),
+			);
+		});
+
+		// 同一ユーザーの二重の反応を DB 側で止めていること。
+		//
+		// アプリ側は `ON CONFLICT` で冪等に倒しているため、制約が消えても
+		// 通常の経路では気づけない。ここは制約そのものを直接叩く。
+		it("enforces the unique constraint on (issue_id, user_id)", async () => {
+			await env.DB.prepare(
+				"INSERT INTO issues (id, title, description, scope, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?)",
+			)
+				.bind("schema-test-reaction-issue", "t", "d", "community", 0, 0)
+				.run();
+			await env.DB.prepare(
+				"INSERT INTO reactions (issue_id, user_id) VALUES (?, ?)",
+			)
+				.bind("schema-test-reaction-issue", "user_dup")
+				.run();
+
+			await expect(
+				env.DB.prepare(
+					"INSERT INTO reactions (issue_id, user_id) VALUES (?, ?)",
+				)
+					.bind("schema-test-reaction-issue", "user_dup")
 					.run(),
 			).rejects.toThrow(/UNIQUE constraint failed/);
 		});

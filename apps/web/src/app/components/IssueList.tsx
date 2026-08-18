@@ -57,6 +57,7 @@ export function IssueCard({
 	locale?: Locale;
 }) {
 	const scopes = ISSUE_SCOPE_LABELS[locale];
+	const messages = getUiMessages(locale);
 
 	return (
 		<li className="issue-card">
@@ -121,6 +122,20 @@ export function IssueCard({
 				*/}
 				{" / "}
 				<span>{getIssueAnonymityLabel(issue.is_anonymous, locale)}</span>
+				{/*
+				  「私も困っている」の件数（#112）。0 件のときは出さない。
+				  時系列に並んだだけの一覧に「どれが多くの人に効いているか」という
+				  重みを付けるのが狙いで、0 は重みを持たないうえ、全件に「0」が
+				  並ぶと数のある行が埋もれる。
+
+				  誰が押したかは出さない（API がそもそも返さない）。ここに出るのは
+				  数だけで、一覧から個人が読み取れることはない
+				*/}
+				{issue.reaction_count > 0 ? (
+					<span className="issue-meta-item">
+						{messages.reaction.cardCount(issue.reaction_count)}
+					</span>
+				) : null}
 			</p>
 		</li>
 	);

@@ -49,6 +49,16 @@ export type PublicIssue = {
 	 * 選んでいるが、**表示名そのものはこのレスポンスに含まれない**（#67）。
 	 */
 	is_anonymous: boolean;
+
+	/**
+	 * 「私も困っている」の件数（#112）。
+	 *
+	 * 一覧のカードに出す。誰が押したかは含まれない（API がそもそも
+	 * 返さない。理由は `apps/api/src/routes/reactions.ts`）。
+	 * 閲覧者自身が押したかどうかもここには無く、詳細ページが
+	 * `lib/reactions.ts` 経由で別に取る。
+	 */
+	reaction_count: number;
 };
 
 const SCOPES: readonly string[] = IssueScope.options;
@@ -81,6 +91,7 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 		updated_at,
 		has_photo,
 		is_anonymous,
+		reaction_count,
 	} = value;
 
 	if (typeof id !== "string") return null;
@@ -120,6 +131,23 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 		return null;
 	}
 
+	// `reaction_count`（#112）も `has_photo` と同じ扱いで、欠けていれば
+	// 弾かずに 0 として読む。この値を返さない古い API に対して一覧ごと
+	// 失敗させると、件数という付加的な情報のために画面全体が失われる。
+	//
+	// 値が入っているのに数値でない・有限でない場合は弾く。件数として
+	// 描画できない値をそのまま渡すと "NaN 人" のような表示になる。
+	// 負の数もここで落とす。件数が負になる経路は無く、来たなら
+	// 想定と違うものが返っている。
+	if (
+		reaction_count !== undefined &&
+		(typeof reaction_count !== "number" ||
+			!Number.isFinite(reaction_count) ||
+			reaction_count < 0)
+	) {
+		return null;
+	}
+
 	return {
 		id,
 		title,
@@ -133,6 +161,7 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 		updated_at,
 		has_photo: has_photo ?? false,
 		is_anonymous: is_anonymous ?? true,
+		reaction_count: reaction_count ?? 0,
 	};
 }
 

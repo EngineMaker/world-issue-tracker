@@ -18,6 +18,7 @@ import { requireAuth, viewerUserId } from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
 import { comments } from "./comments";
 import { helpOffers } from "./help-offers";
+import { reactions } from "./reactions";
 
 /**
  * このルーターが動く環境。
@@ -113,6 +114,23 @@ type PublicIssue = Omit<
 	has_photo: boolean;
 
 	/**
+	 * この Issue に付いた「私も困っている」の件数（#112）。
+	 *
+	 * 一覧のカードに出すために行と一緒に返す。件数だけを別経路
+	 * （`GET /issues/:id/reactions`）で引くと、一覧の 1 ページ分だけ
+	 * 往復が要り、ページを開くたびに件数分のリクエストが飛ぶ。
+	 *
+	 * 素の列ではなく相関副問い合わせで数えた派生フィールドなので、
+	 * `PUBLIC_ISSUE_COLUMNS`（＝ issues テーブルの公開カラム）には入れない。
+	 * `has_photo` と同じ扱い。
+	 *
+	 * 誰が押したかは含まない。数だけを出すのがこの機能の決めごと
+	 * （`routes/reactions.ts` 参照）。閲覧者自身が押したかどうかも
+	 * ここには載せず、詳細ページが `/reactions` から取る。
+	 */
+	reaction_count: number;
+
+	/**
 	 * 匿名で起票されたか（#88）。
 	 *
 	 * `IssueRow` 側は SQLite の生の姿である `number`（0/1）だが、
@@ -136,7 +154,16 @@ type PublicIssue = Omit<
  * この関数が組み立てるものであって、入力の行には無い。
  */
 type IssueRowLike = Pick<IssueRow, (typeof PUBLIC_ISSUE_COLUMNS)[number]> &
-	Partial<IssueRow>;
+	Partial<IssueRow> & {
+		/**
+		 * 相関副問い合わせで数えた反応の件数（#112）。`issues` テーブルの
+		 * カラムではないので `IssueRow` には無く、ここで足している。
+		 *
+		 * 任意なのは、この列を選んでいない SELECT（POST / PATCH / DELETE の
+		 * RETURNING）もこの関数を通るため。付いていなければ 0 として返す。
+		 */
+		reaction_count?: number;
+	};
 
 /**
  * レスポンスに載せるカラムだけを並べた SELECT / RETURNING 句。
@@ -149,6 +176,28 @@ export const PUBLIC_SELECT = [
 	...PUBLIC_ISSUE_COLUMNS,
 	...INTERNAL_PHOTO_COLUMNS,
 ].join(", ");
+
+/**
+ * 反応の件数（#112）を数える相関副問い合わせ。
+ *
+ * 行を読む SELECT に足して、Issue 1 件ごとの件数を一緒に取る。
+ * `reactions` の UNIQUE (issue_id, user_id) が張る索引の先頭列が
+ * `issue_id` なので、この集計はその索引で引ける。
+ *
+ * 反応が 1 件も無ければ COUNT は 0 を返す（NULL にはならない）ので、
+ * 外側で結合するより値の形が安定する。
+ */
+const REACTION_COUNT_SQL =
+	"(SELECT COUNT(*) FROM reactions WHERE reactions.issue_id = issues.id) AS reaction_count";
+
+/**
+ * 行の読み出し（GET）で使う SELECT 句。公開カラムに反応の件数を足したもの。
+ *
+ * 書き込み系の RETURNING では使わない。RETURNING は更新した行そのものしか
+ * 見ないため副問い合わせを書けるとは限らず、そこで件数が要る場面も無い
+ * （作った直後・消した直後の反応は 0 件、または画面が使わない）。
+ */
+const PUBLIC_SELECT_WITH_COUNTS = `${PUBLIC_ISSUE_COLUMNS.map((column) => `issues.${column}`).join(", ")}, ${INTERNAL_PHOTO_COLUMNS.map((column) => `issues.${column}`).join(", ")}, ${REACTION_COUNT_SQL}`;
 
 /**
  * DB の行から公開してよいカラムだけを取り出す。
@@ -172,8 +221,12 @@ export function toPublicIssue(row: IssueRowLike): PublicIssue {
 			]),
 			// 真偽値へ直したカラムがあるので、`IssueRow` そのままの形にはならない。
 			// 変換後の形（＝レスポンスの形）で受ける
-		) as Omit<PublicIssue, "has_photo">),
+		) as Omit<PublicIssue, "has_photo" | "reaction_count">),
 		has_photo: Boolean(row.photo_key),
+		// 件数を選んでいない SELECT（書き込み系の RETURNING）から来た行は
+		// 0 にする。undefined をそのまま返すと JSON からキーごと消え、
+		// 「0 件」と「取れなかった」の区別が付かないレスポンスになる。
+		reaction_count: row.reaction_count ?? 0,
 	};
 }
 
@@ -739,7 +792,7 @@ async function listIssues(c: Context<IssuesEnv>, ownerUserId?: string) {
 	// `direction` は enum から導いた "ASC" / "DESC" のリテラルで、
 	// 外部入力がそのまま SQL に入ることはない（スキーマを通らない値は 400）。
 	const rows = await c.env.DB.prepare(
-		`SELECT ${PUBLIC_SELECT} FROM issues ${where} ORDER BY created_at ${direction}, id ${direction} LIMIT ? OFFSET ?`,
+		`SELECT ${PUBLIC_SELECT_WITH_COUNTS} FROM issues ${where} ORDER BY created_at ${direction}, id ${direction} LIMIT ? OFFSET ?`,
 	)
 		.bind(...binds, limit + 1, offset)
 		.all<IssueRowLike>();
@@ -809,6 +862,18 @@ issues.use("/:id/help-offers", async (c, next) => {
 	await next();
 });
 issues.route("/:id/help-offers", helpOffers);
+
+/**
+ * 「私も困っている」の表明（`/issues/:id/reactions`）を子ルーターに委譲する（#112）。
+ *
+ * 委譲の仕方は上の `help-offers` と同じ（`route()` がパスパラメータを
+ * 引き継がないため、mount の手前で `:id` をコンテキストに入れる）。
+ */
+issues.use("/:id/reactions", async (c, next) => {
+	c.set("issueId", c.req.param("id") ?? "");
+	await next();
+});
+issues.route("/:id/reactions", reactions);
 
 /**
  * GET /issues/:id/viewer — 閲覧者とこの Issue の関係 (public)
@@ -917,7 +982,7 @@ issues.get("/:id/photo", async (c) => {
 issues.get("/:id", async (c) => {
 	const id = c.req.param("id");
 	const row = await c.env.DB.prepare(
-		`SELECT ${PUBLIC_SELECT} FROM issues WHERE id = ?`,
+		`SELECT ${PUBLIC_SELECT_WITH_COUNTS} FROM issues WHERE id = ?`,
 	)
 		.bind(id)
 		.first<IssueRowLike>();
