@@ -11,6 +11,8 @@
  */
 
 import { describe, expect, it, mock } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { getUiMessages, Locale } from "@world-issue-tracker/shared";
 import { renderToStaticMarkup } from "react-dom/server";
 import { type PublicComment, parsePublicComment } from "../src/lib/comments";
@@ -134,5 +136,54 @@ describe("コメントの削除ボタン", () => {
 
 		expect(countDeleteButtons(markup, "en")).toBe(1);
 		expect(countDeleteButtons(markup, "ja")).toBe(0);
+	});
+});
+
+/**
+ * 画面と API の結線。
+ *
+ * 本来はボタンを押して `deleteComment` が呼ばれることを確かめたいが、
+ * web にはクリックや `useEffect` を走らせられるテスト基盤が無い
+ * （DOM 環境も testing-library も依存に無い）。`renderToStaticMarkup` は
+ * 初期描画の文字列しか出さないので、**「ボタンは出ているが押しても何も
+ * 起きない」「取り直しが消えている」を描画結果からは見分けられない。**
+ *
+ * どちらも起きると Issue #99 が未解決の状態に戻る（消したつもりで消えて
+ * いない／自分のコメントにも削除ボタンが出ない）のに、テストは緑のままに
+ * なる。実際にレビューで作った変異体（`deleteComment` の呼び出しを消す、
+ * `useEffect` を丸ごと無効化する）は web の 777 件すべてを通過した。
+ *
+ * そこで、せめて経路がソース上に在ることを確かめる。`style-coverage.test.tsx`
+ * が「値が正しいか」ではなく「そもそも書かれているか」を静的に見ているのと
+ * 同じ考え方。実装の書き方を変えたらここも直す必要があるが、**黙って経路が
+ * 消えるよりは、書き換えのたびに目を通す方がよい。**
+ */
+describe("画面と API の結線（ソース上の確認）", () => {
+	const source = readFileSync(
+		join(import.meta.dir, "../src/app/components/CommentSection.tsx"),
+		"utf8",
+	);
+
+	it("削除の確定ボタンが handleDelete を呼ぶ", () => {
+		expect(source).toContain("onClick={() => handleDelete(comment.id)}");
+	});
+
+	it("handleDelete が API の deleteComment を呼ぶ", () => {
+		// ここが消えると、画面上はカードが減るのに DB には残る
+		expect(source).toMatch(/await deleteComment\(\s*issueId,\s*commentId,/);
+	});
+
+	it("削除に成功した後に手元の一覧から取り除く", () => {
+		expect(source).toMatch(
+			/current\.filter\(\(comment\) => comment\.id !== commentId\)/,
+		);
+	});
+
+	it("マウント後に viewer_is_author を取り直す", () => {
+		// 詳細ページ（Server Component）はトークンを渡さないため、SSR の一覧は
+		// 全件 false で返る。この取り直しが本番で削除ボタンが出る唯一の経路
+		expect(source).toContain("useEffect(");
+		expect(source).toMatch(/fetchComments\(issueId, \{\s*token:/);
+		expect(source).toMatch(/applyViewerFlags\(current, result\.comments\)/);
 	});
 });

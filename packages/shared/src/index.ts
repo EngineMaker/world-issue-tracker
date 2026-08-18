@@ -1061,7 +1061,9 @@ const EN_UI_MESSAGES: UiMessages = {
 		/** コメントの削除（#99）。日本語側のコメントを参照。 */
 		delete: "Delete",
 		deleteConfirm: "Delete this comment? This cannot be undone.",
-		deleteConfirmYes: "Delete",
+		// 確認の前後でボタンの文字が変わるようにする。どちらも "Delete" だと、
+		// 押したのに何も起きていないように見える（日本語側は「削除」→「削除する」）
+		deleteConfirmYes: "Yes, delete",
 		deleteConfirmCancel: "Keep it",
 		deleting: "Deleting…",
 		deleteFailed: "Could not delete the comment. Please try again later.",

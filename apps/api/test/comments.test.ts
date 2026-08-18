@@ -116,6 +116,58 @@ async function commentExists(id: string): Promise<boolean> {
 	return row !== null;
 }
 
+/**
+ * 所有者チェックの直後にコメントの持ち主が変わる `env` を作る。
+ *
+ * 削除の二段構えのうち **2 段目（DELETE 文の `AND user_id = ?`）だけ**を
+ * 検証するために要る。通常の経路では 1 段目のチェックが先に弾いてしまい、
+ * 2 段目が抜けていても他のテストは全部通ってしまう。
+ *
+ * 実装が投げる `SELECT user_id FROM comments ...`（＝チェック）の結果が
+ * 返った直後に、その行の `user_id` を別人へ書き換える。チェックは
+ * 「自分のもの」と判断して先へ進み、DELETE がその後の行に当たる。
+ *
+ * 差し替えるのは `env` のコピーだけで、`env.DB` 自体には触らない
+ * （他のテストへ漏らさないため）。ラップするのはこの 1 本の SELECT が
+ * 使うメソッド（`bind` → `first`）に限る。
+ */
+function envWhereOwnerChangesAfterCheck(
+	commentId: string,
+	newOwner: string,
+): typeof env {
+	const changeOwner = () =>
+		env.DB.prepare("UPDATE comments SET user_id = ? WHERE id = ?")
+			.bind(newOwner, commentId)
+			.run();
+
+	return {
+		...env,
+		DB: {
+			...env.DB,
+			prepare(sql: string) {
+				const stmt = env.DB.prepare(sql);
+				if (!sql.startsWith("SELECT user_id FROM comments")) {
+					return stmt;
+				}
+				return {
+					bind(...args: unknown[]) {
+						const bound = stmt.bind(...args);
+						return {
+							async first<T>(): Promise<T | null> {
+								const row = await bound.first<T>();
+								await changeOwner();
+								return row;
+							},
+						};
+					},
+					// biome-ignore lint/suspicious/noExplicitAny: このステートメントで実装が呼ぶのは bind → first だけ。残りは持たせない
+				} as any;
+			},
+			// biome-ignore lint/suspicious/noExplicitAny: D1Database のうち差し替えるのは prepare だけ
+		} as any,
+	};
+}
+
 const ISSUE_ID = "issue-0001";
 
 describe("Comments", () => {
@@ -590,6 +642,27 @@ describe("Comments", () => {
 		it("二度目の削除は 404 を返す", async () => {
 			expect((await deleteComment(ISSUE_ID, "mine")).status).toBe(204);
 			expect((await deleteComment(ISSUE_ID, "mine")).status).toBe(404);
+		});
+
+		it("所有者チェックの後に行が他人のものへ変わったら削除しない", async () => {
+			// 削除は二段構えになっている（`DELETE /issues/:id` と同じ）。
+			// 1. 所有者チェックで 404 / 403 を返す
+			// 2. DELETE 文自体にも `AND user_id = ?` を入れる
+			//
+			// 通常の経路では 1 が先に弾くので、2 が無くても他のテストはすべて通る。
+			// **2 が効いていることは、1 を通り抜けた後に行が変わる状況でしか
+			// 確かめられない。** その状況を、チェックの SELECT が返った直後に
+			// 持ち主を差し替えることで作る。
+			const res = await app.request(
+				`/issues/${ISSUE_ID}/comments/mine`,
+				{ method: "DELETE", headers: { Origin: ALLOWED_ORIGIN } },
+				envWhereOwnerChangesAfterCheck("mine", "other-user"),
+			);
+
+			// DELETE 文の条件に投稿者が入っていれば 0 行になり、404 で返る。
+			// 条件が抜けていると 204 を返して他人のコメントを消してしまう
+			expect(res.status).toBe(404);
+			expect(await commentExists("mine")).toBe(true);
 		});
 	});
 
