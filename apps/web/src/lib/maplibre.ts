@@ -116,8 +116,41 @@ export async function createMap(
 		// 下の try/catch（コンストラクタしか守れない）には届かない。
 		// 購読しないと「地図は白いがコンソールに何も出ない」状態になり、
 		// 配信元・CORS・スタイルのどれが原因かを切り分ける手がかりが消える。
+		//
+		// **どこで失敗したかまで出す理由。** `error` だけでは
+		// 「Failed to fetch」のような一行しか残らず、どのソースの・どの URL が
+		// 落ちたのかが分からない。PMTiles は 1 つの URL に Range で何度も
+		// 取りに行くので、失敗した資源を特定できないと配信元の設定と
+		// スタイルの誤りを切り分けられない。
 		map.on("error", (event) => {
-			console.error("[map] 読み込みに失敗しました", event.error ?? event);
+			const error = event.error;
+			// AJAXError は status / url を持つ。それ以外は message だけのことが多い
+			const detail: Record<string, unknown> = {
+				message: error?.message ?? String(error),
+			};
+			// `sourceId` はタイル読み込みの失敗にだけ付く。型には出ていないので
+			// 取り出せたときだけ載せる
+			const sourceId = (event as unknown as Record<string, unknown>).sourceId;
+			if (typeof sourceId === "string") detail.sourceId = sourceId;
+			for (const key of ["status", "statusText", "url"] as const) {
+				const value = (
+					error as unknown as Record<string, unknown> | undefined
+				)?.[key];
+				if (value !== undefined) detail[key] = value;
+			}
+			console.error("[map] 読み込みに失敗しました", detail, error);
+		});
+
+		// **エラーが出ないまま地図が白いことがある。** その場合 `error` は
+		// 一度も発火しないので、上のログだけでは「何も起きていない」と
+		// 区別がつかない。ソースが読み終わったかどうかを併せて残しておくと、
+		// 「取りに行っていない」のか「取ったが描けない」のかを分けられる。
+		map.on("sourcedata", (event) => {
+			if (event.sourceId !== "basemap") return;
+			console.info("[map] ソースの状態", {
+				loaded: event.isSourceLoaded,
+				dataType: event.dataType,
+			});
 		});
 
 		if (options.interactive !== false) {
