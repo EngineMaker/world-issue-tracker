@@ -81,6 +81,17 @@ let protocolRegistered = false;
  */
 const MAP_WORKER_URL = "/maplibre/maplibre-gl-worker.mjs";
 
+/** スタイルの中でベースマップのソースに付ける名前（`lib/map-style.ts` と揃える）。 */
+const BASEMAP_SOURCE_ID = "basemap";
+
+/**
+ * タイルの読み込みが止まったとみなすまでの時間。
+ *
+ * 実測では数百 ms で読み終わる。長めに取っているのは、遅い回線を
+ * 異常として報告しないため。
+ */
+const STALL_TIMEOUT_MS = 15_000;
+
 /**
  * ワーカーの置き場所を設定済みか。
  *
@@ -178,17 +189,27 @@ export async function createMap(
 			console.error("[map] 読み込みに失敗しました", detail, error);
 		});
 
-		// **エラーが出ないまま地図が白いことがある。** その場合 `error` は
-		// 一度も発火しないので、上のログだけでは「何も起きていない」と
-		// 区別がつかない。ソースが読み終わったかどうかを併せて残しておくと、
-		// 「取りに行っていない」のか「取ったが描けない」のかを分けられる。
-		map.on("sourcedata", (event) => {
-			if (event.sourceId !== "basemap") return;
-			console.info("[map] ソースの状態", {
-				loaded: event.isSourceLoaded,
-				dataType: event.dataType,
-			});
-		});
+		// **エラーが出ないまま地図が白いことがある。**
+		//
+		// #127 がそれだった。ワーカーが起動できないと MapLibre は例外も
+		// `error` イベントも出さず、タイルを 1 枚も処理しないまま静かに止まる。
+		// 何も出ないので「正常に描けている」と見分けがつかない。
+		//
+		// 一定時間たってもソースが読み終わらなければ、それを知らせる。
+		// 正常なときは何も出さない（毎回ログが並ぶと、本当の異常が埋もれる）。
+		const stallTimer = setTimeout(() => {
+			if (
+				map.getSource(BASEMAP_SOURCE_ID) &&
+				!map.isSourceLoaded(BASEMAP_SOURCE_ID)
+			) {
+				console.error(
+					`[map] ${STALL_TIMEOUT_MS / 1000} 秒たってもタイルを読み終えていません。` +
+						"ワーカー（/maplibre/maplibre-gl-worker.mjs とその依存）が読めているか、" +
+						"配信元とその CORS 設定を確認してください（#127）",
+				);
+			}
+		}, STALL_TIMEOUT_MS);
+		map.once("idle", () => clearTimeout(stallTimer));
 
 		if (options.interactive !== false) {
 			// 拡大・縮小のボタン。ドラッグとホイールだけだと、
@@ -219,7 +240,15 @@ export async function createMap(
 			map.on("moveend", () => handler(getView()));
 		}
 
-		return { remove: () => map.remove(), getView };
+		return {
+			// 破棄したあとに検知が走ると、消えた地図を「止まっている」と
+			// 誤って報告することになる。タイマーも一緒に止める
+			remove: () => {
+				clearTimeout(stallTimer);
+				map.remove();
+			},
+			getView,
+		};
 	} catch (error) {
 		// WebGL が使えない、スタイルが読めないなど。地図が出ないだけに留める。
 		// ただし黙って消さない。原因が分からないまま「白い地図」だけが
