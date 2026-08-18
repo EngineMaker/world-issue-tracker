@@ -97,6 +97,21 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 		scopeLabels[parsedScope.success ? parsedScope.data : "personal"];
 
 	/**
+	 * 緯度経度の欄を空にする（#124）。
+	 *
+	 * 位置は任意なので空欄のままでも起票できるが、「現在地から入力」を
+	 * 押した後で気が変わった人には、値を消す手立てが要る。手で 2 つの欄を
+	 * 選択して消させると、片方だけ消して 400 になる経路が生まれる。
+	 *
+	 * 取得の状態も `idle` へ戻す。失敗の表示が残ったままだと、
+	 * 位置を出さないと決めた後も警告が出ているように見える。
+	 */
+	const clearLocation = () => {
+		setValues((current) => ({ ...current, latitude: "", longitude: "" }));
+		setGeolocation("idle");
+	};
+
+	/**
 	 * 端末の位置情報を緯度経度の欄に入れる。
 	 *
 	 * 地図 UI は未導入なので、手入力の負担を減らす補助として置いている。
@@ -403,6 +418,14 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 					)}
 				</FormField>
 
+				{/*
+				  場所（#124 で任意になった）。
+
+				  必須だった頃は、位置を出したくない人に「起票しない」以外の
+				  選択肢が無かった。空欄のまま送れば位置なしの Issue として
+				  作られる（`validateIssueForm` が空文字を undefined に倒す）。
+				  入力した場合も、保存・公開されるのは約 100m へ丸めた値になる。
+				*/}
 				<fieldset className="location">
 					<legend>{messages.newIssue.locationLegend}</legend>
 					<p id="location-hint">{messages.newIssue.locationHint}</p>
@@ -457,7 +480,20 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 							{geolocation === "loading"
 								? messages.newIssue.locating
 								: messages.newIssue.useCurrentPosition}
-						</button>
+						</button>{" "}
+						{/*
+						  入力した位置を取り消す（#124）。何も入っていないときは
+						  押しても意味が無いので出さない
+						*/}
+						{(values.latitude !== "" || values.longitude !== "") && (
+							<button
+								type="button"
+								className="button-secondary"
+								onClick={clearLocation}
+							>
+								{messages.newIssue.clearLocation}
+							</button>
+						)}
 					</p>
 
 					{geolocation === "failed" && (

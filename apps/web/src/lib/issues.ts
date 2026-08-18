@@ -28,8 +28,19 @@ export type PublicIssue = {
 	description: string;
 	scope: IssueScopeType;
 	status: IssueStatusType;
-	latitude: number;
-	longitude: number;
+	/**
+	 * 困りごとが起きている場所（#124）。**位置を出さずに起票された Issue は
+	 * `null`。**
+	 *
+	 * API が返すのは小数点以下 3 桁（約 100m）へ丸めた値で、建物を指せる
+	 * 細かさは持たない。緯度と経度は必ず揃って `null` か、揃って数値になる
+	 * （片方だけの座標は API が受け付けない）。
+	 *
+	 * 使う側は「地図に置けない Issue がある」ことを前提にすること。
+	 * 座標を要求する部品へ渡す前に `locatedIssues()` で絞る。
+	 */
+	latitude: number | null;
+	longitude: number | null;
 	category: string | null;
 	created_at: string;
 	updated_at: string;
@@ -81,6 +92,48 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * 座標として読める値か（#124）。
+ *
+ * 位置は任意なので、`null` と `undefined`（キーが無い）は通す。
+ * 数値の場合は有限であることまで確かめる。
+ */
+function isOptionalCoordinate(
+	value: unknown,
+): value is number | null | undefined {
+	if (value === null || value === undefined) return true;
+	return typeof value === "number" && Number.isFinite(value);
+}
+
+/**
+ * 座標を必ず持つ Issue（#124）。
+ *
+ * 地図に関わる部品はこの型を受け取る。`PublicIssue` をそのまま受けると
+ * 「位置なしの Issue を渡しても型が通る」ので、絞り忘れが実行時まで
+ * 見つからない。`locatedIssues()` を通した値だけがこの型になる。
+ */
+export type LocatedIssue = PublicIssue & {
+	latitude: number;
+	longitude: number;
+};
+
+/**
+ * 位置情報を持つ Issue だけを取り出す（#124）。
+ *
+ * 地図に関わる部品（`fitViewToIssues` / `buildIssuesMapOptions`）は座標を
+ * 必ず持つ Issue を前提にしている。位置なしの Issue をそのまま渡すと、
+ * `null` が図法の計算に入って NaN になり、**地図全体が描けなくなる**
+ * （1 件のせいで全件が消える）。呼び出し側で必ずここを通す。
+ *
+ * 戻り値の型で座標が `number` に狭まるので、通した後は `null` の考慮が要らない。
+ */
+export function locatedIssues(issues: readonly PublicIssue[]): LocatedIssue[] {
+	return issues.filter(
+		(issue): issue is LocatedIssue =>
+			issue.latitude !== null && issue.longitude !== null,
+	);
+}
+
+/**
  * `unknown` を `PublicIssue` として検証する。合わなければ null。
  *
  * API とはネットワーク越しなので、型注釈だけでは形を保証できない。
@@ -112,10 +165,19 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 	if (typeof description !== "string") return null;
 	if (typeof scope !== "string" || !SCOPES.includes(scope)) return null;
 	if (typeof status !== "string" || !STATUSES.includes(status)) return null;
-	// `typeof` だけだと NaN / Infinity を通してしまう。地図に渡したときに
-	// 壊れるので、有限な数値であることまで確かめる
-	if (typeof latitude !== "number" || !Number.isFinite(latitude)) return null;
-	if (typeof longitude !== "number" || !Number.isFinite(longitude)) return null;
+	// 位置は任意（#124）。`null` と「キーが無い」はどちらも「位置なし」として
+	// 読む。API は `null` を返すが、この値を持たない古い API（デプロイのズレ）
+	// から来ても、位置の無い Issue として素直に扱える。
+	//
+	// 値が入っているのに数値でない・有限でない場合は弾く。`typeof` だけだと
+	// NaN / Infinity を通してしまい、地図に渡したときに壊れる。
+	// 「位置が無い」と「壊れた値が来た」は別で、後者を null に畳むと
+	// API 側の変更が画面に静かに影響する。
+	if (!isOptionalCoordinate(latitude)) return null;
+	if (!isOptionalCoordinate(longitude)) return null;
+	// 片方だけの座標は地図に置けない。API が対で扱っている（#124）ので、
+	// 揃っていない行は想定外の形として弾く
+	if ((latitude == null) !== (longitude == null)) return null;
 	if (category !== null && typeof category !== "string") return null;
 	if (typeof created_at !== "string") return null;
 	if (typeof updated_at !== "string") return null;
@@ -182,8 +244,8 @@ export function parsePublicIssue(value: unknown): PublicIssue | null {
 		description,
 		scope: scope as IssueScopeType,
 		status: status as IssueStatusType,
-		latitude,
-		longitude,
+		latitude: latitude ?? null,
+		longitude: longitude ?? null,
 		category,
 		created_at,
 		updated_at,

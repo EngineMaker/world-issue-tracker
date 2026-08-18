@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-	CreateIssueSchema,
+	CreateIssueFields,
 	ISSUE_SCOPE_LABELS,
 	IssueScope,
 	Locale,
@@ -429,9 +429,14 @@ describe("カテゴリ候補の定数", () => {
 
 	it("候補がスキーマの category 制約に収まっている", () => {
 		// 候補をそのまま選ぶと API 側の検証で 400 になる、という事故を防ぐ。
-		// 制約はここで書き直さず、スキーマそのものに通して確かめる
+		// 制約はここで書き直さず、スキーマそのものに通して確かめる。
+		//
+		// 項目単位のスキーマを引くので `CreateIssueSchema`（緯度経度が対に
+		// なっているかの `superRefine` を掛けた形）ではなく、その素の
+		// `ZodObject` である `CreateIssueFields` を見る。検証している制約は
+		// どちらも同じもの（#124 で refine を足した際に分けた）。
 		for (const suggestion of ISSUE_CATEGORY_SUGGESTIONS) {
-			const parsed = CreateIssueSchema.shape.category.safeParse(suggestion);
+			const parsed = CreateIssueFields.shape.category.safeParse(suggestion);
 			expect(parsed.success, `候補「${suggestion}」がスキーマに通らない`).toBe(
 				true,
 			);

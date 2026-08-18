@@ -9,7 +9,7 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef } from "react";
-import type { PublicIssue } from "../../lib/issues";
+import type { LocatedIssue } from "../../lib/issues";
 import {
 	buildIssuesMapOptions,
 	type PlottedMarker,
@@ -53,7 +53,14 @@ export function IssuesMap({
 	view,
 	locale = DEFAULT_LOCALE,
 }: {
-	issues: readonly PublicIssue[];
+	/**
+	 * 地図に置く Issue。**座標を持つものだけ**（#124）。
+	 *
+	 * 位置を出さずに起票された Issue はページ側が `locatedIssues()` で
+	 * 外してから渡す。ここに `null` の座標が混ざると、マーカーの位置が
+	 * NaN になって地図が丸ごと描けなくなる。
+	 */
+	issues: readonly LocatedIssue[];
 	/** タイル配信元。未設定（null）なら地図を描かない。 */
 	tileUrlTemplate: string | null;
 	/** 配信元が要求する帰属表示。無ければ null。 */

@@ -19,7 +19,7 @@
  * 作る手続きは `lib/maplibre.ts`、スタイルの組み立ては `lib/map-style.ts`。
  */
 
-import type { PublicIssue } from "./issues";
+import type { LocatedIssue } from "./issues";
 import { MAP_ZOOM } from "./map";
 import { canRenderMap, type MapStyle, resolveMapStyle } from "./map-style";
 import { MAX_MAP_ZOOM, type MapView, MIN_MAP_ZOOM } from "./map-view";
@@ -87,6 +87,10 @@ export function buildDetailMapOptions(
  * 視界は呼び出し側が渡す。URL のクエリ（zoom / lat / lng）を反映した値か、
  * 全件が収まるよう自動で決めた値かは、ページ側が決めている。
  *
+ * 受け取るのは座標を持つ Issue だけ（#124）。位置を出さずに起票された
+ * Issue は呼び出し側が `locatedIssues()` で外してから渡す。ここで
+ * `null` を受けると図法の計算が NaN になり、地図が丸ごと描けなくなる。
+ *
  * **全件をマーカーにする。** #113 の頃は表示領域に入る分だけを描いていたが、
  * それは `<img>` を並べる方式で「見えない要素がキーボードの順路に挟まる」
  * のを避けるためだった。MapLibre は画面外のマーカーを自分で隠すので、
@@ -94,7 +98,7 @@ export function buildDetailMapOptions(
  * 入ってきた Issue のマーカーが出てこなくなる。
  */
 export function buildIssuesMapOptions(
-	issues: readonly PublicIssue[],
+	issues: readonly LocatedIssue[],
 	view: MapView,
 	tileUrlTemplate: string | null,
 	attribution: string | null,

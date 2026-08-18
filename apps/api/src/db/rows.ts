@@ -43,6 +43,12 @@ import type { IssueScope, IssueStatus } from "@world-issue-tracker/shared";
  * （`0008` のコメント参照）。この型が `number` なのはその生の姿を写した
  * もので、レスポンスに載る真偽値への変換は `toPublicIssue` が行う。
  * NOT NULL DEFAULT 1 なので NULL は来ない。
+ *
+ * `latitude` / `longitude` は NULL を許す（`0010_coarsen_location.sql` で
+ * NOT NULL を外した）。位置を出したくない人が起票できるようにするため
+ * （#124）で、両方 NULL か両方 NULL でないかのどちらかになる
+ * （片方だけの座標は `CreateIssueSchema` が弾く）。保存されている値は
+ * 小数点以下 3 桁へ丸めてある。
  */
 export type IssueRow = {
 	id: string;
@@ -50,8 +56,8 @@ export type IssueRow = {
 	description: string;
 	scope: IssueScope;
 	status: IssueStatus;
-	latitude: number;
-	longitude: number;
+	latitude: number | null;
+	longitude: number | null;
 	category: string | null;
 	user_id: string | null;
 	photo_key: string | null;

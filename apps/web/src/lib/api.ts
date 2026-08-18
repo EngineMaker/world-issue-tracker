@@ -28,6 +28,13 @@ export type IssueFormValues = {
 	title: string;
 	description: string;
 	scope: string;
+	/**
+	 * 場所の入力欄（#124）。**空文字は「位置を出さない」**。
+	 *
+	 * 未入力を 0 に化けさせないよう、スキーマへ渡す前に `toNumber` が
+	 * `undefined` へ倒す。緯度と経度は対で扱われ、片方だけ入力すると
+	 * スキーマ側（`CreateIssueSchema` の `superRefine`）で弾かれる。
+	 */
 	latitude: string;
 	longitude: string;
 	category: string;
@@ -104,9 +111,10 @@ function omitEmpty(value: string): string | undefined {
 /**
  * 数値項目の文字列を数値に変換する。
  *
- * `Number("")` は `0` になるため、空文字は `undefined` にして
- * 「未入力」として `CreateIssueSchema` の required エラーに落とす。
- * 変換できない文字列は `NaN` のまま渡し、これもスキーマ側で弾かれる。
+ * `Number("")` は `0` になるため、空文字は `undefined` にする。位置は
+ * 任意なので（#124）、`undefined` はそのまま「位置を出さない」として通る。
+ * ここで 0 に化けると、緯度経度 0（ギニア湾沖）の Issue が黙って作られる。
+ * 変換できない文字列は `NaN` のまま渡し、これはスキーマ側で弾かれる。
  */
 function toNumber(value: string): number | undefined {
 	const trimmed = value.trim();
@@ -229,8 +237,12 @@ function buildCreateIssueRequest(
 	form.set("title", input.title);
 	form.set("description", input.description);
 	form.set("scope", input.scope);
-	form.set("latitude", String(input.latitude));
-	form.set("longitude", String(input.longitude));
+	// 位置は任意（#124）。無いときは送らない。`String(null)` は `"null"` に
+	// なり、サーバー側の `Number("null")` が NaN になって 400 で弾かれる
+	if (input.latitude != null && input.longitude != null) {
+		form.set("latitude", String(input.latitude));
+		form.set("longitude", String(input.longitude));
+	}
 	// 任意項目。未入力なら送らない（空文字を送ると `min(1)` に当たる）
 	if (input.category !== undefined) {
 		form.set("category", input.category);
