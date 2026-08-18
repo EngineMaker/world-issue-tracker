@@ -45,6 +45,16 @@ async function readBody(res: Response): Promise<Body> {
 	return (await res.json()) as Body;
 }
 
+/** 表示名キャッシュ（#135）を空にする。テスト間でキャッシュを持ち越さないため。 */
+async function clearDisplayNameCache(): Promise<void> {
+	const cache = env.DISPLAY_NAME_CACHE;
+	if (!cache) {
+		return;
+	}
+	const { keys } = await cache.list();
+	await Promise.all(keys.map((key) => cache.delete(key.name)));
+}
+
 /**
  * Issue を DB へ直接投入する。
  *
@@ -108,6 +118,10 @@ describe("起票者とコメント投稿者の表示名（#67）", () => {
 		await env.DB.exec("DELETE FROM issues");
 		setMockUserId(null);
 		resetMockClerkUsers();
+		// 表示名キャッシュ（#135）も落とす。前のテストで載った名前が残ると、
+		// 「連打しても Clerk を 1 回しか叩かない」の検証が前のテストのキャッシュで
+		// 通ってしまう。回数を数える他のテストの独立性も保つ。
+		await clearDisplayNameCache();
 	});
 
 	describe("Issue の起票者", () => {
@@ -317,6 +331,24 @@ describe("起票者とコメント投稿者の表示名（#67）", () => {
 			const detail = await readBody(await app.request("/issues/i1", {}, env));
 			expect(detail).not.toHaveProperty("user_id");
 			expect(JSON.stringify(detail)).not.toContain("user_2abcSECRETclerkid");
+		});
+
+		// #135。Issue 一覧も無認証で叩ける公開エンドポイントで、同じ
+		// `fetchDisplayNames` を通す。連打で Clerk への問い合わせが増幅すると、
+		// レート制限を使い切って認証まで巻き添えになる。KV キャッシュで止める。
+		it("Issue 一覧を連打しても Clerk への問い合わせは増幅しない", async () => {
+			await insertIssue("i1", "user_named", false);
+			setMockClerkUsers([clerkUser("user_named", "花子", "山田")]);
+
+			const first = await readBody(await app.request("/issues", {}, env));
+			const second = await readBody(await app.request("/issues", {}, env));
+			const third = await readBody(await app.request("/issues", {}, env));
+
+			for (const body of [first, second, third]) {
+				expect(body.data[0].display_name).toBe("花子 山田");
+			}
+			// 3 回叩いても getUserList は 1 回だけ（キャッシュが無ければ 3 回）
+			expect(getUserListCalls()).toHaveLength(1);
 		});
 	});
 
@@ -562,6 +594,29 @@ describe("起票者とコメント投稿者の表示名（#67）", () => {
 					"viewer_is_author",
 				].sort(),
 			);
+		});
+
+		// #135。コメント一覧も `requireAuth` 無しで叩ける公開エンドポイントで、
+		// 同じ `fetchDisplayNames` を通す。連打による増幅を KV キャッシュで止める。
+		it("コメント一覧を連打しても Clerk への問い合わせは増幅しない", async () => {
+			await insertIssue("i1", "user_author", false);
+			await insertComment("c1", "i1", "user_commenter", "似た経験があります");
+			setMockClerkUsers([clerkUser("user_commenter", "次郎", "佐藤")]);
+
+			const first = await readBody(
+				await app.request("/issues/i1/comments", {}, env),
+			);
+			const second = await readBody(
+				await app.request("/issues/i1/comments", {}, env),
+			);
+			const third = await readBody(
+				await app.request("/issues/i1/comments", {}, env),
+			);
+
+			for (const body of [first, second, third]) {
+				expect(body.data[0].display_name).toBe("次郎 佐藤");
+			}
+			expect(getUserListCalls()).toHaveLength(1);
 		});
 	});
 });

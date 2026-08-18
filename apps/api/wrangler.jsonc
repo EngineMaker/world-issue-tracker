@@ -45,5 +45,33 @@
 			"binding": "PHOTOS",
 			"bucket_name": "world-issue-tracker-photos"
 		}
+	],
+	// 表明者・起票者・コメント投稿者の表示名（Clerk から引いた結果）のキャッシュ（#135）。
+	//
+	// 無認証で叩ける公開エンドポイント（`GET /issues/:id/help-offers`、`GET /issues`、
+	// `GET /issues/:id`、`GET /issues/:id/comments`）が、表示名を引くために毎回
+	// Clerk の管理 API を叩いていた。連打されるとその回数だけ Clerk への問い合わせが
+	// 増幅し、レート制限を使い切ると認証（JWKS 取得）まで巻き添えになる。一度引いた
+	// 表示名を User ID ごとにここへ載せ、次からは Clerk に触れないようにする
+	// （`src/lib/display-names.ts`）。
+	//
+	// ⚠️ 下の `id` はプレースホルダ（実在しない namespace）。マージ前に必ず
+	//   `wrangler kv namespace create world-issue-tracker-display-names`
+	// で作成し、出力された ID に差し替えること。差し替えずにデプロイすると
+	// `wrangler deploy`（.github/workflows/deploy.yml の deploy-api）が binding 検証で
+	// 失敗し、後続の deploy-web まで含めてパイプラインが止まる。
+	//
+	// なおコード側はバインディングが無くても従来どおり動く（キャッシュが効かない
+	// だけで公開エンドポイントは落ちない。Bindings で optional）。ただしそれは
+	// バインディング宣言自体を消した場合の話で、宣言を残したまま id が無効だと
+	// 上記のとおりデプロイが失敗する。
+	//
+	// `preview_id` は置いていない。`wrangler dev` / テストは miniflare の
+	// ローカルシミュレーションで完結し、実 namespace を触らない（r2_buckets と同じ）。
+	"kv_namespaces": [
+		{
+			"binding": "DISPLAY_NAME_CACHE",
+			"id": "0000000000000000000000000000000000"
+		}
 	]
 }

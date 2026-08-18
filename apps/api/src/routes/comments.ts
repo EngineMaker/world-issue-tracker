@@ -147,11 +147,16 @@ async function resolveCommentAuthors(
 	const isAnonymousComment = (row: CommentRowLike): boolean =>
 		anonymousAuthorId !== null && row.user_id === anonymousAuthorId;
 
+	// 表示名は KV にキャッシュする（#135）。コメント一覧も `requireAuth` 無しで
+	// 叩ける公開エンドポイントなので、キャッシュが無いと連打で Clerk への
+	// 問い合わせが増幅し、レート制限を使い切ると認証まで巻き添えになる
+	// （help-offers・Issue 一覧と同根なので同じ cache を通す）。
 	const displayNames = await fetchDisplayNames(
 		c.env.CLERK_SECRET_KEY,
 		rows
 			.filter((row) => !isAnonymousComment(row) && row.user_id)
 			.map((row) => row.user_id as string),
+		{ cache: c.env.DISPLAY_NAME_CACHE },
 	);
 
 	// 閲覧者。ログインしていなければ null なので、どの行とも一致しない（#99）。

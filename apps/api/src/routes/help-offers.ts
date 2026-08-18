@@ -160,12 +160,18 @@ helpOffers.get("/", clerkAuth(), async (c) => {
 	// 100 件ずつに分割する）。表明の一覧はページングが無く全件返すため、
 	// 人数分の往復にするとレート制限にすぐ触れる。
 	//
+	// `DISPLAY_NAME_CACHE` を渡して結果を KV にキャッシュする（#135）。この
+	// エンドポイントは無認証で叩けるため、キャッシュが無いと同じ Issue を連打
+	// されるだけで Clerk への問い合わせが増幅し、認証まで巻き添えにできてしまう。
+	// 一度引いた表示名は User ID ごとにキャッシュされ、次からは Clerk に触れない。
+	//
 	// ここは失敗しても throw しない。引けなかった人は `display_name` が null に
 	// なるだけで、一覧そのものは必ず返る。表示名は「あると嬉しい」情報であって、
 	// Clerk が落ちていることで困りごとの画面が見えなくなってはいけない。
 	const displayNames = await fetchDisplayNames(
 		c.env.CLERK_SECRET_KEY,
 		offers.map((offer) => offer.user_id),
+		{ cache: c.env.DISPLAY_NAME_CACHE },
 	);
 
 	const data: PublicHelpOfferWithName[] = offers.map((offer) => ({
