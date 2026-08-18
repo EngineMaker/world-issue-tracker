@@ -82,15 +82,21 @@ export function IssueCard({
 			  読みに行かせないため。サムネイルにしてもなお、一覧の初回表示で
 			  20 枚を取りに行く必要は無い。
 
-			  代替テキストは詳細ページと同じ文言を使う。同じ画像なので、
-			  読み上げで別の説明になる方がおかしい
+			  `alt` は空にする。詳細ページ（.issue-photo）は「◯◯ の様子」と
+			  名乗るが、あちらは写真が主役の画面で、周りに同じ情報を持つ
+			  文字が無い。一覧では真下の見出しが同じタイトルを持っており、
+			  代替テキストもそのタイトルから機械的に作った文字列でしかない。
+			  そのまま出すと読み上げが「◯◯ の様子（画像）」「◯◯（リンク）」と
+			  1 件につき 2 回タイトルを読むことになり、20 件並ぶ画面では
+			  読み進める邪魔にしかならない。隣接するテキストが同じ内容を
+			  伝えているときは空にするのが定石（レビューで指摘）
 			*/}
 			{issue.has_photo ? (
 				// biome-ignore lint/performance/noImgElement: 配信元（API Worker）は環境変数で差し替わるため next/image の remotePatterns に列挙できない（理由は詳細ページと同じ）。寸法を属性で固定しないのは写真の縦横比が投稿ごとに違うため — 表示枠は CSS が持ち、はみ出す分は object-fit で切る
 				<img
 					className="issue-card-photo"
 					src={issuePhotoThumbnailUrl(issue.id)}
-					alt={messages.issueDetail.photoAlt(issue.title)}
+					alt=""
 					loading="lazy"
 					decoding="async"
 				/>

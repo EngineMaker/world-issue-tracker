@@ -8,6 +8,7 @@ vi.mock("@clerk/backend", async () => {
 	return clerkBackendMockFactory();
 });
 
+import { ISSUE_THUMBNAIL_MAX_BYTES } from "@world-issue-tracker/shared";
 import { createApp } from "../src/index";
 import { photoObjectKey, photoThumbnailObjectKey } from "../src/routes/issues";
 import { setMockUserId } from "./helpers/clerk-mock";
@@ -574,18 +575,83 @@ describe("Issue photos", () => {
 			expect(await countPhotoObjects()).toBe(0);
 		});
 
-		it("rejects a thumbnail above the size limit", async () => {
+		/*
+		 * サムネイルの上限は原寸（5MB）より小さい（#125、レビューで指摘）。
+		 *
+		 * 一覧を軽くするための派生物なのに 5MB を通すと、上限としての意味を
+		 * ほとんど失う。自前のクライアント以外が大きな画像を `thumbnail` として
+		 * 送ると、一覧が原寸より重くなりうる。
+		 *
+		 * 期待値は共有スキーマから引く。ここに数値を直書きすると、上限を
+		 * 変えたときにテストだけが古い値を守り続ける
+		 */
+		it("rejects a thumbnail above the thumbnail size limit", async () => {
 			const res = await createIssueWithPhoto(
 				{ bytes: imageBytes(1024), type: "image/jpeg" },
 				{},
 				{
-					bytes: imageBytes(5 * 1024 * 1024 + 1),
+					bytes: imageBytes(ISSUE_THUMBNAIL_MAX_BYTES + 1),
 					type: "image/jpeg",
 				},
 			);
 
 			expect(res.status).toBe(400);
 			expect(await countIssues()).toBe(0);
+		});
+
+		it("accepts a thumbnail at the thumbnail size limit", async () => {
+			const res = await createIssueWithPhoto(
+				{ bytes: imageBytes(1024), type: "image/jpeg" },
+				{},
+				{
+					bytes: imageBytes(ISSUE_THUMBNAIL_MAX_BYTES),
+					type: "image/jpeg",
+				},
+			);
+
+			expect(res.status).toBe(201);
+		});
+
+		// 原寸の上限（5MB）をそのまま当てていないこと。両方に同じ値を
+		// 使うと、上のテストは「5MB + 1」でしか落ちなくなる
+		it("does not apply the full-size limit to the thumbnail", () => {
+			expect(ISSUE_THUMBNAIL_MAX_BYTES).toBeLessThan(5 * 1024 * 1024);
+		});
+
+		/*
+		 * 原寸に倒したときのキャッシュ指示（レビューで指摘）。
+		 *
+		 * この URL は、後から派生物が用意されれば中身が「原寸 →
+		 * サムネイル」に変わる。`immutable` を付けたまま配ると、一度でも
+		 * 一覧を開いた人のブラウザや中間キャッシュが最大 1 年間 原寸を
+		 * 返し続け、差し替えが届かなくなる
+		 */
+		it("does not mark the original fallback as immutable", async () => {
+			const created = await createIssueWithPhoto({
+				bytes: imageBytes(512),
+				type: "image/jpeg",
+			});
+			const { id } = await readBody(created);
+
+			const res = await app.request(`/issues/${id}/photo/thumbnail`, {}, env);
+
+			expect(res.headers.get("Cache-Control")).not.toContain("immutable");
+			await res.arrayBuffer();
+		});
+
+		// 派生物が実在するときは中身が変わらないので、原寸と同じく長く持たせる
+		it("marks a real thumbnail as immutable", async () => {
+			const created = await createIssueWithPhoto(
+				{ bytes: imageBytes(1024), type: "image/jpeg" },
+				{},
+				{ bytes: imageBytes(128), type: "image/jpeg" },
+			);
+			const { id } = await readBody(created);
+
+			const res = await app.request(`/issues/${id}/photo/thumbnail`, {}, env);
+
+			expect(res.headers.get("Cache-Control")).toContain("immutable");
+			await res.arrayBuffer();
 		});
 
 		// 写真を付けずにサムネイルだけ送るのは、自前のクライアントが

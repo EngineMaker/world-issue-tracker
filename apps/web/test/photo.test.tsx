@@ -131,6 +131,7 @@ describe("createIssue — 写真の送信", () => {
 	/** `fetch` を差し替えて、実際に組み立てられたリクエストを捕まえる。 */
 	async function captureRequest(
 		photo: File | null,
+		thumbnail: File | null = null,
 	): Promise<{ init: RequestInit }> {
 		const original = globalThis.fetch;
 		let captured: RequestInit | undefined;
@@ -143,7 +144,7 @@ describe("createIssue — 写真の送信", () => {
 		}) as unknown as typeof fetch;
 
 		try {
-			await createIssue(validInput, "test-token", photo);
+			await createIssue(validInput, "test-token", photo, thumbnail);
 		} finally {
 			globalThis.fetch = original;
 		}
@@ -179,6 +180,44 @@ describe("createIssue — 写真の送信", () => {
 		expect(form.get("latitude")).toBe(String(validInput.latitude));
 		expect(form.get("longitude")).toBe(String(validInput.longitude));
 		expect(form.get("photo")).toBeInstanceOf(File);
+	});
+
+	/*
+	 * 一覧用のサムネイル（#125）。
+	 *
+	 * ここを見ないと、フォームが作った派生物が送られなくなっても
+	 * 誰も気付けない。API 側のテストは `thumbnail` パートを自分で
+	 * 組み立てて投げるので、web からの送信経路は素通りする
+	 * （レビューで指摘された穴）。
+	 */
+	it("サムネイルがあれば multipart に載せる", async () => {
+		const photo = new File([new Uint8Array(64)], "photo.jpg", {
+			type: "image/jpeg",
+		});
+		const thumbnail = new File([new Uint8Array(16)], "thumbnail.jpg", {
+			type: "image/jpeg",
+		});
+		const { init } = await captureRequest(photo, thumbnail);
+
+		const form = init.body as FormData;
+		const sent = form.get("thumbnail");
+		expect(sent, "thumbnail パートが載っていない").toBeInstanceOf(File);
+		// 原寸と取り違えていないこと。同じファイルを両方に入れても
+		// 「載っている」だけの検査は通ってしまう
+		expect((sent as File).size).toBe(thumbnail.size);
+		expect((form.get("photo") as File).size).toBe(photo.size);
+	});
+
+	// 作れなかったとき（`createThumbnailFile` が null を返したとき）は
+	// 空のパートを送らない。API 側は空のファイルパートを「写真なし」として
+	// 扱うが、そこに頼らず送る側で落とす
+	it("サムネイルが無ければ thumbnail パートを送らない", async () => {
+		const photo = new File([new Uint8Array(16)], "photo.jpg", {
+			type: "image/jpeg",
+		});
+		const { init } = await captureRequest(photo, null);
+
+		expect((init.body as FormData).has("thumbnail")).toBe(false);
 	});
 
 	// 手で `multipart/form-data` と書くと境界文字列（boundary）が欠け、

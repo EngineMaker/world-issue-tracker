@@ -6,6 +6,7 @@ import {
 	escapeLikePattern,
 	ISSUE_PHOTO_CONTENT_TYPES,
 	ISSUE_PHOTO_MAX_BYTES,
+	ISSUE_THUMBNAIL_MAX_BYTES,
 	isIssuePhotoContentType,
 	ListIssuesQuerySchema,
 	parseIssueCursor,
@@ -516,13 +517,19 @@ function toPhotoFile(value: unknown): UploadedPhoto | null {
  */
 function validatePhoto(
 	photo: UploadedPhoto,
+	// 上限だけは呼び出し側が決める。一覧用のサムネイル（#125）は原寸より
+	// ずっと小さいはずで、同じ 5MB を当てると上限としての意味を失う
+	// （一覧を軽くするための派生物として 5MB を受け付けることになる）。
+	// MIME の規則は共有する。どちらも同じ経路で配信されるので、
+	// 通してよい形式が変わる理由が無い
+	maxBytes: number = ISSUE_PHOTO_MAX_BYTES,
 ):
 	| { ok: true; contentType: IssuePhotoContentType }
 	| { ok: false; error: string } {
-	if (photo.size > ISSUE_PHOTO_MAX_BYTES) {
+	if (photo.size > maxBytes) {
 		return {
 			ok: false,
-			error: `Photo must be ${ISSUE_PHOTO_MAX_BYTES} bytes or smaller`,
+			error: `Photo must be ${maxBytes} bytes or smaller`,
 		};
 	}
 
@@ -625,7 +632,7 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 	let thumbnailContentType: IssuePhotoContentType | null = null;
 	// 写真そのものが無いのにサムネイルだけ来ても保存する先が無いので見ない
 	if (photo && thumbnail) {
-		const validated = validatePhoto(thumbnail);
+		const validated = validatePhoto(thumbnail, ISSUE_THUMBNAIL_MAX_BYTES);
 		if (!validated.ok) {
 			return c.json({ error: validated.error }, 400);
 		}
@@ -1088,6 +1095,29 @@ issues.get("/:id/viewer", clerkAuth(), async (c) => {
  * `<img>` から読む用途なので inline が正しい。
  */
 /**
+ * 中身が変わらない画像のキャッシュ指示。
+ *
+ * 画像は差し替えられない（#65 の範囲外）ので、キーが同じなら中身も同じ。
+ * 詳細ページを開くたびに R2 から読み直さずに済むよう長めに持たせる。
+ * 通報による削除が入ったときは 404 に変わるが、それがキャッシュに
+ * 反映されるまでの遅れは許容する（`private` にはしない ＝ 公開画像なので）。
+ */
+const IMMUTABLE_PHOTO_CACHE = "public, max-age=31536000, immutable";
+
+/**
+ * 中身が後から変わりうる画像のキャッシュ指示（#125）。
+ *
+ * サムネイルの経路は、派生物が無いときに原寸へ倒す。同じ URL の中身が
+ * 「原寸 → サムネイル」に変わりうるということなので、`immutable` は
+ * 事実に反する。付けたまま配ると、後から派生物を用意しても、一度でも
+ * 一覧を開いた人のブラウザや中間キャッシュは最大 1 年間 原寸を返し続ける。
+ *
+ * 1 時間にしているのは、一覧を続けて見る間は読み直さずに済み、かつ
+ * 派生物を用意した日のうちに切り替わる長さだから。
+ */
+const REVALIDATING_PHOTO_CACHE = "public, max-age=3600";
+
+/**
  * R2 のオブジェクトを画像のレスポンスとして返す。原寸とサムネイルで共有する。
  *
  * `contentType` は保存時に `validatePhoto` を通した値だけが渡る前提。
@@ -1101,17 +1131,14 @@ issues.get("/:id/viewer", clerkAuth(), async (c) => {
 function photoResponse(
 	object: R2ObjectBody,
 	contentType: string | null | undefined,
+	cacheControl: string = IMMUTABLE_PHOTO_CACHE,
 ): Response {
 	const headers = new Headers();
 	if (contentType) {
 		headers.set("Content-Type", contentType);
 	}
 	headers.set("Content-Disposition", "inline");
-	// 画像は差し替えられない（#65 の範囲外）ので、キーが同じなら中身も同じ。
-	// 詳細ページを開くたびに R2 から読み直さずに済むよう長めに持たせる。
-	// 通報による削除が入ったときは 404 に変わるが、それがキャッシュに
-	// 反映されるまでの遅れは許容する（`private` にはしない ＝ 公開画像なので）
-	headers.set("Cache-Control", "public, max-age=31536000, immutable");
+	headers.set("Cache-Control", cacheControl);
 	// R2 が返す ETag をそのまま通す。条件付きリクエストで 304 を返す
 	// 実装はまだ無いが、中間のキャッシュが使える
 	headers.set("ETag", object.httpEtag);
@@ -1159,7 +1186,13 @@ issues.get("/:id/photo/thumbnail", async (c) => {
 		console.error("Photo object missing in R2", row.photo_key);
 		return c.json({ error: "Photo not found" }, 404);
 	}
-	return photoResponse(original, row.photo_content_type);
+	// 倒した先は原寸だが、この URL は派生物が用意されれば中身が変わる。
+	// `immutable` で配ると差し替えが利用者に届かなくなる
+	return photoResponse(
+		original,
+		row.photo_content_type,
+		REVALIDATING_PHOTO_CACHE,
+	);
 });
 
 issues.get("/:id/photo", async (c) => {
