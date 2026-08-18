@@ -14,18 +14,18 @@
  */
 
 import { beforeAll, describe, expect, it } from "bun:test";
-import {
-	getIssueAnonymityLabel,
-	ISSUE_ANONYMITY_LABELS,
-} from "@world-issue-tracker/shared";
+import { AUTHOR_LABELS, getAuthorLabel } from "@world-issue-tracker/shared";
 import { renderToStaticMarkup } from "react-dom/server";
 import { IssueCard } from "../src/app/components/IssueList";
 import NewIssuePage from "../src/app/issues/new/page";
 import { validateIssueForm } from "../src/lib/api";
 import { type PublicIssue, parsePublicIssue } from "../src/lib/issues";
 
-const ANONYMOUS_LABEL = ISSUE_ANONYMITY_LABELS.ja.anonymous;
-const NAMED_LABEL = ISSUE_ANONYMITY_LABELS.ja.named;
+const ANONYMOUS_LABEL = AUTHOR_LABELS.ja.anonymous;
+/** 名乗ったが Clerk に表示名が無い人の文言（#67）。匿名とは別の言葉。 */
+const UNNAMED_LABEL = AUTHOR_LABELS.ja.unnamed;
+/** 名乗った人の表示名として使うサンプル（#67）。 */
+const DISPLAY_NAME = "花子 山田";
 
 /** `GET /issues/:id` が返す形の 1 件分。個々のテストで必要な項目だけ上書きする。 */
 const sampleResponse = {
@@ -143,10 +143,14 @@ describe("parsePublicIssue の is_anonymous", () => {
 
 describe("一覧カードの表示", () => {
 	/** `PublicIssue` として 1 件組み立てる。 */
-	function issue(isAnonymous: boolean): PublicIssue {
+	function issue(
+		isAnonymous: boolean,
+		displayName: string | null = null,
+	): PublicIssue {
 		const parsed = parsePublicIssue({
 			...sampleResponse,
 			is_anonymous: isAnonymous,
+			display_name: displayName,
 		});
 		if (!parsed) throw new Error("サンプルがパースできない");
 		return parsed;
@@ -155,22 +159,37 @@ describe("一覧カードの表示", () => {
 	it("匿名なら「匿名の方」と出す", () => {
 		const markup = renderToStaticMarkup(<IssueCard issue={issue(true)} />);
 		expect(markup).toContain(ANONYMOUS_LABEL);
-		expect(markup).not.toContain(NAMED_LABEL);
+		expect(markup).not.toContain(UNNAMED_LABEL);
 	});
 
-	it("匿名でなければ投稿者がいることを示す", () => {
-		const markup = renderToStaticMarkup(<IssueCard issue={issue(false)} />);
-		expect(markup).toContain(NAMED_LABEL);
+	it("匿名でなければ起票者の表示名を出す（#67）", () => {
+		const markup = renderToStaticMarkup(
+			<IssueCard issue={issue(false, DISPLAY_NAME)} />,
+		);
+		expect(markup).toContain(DISPLAY_NAME);
 		expect(markup).not.toContain(ANONYMOUS_LABEL);
 	});
 
-	// 「表示名は出さない」がこの Issue の前提（#67 の範囲）。
-	// ラベルの文言そのものに名前らしきものが混ざっていないことを、
-	// ラベル定義の側で押さえる。
-	it("ラベルに表示名は含まれない", () => {
-		expect(getIssueAnonymityLabel(true)).toBe(ANONYMOUS_LABEL);
-		expect(getIssueAnonymityLabel(false)).toBe(NAMED_LABEL);
-		// 2 つのラベルが別物であること（同じ文字列だと出し分けが意味を失う）
-		expect(ANONYMOUS_LABEL).not.toBe(NAMED_LABEL);
+	// 表示名が出せるようになった後も（#67）、匿名を選んだ人の名前は
+	// 出ないままであること。API 側は匿名の user_id を Clerk へ渡さないので
+	// 通常は表示名が届かないが、万一届いても匿名が優先される。
+	// 一度表示したものは、後から匿名化しても見られた事実を消せない。
+	it("匿名なら表示名が付いていても出さない", () => {
+		const markup = renderToStaticMarkup(
+			<IssueCard issue={issue(true, DISPLAY_NAME)} />,
+		);
+		expect(markup).toContain(ANONYMOUS_LABEL);
+		expect(markup).not.toContain(DISPLAY_NAME);
+	});
+
+	// ラベル定義の側でも同じことを押さえる。描画のテストは JSX の
+	// 組み立てを、こちらは出し分けの規則そのものを見ている。
+	it("匿名のラベルは表示名を含まない", () => {
+		expect(
+			getAuthorLabel({ isAnonymous: true, displayName: DISPLAY_NAME }),
+		).toBe(ANONYMOUS_LABEL);
+		// 「匿名を選んだ」と「名乗ったが名前が無い」が別物であること
+		// （同じ文字列だと出し分けが意味を失う）
+		expect(ANONYMOUS_LABEL).not.toBe(UNNAMED_LABEL);
 	});
 });

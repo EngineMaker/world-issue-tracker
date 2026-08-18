@@ -2170,14 +2170,16 @@ describe("Issues CRUD", () => {
 			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
 			// テーブルの公開カラムに加えて、行に無い派生フィールド
-			// `has_photo`（写真の有無、#65）と `reaction_count`
-			// （「私も困っている」の件数、#112）が載る。
+			// `has_photo`（写真の有無、#65）、`reaction_count`
+			// （「私も困っている」の件数、#112）、`display_name`
+			// （起票者の表示名、#67）が載る。
 			// 公開一覧と同じ形であることが要点
 			expect(Object.keys(body.data[0]).sort()).toEqual(
 				[
 					...PUBLIC_ISSUE_COLUMNS_FOR_TEST,
 					"has_photo",
 					"reaction_count",
+					"display_name",
 				].sort(),
 			);
 		});
@@ -2237,6 +2239,20 @@ describe("Issues CRUD", () => {
 			"reaction_count",
 		];
 
+		/**
+		 * 読み出し（GET）が返してよいキー。
+		 *
+		 * 書き込み系（POST / PATCH / DELETE）との違いは `display_name`
+		 * （起票者の表示名、#67）だけ。あちらは作成・更新した本人へ返すもので、
+		 * Clerk へ表示名を引きに行く場面が無いため載せていない
+		 * （`help-offers.ts` の POST と同じ判断）。
+		 *
+		 * 行に無い派生フィールドなので、`PUBLIC_ISSUE_COLUMNS` には入らない。
+		 * `user_id` が公開に回ったわけではないことは、この describe の
+		 * `does not expose user_id in ...` と `Defence layers` が見ている。
+		 */
+		const READ_PUBLIC_KEYS = [...PUBLIC_KEYS, "display_name"];
+
 		beforeEach(async () => {
 			setMockUserId("user_2abcSECRETclerkid");
 		});
@@ -2294,7 +2310,9 @@ describe("Issues CRUD", () => {
 			setMockUserId(null);
 			const res = await app.request("/issues", {}, env);
 			const body = await readBody(res);
-			expect(Object.keys(body.data[0]).sort()).toEqual([...PUBLIC_KEYS].sort());
+			expect(Object.keys(body.data[0]).sort()).toEqual(
+				[...READ_PUBLIC_KEYS].sort(),
+			);
 		});
 
 		// 一覧はフィルタ・ページングでクエリの組み立てが変わるため、
@@ -2308,7 +2326,9 @@ describe("Issues CRUD", () => {
 			const res = await app.request("/issues?scope=community", {}, env);
 			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
-			expect(Object.keys(body.data[0]).sort()).toEqual([...PUBLIC_KEYS].sort());
+			expect(Object.keys(body.data[0]).sort()).toEqual(
+				[...READ_PUBLIC_KEYS].sort(),
+			);
 			expect(JSON.stringify(body)).not.toContain("user_2abcSECRETclerkid");
 		});
 
@@ -2319,7 +2339,9 @@ describe("Issues CRUD", () => {
 			const res = await app.request("/issues?status=open", {}, env);
 			const body = await readBody(res);
 			expect(body.data).toHaveLength(1);
-			expect(Object.keys(body.data[0]).sort()).toEqual([...PUBLIC_KEYS].sort());
+			expect(Object.keys(body.data[0]).sort()).toEqual(
+				[...READ_PUBLIC_KEYS].sort(),
+			);
 			expect(JSON.stringify(body)).not.toContain("user_2abcSECRETclerkid");
 		});
 
@@ -2353,7 +2375,9 @@ describe("Issues CRUD", () => {
 			// 2 ページ目が「新しい順で 2 番目」の行であること。
 			// キーの集合だけを見ていると、どの行を返しても通ってしまう。
 			expect(titlesOf(body)).toEqual(["Issue 2"]);
-			expect(Object.keys(body.data[0]).sort()).toEqual([...PUBLIC_KEYS].sort());
+			expect(Object.keys(body.data[0]).sort()).toEqual(
+				[...READ_PUBLIC_KEYS].sort(),
+			);
 			expect(JSON.stringify(body)).not.toContain("user_2abcSECRETclerkid");
 		});
 
@@ -2367,7 +2391,7 @@ describe("Issues CRUD", () => {
 			setMockUserId(null);
 			const res = await app.request(`/issues/${created.id}`, {}, env);
 			const body = await readBody(res);
-			expect(Object.keys(body).sort()).toEqual([...PUBLIC_KEYS].sort());
+			expect(Object.keys(body).sort()).toEqual([...READ_PUBLIC_KEYS].sort());
 		});
 
 		// 書き込み系（POST / PATCH / DELETE）は認証必須だが、返しているのは

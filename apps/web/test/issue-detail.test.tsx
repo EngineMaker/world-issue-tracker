@@ -12,6 +12,7 @@
 import "./helpers/mock-cookies";
 import { afterEach, describe, expect, it } from "bun:test";
 import {
+	AUTHOR_LABELS,
 	DEFAULT_LOCALE,
 	getUiMessages,
 	ISSUE_SCOPE_LABELS,
@@ -223,6 +224,81 @@ describe("詳細ページ", () => {
 			globalThis.fetch = originalFetch;
 		}
 	}
+
+	// 起票者とコメント投稿者の表示（#67）。
+	//
+	// `IssueCard` / `CommentSection` 単体の描画は `author-display.test.tsx` が
+	// 見ているが、詳細ページがそれらへ API の値を渡せていなければ画面には
+	// 出ない。ページを実際に描画して、結線されていることを確かめる。
+	describe("起票者とコメント投稿者の表示（#67）", () => {
+		const NAMED_ISSUE = {
+			...sampleIssue,
+			is_anonymous: false,
+			display_name: "花子 山田",
+		};
+
+		it("名乗っている起票者の表示名を出す", async () => {
+			const { html } = await renderDetail(
+				sampleIssue.id,
+				Response.json(NAMED_ISSUE),
+			);
+
+			expect(html).toContain("花子 山田");
+			expect(html).not.toContain(AUTHOR_LABELS[DEFAULT_LOCALE].anonymous);
+		});
+
+		it("匿名の Issue には表示名を出さない", async () => {
+			// 匿名を選んだ人の名前は、どの画面にも出ない。API 側も
+			// 匿名の user_id を Clerk へ渡さないので通常は届かないが、
+			// 万一届いても画面が出さないこと
+			const { html } = await renderDetail(
+				sampleIssue.id,
+				Response.json({
+					...sampleIssue,
+					is_anonymous: true,
+					display_name: "花子 山田",
+				}),
+			);
+
+			expect(html).toContain(AUTHOR_LABELS[DEFAULT_LOCALE].anonymous);
+			expect(html).not.toContain("花子 山田");
+		});
+
+		it("名乗っていても表示名が無ければ専用の文言を出す", async () => {
+			const { html } = await renderDetail(
+				sampleIssue.id,
+				Response.json({
+					...sampleIssue,
+					is_anonymous: false,
+					display_name: null,
+				}),
+			);
+
+			expect(html).toContain(AUTHOR_LABELS[DEFAULT_LOCALE].unnamed);
+			expect(html).not.toContain(AUTHOR_LABELS[DEFAULT_LOCALE].anonymous);
+		});
+
+		it("コメントの投稿者を出す", async () => {
+			// 本文と日時だけで、誰が書いたか分からなかった状態からの回帰を防ぐ
+			const { html } = await renderDetail(
+				sampleIssue.id,
+				Response.json(NAMED_ISSUE),
+				Response.json({
+					data: [
+						{
+							...sampleComment,
+							is_anonymous: false,
+							display_name: "次郎 佐藤",
+						},
+					],
+					total: 1,
+				}),
+			);
+
+			expect(html).toContain("次郎 佐藤");
+			expect(html).toContain(sampleComment.body);
+		});
+	});
 
 	it("API を呼び、返ってきた Issue を描画する", async () => {
 		const { html, calls } = await renderDetail(

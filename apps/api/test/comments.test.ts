@@ -375,8 +375,12 @@ describe("Comments", () => {
 			const list = await readBody(res);
 
 			expect(list.data[0]).not.toHaveProperty("user_id");
+			// テーブルの公開カラムに加えて、行に無い派生フィールドが 2 つ載る（#67）。
+			// `display_name` は Clerk から引いた投稿者の表示名、`is_anonymous` は
+			// 「この投稿者を匿名として扱うか」。どちらも生の `user_id` を
+			// 公開しない形で投稿者を出すためのもの
 			expect(Object.keys(list.data[0]).sort()).toEqual(
-				[...PUBLIC_COMMENT_COLUMNS].sort(),
+				[...PUBLIC_COMMENT_COLUMNS, "is_anonymous", "display_name"].sort(),
 			);
 		});
 

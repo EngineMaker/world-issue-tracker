@@ -1,6 +1,6 @@
 import {
 	DEFAULT_LOCALE,
-	getIssueAnonymityLabel,
+	getAuthorLabel,
 	getUiMessages,
 	ISSUE_SCOPE_LABELS,
 	ISSUE_STATUS_LABELS,
@@ -115,13 +115,25 @@ export function IssueCard({
 					{formatCreatedAt(issue.created_at, locale)}
 				</time>
 				{/*
-				  起票者が名乗っているかどうか（#88）。実際の表示名はまだ出せない
-				  （#67 で取得する）が、匿名かどうかの区別だけは一覧の時点で分かる
-				  ようにしておく。何も出さないと「全員匿名」と「全員名乗っている」の
-				  どちらの世界なのかが画面から読み取れない
+				  起票者（#88 / #67）。匿名を選んだ人は「匿名の方」、名乗って
+				  いる人は Clerk の表示名。名前が引けなかった人には匿名とは
+				  別の文言が出る（出し分けは `getAuthorLabel` に寄せてあり、
+				  一覧・詳細・コメントで同じ規則になる）。
+
+				  誰が困っているのか分からない相手を「手伝います」と支援するのは
+				  難しい。とはいえ実名表示が常に正しいわけでもないので、
+				  匿名を選んだ人の名前はここに出ない
 				*/}
 				{" / "}
-				<span>{getIssueAnonymityLabel(issue.is_anonymous, locale)}</span>
+				<span>
+					{getAuthorLabel(
+						{
+							isAnonymous: issue.is_anonymous,
+							displayName: issue.display_name,
+						},
+						locale,
+					)}
+				</span>
 				{/*
 				  「私も困っている」の件数（#112）。0 件のときは出さない。
 				  時系列に並んだだけの一覧に「どれが多くの人に効いているか」という

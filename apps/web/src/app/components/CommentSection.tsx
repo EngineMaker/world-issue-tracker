@@ -3,6 +3,7 @@
 import { SignInButton, useAuth } from "@clerk/nextjs";
 import {
 	DEFAULT_LOCALE,
+	getAuthorLabel,
 	getUiMessages,
 	type Locale,
 } from "@world-issue-tracker/shared";
@@ -121,6 +122,24 @@ export function CommentSection({
 				<ul className="comment-cards">
 					{comments.map((comment) => (
 						<li key={comment.id} className="comment-card">
+							{/*
+							  誰が書いたか（#67）。本文と日時だけだと、起票者本人の
+							  追記なのか第三者の助言なのかが分からず、読み手の
+							  受け取り方が変わる。
+
+							  匿名で立てられた Issue の起票者本人には名前を出さない
+							  （API が `is_anonymous` を真で返す）。出し分けの規則は
+							  一覧・詳細の起票者と同じ `getAuthorLabel` に寄せてある
+							*/}
+							<p className="comment-author">
+								{getAuthorLabel(
+									{
+										isAnonymous: comment.is_anonymous,
+										displayName: comment.display_name,
+									},
+									locale,
+								)}
+							</p>
 							{/* 改行を含む本文をそのまま読めるようにする */}
 							<p className="comment-body">{comment.body}</p>
 							<p className="comment-date">

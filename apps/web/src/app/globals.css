@@ -1590,6 +1590,18 @@ main p {
 	list-style: none;
 }
 
+/*
+  コメントの投稿者（#67）。本文の上に置く。
+  誰の言葉かを読む前に知りたいので、本文より前に出す。
+  本文と同じ濃さだと本文の一部に見えるため、少し弱めて名前だと分かる形にする
+*/
+.comment-author {
+	margin: 0 0 var(--space-1);
+	font-size: var(--text-sm);
+	font-weight: 600;
+	color: var(--ink-soft);
+}
+
 .comment-body {
 	margin: 0 0 var(--space-2);
 	/* 投稿は textarea への入力なので改行が意味を持つ */
