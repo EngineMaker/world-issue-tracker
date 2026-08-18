@@ -20,7 +20,7 @@ import {
 	type IssueFormValues,
 	validateIssueForm,
 } from "@/lib/api";
-import { resizeImageFile } from "@/lib/photo";
+import { createThumbnailFile, resizeImageFile } from "@/lib/photo";
 
 // カテゴリの候補は定数から引く（`@/lib/api`）。
 // ここに直書きすると、表記ゆれを防ぐという目的そのものが崩れる
@@ -64,7 +64,17 @@ function coordinateFieldValue(value: number): string {
 type PhotoState =
 	| { status: "empty" }
 	| { status: "processing" }
-	| { status: "ready"; file: File; previewUrl: string }
+	/**
+	 * `thumbnail` は一覧のカード用に作る小さい派生物（#125）。
+	 * 作れなかったときは null になるが、送信は止めない
+	 * （API 側が原寸に倒して配信する）。
+	 */
+	| {
+			status: "ready";
+			file: File;
+			thumbnail: File | null;
+			previewUrl: string;
+	  }
 	| { status: "failed"; message: string };
 
 /**
@@ -197,9 +207,20 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 			return;
 		}
 
+		/*
+		 * 一覧用のサムネイル（#125）。縮小済みのファイルから作る。
+		 * 失敗しても null になるだけで、投稿は止めない。
+		 *
+		 * 行コメントで書くと、Issue 番号が 3 桁以上のときに
+		 * `#rgb` の直書きと見分けが付かず design-tokens.test.tsx が落ちる
+		 * （あちらはブロックコメントだけを剥がす）
+		 */
+		const thumbnail = await createThumbnailFile(result.file);
+
 		setPhoto({
 			status: "ready",
 			file: result.file,
+			thumbnail,
 			previewUrl: URL.createObjectURL(result.file),
 		});
 	};
@@ -242,6 +263,7 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 				result.data,
 				await getToken(),
 				photo.status === "ready" ? photo.file : null,
+				photo.status === "ready" ? photo.thumbnail : null,
 			);
 			// 自動では遷移させず、この画面で完了を伝えてリンクを出すに留める。
 			// 続けてもう 1 件書く人がこの画面に残れることと、

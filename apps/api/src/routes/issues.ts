@@ -6,6 +6,7 @@ import {
 	escapeLikePattern,
 	ISSUE_PHOTO_CONTENT_TYPES,
 	ISSUE_PHOTO_MAX_BYTES,
+	ISSUE_THUMBNAIL_MAX_BYTES,
 	isIssuePhotoContentType,
 	ListIssuesQuerySchema,
 	parseIssueCursor,
@@ -444,13 +445,15 @@ issues.onError((err, c) => {
  * しない（Zod は File を検証する用途に向かず、サイズと MIME の検査は
  * この後で個別に行う）。
  */
-async function readCreateIssueBody(
-	c: Context<IssuesEnv>,
-): Promise<{ fields: unknown; photo: UploadedPhoto | null }> {
+async function readCreateIssueBody(c: Context<IssuesEnv>): Promise<{
+	fields: unknown;
+	photo: UploadedPhoto | null;
+	thumbnail: UploadedPhoto | null;
+}> {
 	const contentType = c.req.header("Content-Type") ?? "";
 
 	if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
-		return { fields: await c.req.json(), photo: null };
+		return { fields: await c.req.json(), photo: null, thumbnail: null };
 	}
 
 	const form = await c.req.formData();
@@ -471,6 +474,10 @@ async function readCreateIssueBody(
 	};
 
 	const photo = toPhotoFile(form.get("photo"));
+	// 一覧用のサムネイル（#125）。ブラウザが原寸と一緒に送ってくる派生物で、
+	// 無くても構わない（配信側が原寸に倒す）。写真そのものが無いのに
+	// サムネイルだけ来ることは無いので、その組み合わせは後段で捨てる
+	const thumbnail = toPhotoFile(form.get("thumbnail"));
 
 	return {
 		fields: {
@@ -484,6 +491,7 @@ async function readCreateIssueBody(
 			category: text("category")?.trim() || undefined,
 		},
 		photo,
+		thumbnail,
 	};
 }
 
@@ -542,13 +550,19 @@ function toPhotoFile(value: unknown): UploadedPhoto | null {
  */
 function validatePhoto(
 	photo: UploadedPhoto,
+	// 上限だけは呼び出し側が決める。一覧用のサムネイル（#125）は原寸より
+	// ずっと小さいはずで、同じ 5MB を当てると上限としての意味を失う
+	// （一覧を軽くするための派生物として 5MB を受け付けることになる）。
+	// MIME の規則は共有する。どちらも同じ経路で配信されるので、
+	// 通してよい形式が変わる理由が無い
+	maxBytes: number = ISSUE_PHOTO_MAX_BYTES,
 ):
 	| { ok: true; contentType: IssuePhotoContentType }
 	| { ok: false; error: string } {
-	if (photo.size > ISSUE_PHOTO_MAX_BYTES) {
+	if (photo.size > maxBytes) {
 		return {
 			ok: false,
-			error: `Photo must be ${ISSUE_PHOTO_MAX_BYTES} bytes or smaller`,
+			error: `Photo must be ${maxBytes} bytes or smaller`,
 		};
 	}
 
@@ -580,6 +594,21 @@ export function photoObjectKey(issueId: string): string {
 }
 
 /**
+ * R2 に置く一覧用サムネイルのオブジェクトキーを組み立てる（#125）。
+ *
+ * 原寸のキー（`issues/<id>`）から機械的に導けるので、DB に列を足していない。
+ * 「あるかどうか」は R2 を引けば分かり、無ければ原寸に倒すだけで済む。
+ * 列を足すと、#65 より前に投稿された写真のために結局 NULL の分岐が要り、
+ * 分岐が DB と R2 の 2 か所に増える。
+ *
+ * R2 のキー空間はフラットなので、`issues/<id>` と `issues/<id>/thumbnail` が
+ * 親子として衝突することはない。
+ */
+export function photoThumbnailObjectKey(issueId: string): string {
+	return `${photoObjectKey(issueId)}/thumbnail`;
+}
+
+/**
  * 起票の途中で失敗したときに、作りかけの行を取り消す。
  *
  * 呼ばれるのは写真の保存に失敗した経路だけで、この時点の行はまだ
@@ -608,7 +637,7 @@ async function deleteIssueRow(
 // JSON と multipart/form-data の両方を受ける。写真（#65）を付けるときは
 // multipart で、`photo` パートに画像を入れる。
 issues.post("/", clerkAuth(), requireAuth, async (c) => {
-	const { fields, photo } = await readCreateIssueBody(c);
+	const { fields, photo, thumbnail } = await readCreateIssueBody(c);
 	const parsed = CreateIssueSchema.safeParse(fields);
 	if (!parsed.success) {
 		return c.json({ error: parsed.error.flatten() }, 400);
@@ -623,6 +652,24 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 			return c.json({ error: validated.error }, 400);
 		}
 		photoContentType = validated.contentType;
+	}
+
+	// サムネイル（#125）も原寸と同じ規則で検査する。派生物ではあるが、
+	// 配信されるのは原寸と同じ経路（同一オリジンで `Content-Type` を名乗って
+	// 返す）なので、SVG や `text/html` を通す穴にしてはいけない。
+	//
+	// 検査に落ちたら 400 にして黙って捨てない。送ってくるのは自前の
+	// ブラウザ側だけで、そこは作れなかったときに送らない作りになっている
+	// （`createThumbnailFile` が null を返す）。それでも届いたなら、
+	// 想定と違うものが来ているということ。握り潰すと気付けなくなる。
+	let thumbnailContentType: IssuePhotoContentType | null = null;
+	// 写真そのものが無いのにサムネイルだけ来ても保存する先が無いので見ない
+	if (photo && thumbnail) {
+		const validated = validatePhoto(thumbnail, ISSUE_THUMBNAIL_MAX_BYTES);
+		if (!validated.ok) {
+			return c.json({ error: validated.error }, 400);
+		}
+		thumbnailContentType = validated.contentType;
 	}
 
 	const {
@@ -716,6 +763,29 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 		return c.json({ error: "Failed to store photo" }, 500);
 	}
 
+	/*
+	 * サムネイル（#125）は原寸と扱いを変える。置けなくても起票は成功させ、
+	 * ログにだけ残す。
+	 *
+	 * 原寸の失敗を 500 にしているのは「写真を付けたつもりの Issue が
+	 * 写真無しで公開される」のを避けるため。サムネイルにその問題は無い。
+	 * 無ければ配信側が原寸に倒すので、利用者から見た欠落は起きず、
+	 * 一覧がその 1 件だけ重くなるだけで済む。派生物が作れなかったことを
+	 * 理由に起票をやり直させる方が損失が大きい。
+	 */
+	const thumbnailKey = photoThumbnailObjectKey(issueId);
+	let thumbnailStored = false;
+	if (thumbnail && thumbnailContentType) {
+		try {
+			await c.env.PHOTOS.put(thumbnailKey, await thumbnail.arrayBuffer(), {
+				httpMetadata: { contentType: thumbnailContentType },
+			});
+			thumbnailStored = true;
+		} catch (error) {
+			console.error("Failed to store photo thumbnail", error);
+		}
+	}
+
 	const updated = await c.env.DB.prepare(
 		`UPDATE issues SET photo_key = ?, photo_content_type = ? WHERE id = ? RETURNING ${PUBLIC_SELECT}`,
 	)
@@ -727,6 +797,13 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 		await c.env.PHOTOS.delete(key).catch((error: unknown) => {
 			console.error("Failed to clean up orphaned photo", error);
 		});
+		// 置けたサムネイルも一緒に消す。行ごと消える以上、原寸と同じく
+		// どこからも参照されない
+		if (thumbnailStored) {
+			await c.env.PHOTOS.delete(thumbnailKey).catch((error: unknown) => {
+				console.error("Failed to clean up orphaned thumbnail", error);
+			});
+		}
 		await deleteIssueRow(c, issueId);
 		return c.json({ error: "Failed to store photo" }, 500);
 	}
@@ -1061,6 +1138,107 @@ issues.get("/:id/viewer", clerkAuth(), async (c) => {
  * 逆に `attachment` の既定に倒れて毎回ダウンロードされるのを避けるため。
  * `<img>` から読む用途なので inline が正しい。
  */
+/**
+ * 中身が変わらない画像のキャッシュ指示。
+ *
+ * 画像は差し替えられない（#65 の範囲外）ので、キーが同じなら中身も同じ。
+ * 詳細ページを開くたびに R2 から読み直さずに済むよう長めに持たせる。
+ * 通報による削除が入ったときは 404 に変わるが、それがキャッシュに
+ * 反映されるまでの遅れは許容する（`private` にはしない ＝ 公開画像なので）。
+ */
+const IMMUTABLE_PHOTO_CACHE = "public, max-age=31536000, immutable";
+
+/**
+ * 中身が後から変わりうる画像のキャッシュ指示（#125）。
+ *
+ * サムネイルの経路は、派生物が無いときに原寸へ倒す。同じ URL の中身が
+ * 「原寸 → サムネイル」に変わりうるということなので、`immutable` は
+ * 事実に反する。付けたまま配ると、後から派生物を用意しても、一度でも
+ * 一覧を開いた人のブラウザや中間キャッシュは最大 1 年間 原寸を返し続ける。
+ *
+ * 1 時間にしているのは、一覧を続けて見る間は読み直さずに済み、かつ
+ * 派生物を用意した日のうちに切り替わる長さだから。
+ */
+const REVALIDATING_PHOTO_CACHE = "public, max-age=3600";
+
+/**
+ * R2 のオブジェクトを画像のレスポンスとして返す。原寸とサムネイルで共有する。
+ *
+ * `contentType` は保存時に `validatePhoto` を通した値だけが渡る前提。
+ * 無い（NULL の）ときは名乗らずにバイト列だけ返す。推測して間違った型を
+ * 名乗るより安全側に倒す。
+ *
+ * `Content-Disposition: inline` を明示しているのは、`attachment` の既定に
+ * 倒れて毎回ダウンロードされるのを避けるため。`<img>` から読む用途なので
+ * inline が正しい。
+ */
+function photoResponse(
+	object: R2ObjectBody,
+	contentType: string | null | undefined,
+	cacheControl: string = IMMUTABLE_PHOTO_CACHE,
+): Response {
+	const headers = new Headers();
+	if (contentType) {
+		headers.set("Content-Type", contentType);
+	}
+	headers.set("Content-Disposition", "inline");
+	headers.set("Cache-Control", cacheControl);
+	// R2 が返す ETag をそのまま通す。条件付きリクエストで 304 を返す
+	// 実装はまだ無いが、中間のキャッシュが使える
+	headers.set("ETag", object.httpEtag);
+
+	return new Response(object.body, { headers });
+}
+
+/**
+ * GET /issues/:id/photo/thumbnail — 一覧用の小さい写真を返す (public)
+ *
+ * 一覧（`/`, `/issues`）は 1 ページ 20 件並ぶ。詳細ページ用の原寸を
+ * そのまま並べると 1 画面で数 MB を読むことになるため、投稿時に
+ * ブラウザが作った 480px の派生物をここから配る（#125）。
+ *
+ * サムネイルが無いときは原寸に倒す。#125 より前に投稿された写真には
+ * 派生物が存在せず、そこで 404 にすると「古い Issue だけ一覧から
+ * 画像が消える」ことになる。重いのは我慢できるが、出ないのは
+ * この Issue が直そうとしている症状そのものになってしまう。
+ *
+ * 「写真そのものが無い」は原寸と同じく 404。倒す先が無い。
+ */
+issues.get("/:id/photo/thumbnail", async (c) => {
+	const id = c.req.param("id");
+	const row = await c.env.DB.prepare(
+		"SELECT photo_key, photo_content_type FROM issues WHERE id = ?",
+	)
+		.bind(id)
+		.first<{ photo_key: string | null; photo_content_type: string | null }>();
+
+	if (!row?.photo_key) {
+		return c.json({ error: "Photo not found" }, 404);
+	}
+
+	// サムネイルのキーは原寸のキーから導ける（`photoThumbnailObjectKey`）。
+	// DB に列を持たないので、あるかどうかは R2 に聞く
+	const thumbnail = await c.env.PHOTOS.get(photoThumbnailObjectKey(id));
+	if (thumbnail) {
+		// 保存時に `validatePhoto` を通した MIME が `httpMetadata` に入っている。
+		// 原寸と違って DB に控えが無いため、R2 のメタデータが唯一の出どころ
+		return photoResponse(thumbnail, thumbnail.httpMetadata?.contentType);
+	}
+
+	const original = await c.env.PHOTOS.get(row.photo_key);
+	if (!original) {
+		console.error("Photo object missing in R2", row.photo_key);
+		return c.json({ error: "Photo not found" }, 404);
+	}
+	// 倒した先は原寸だが、この URL は派生物が用意されれば中身が変わる。
+	// `immutable` で配ると差し替えが利用者に届かなくなる
+	return photoResponse(
+		original,
+		row.photo_content_type,
+		REVALIDATING_PHOTO_CACHE,
+	);
+});
+
 issues.get("/:id/photo", async (c) => {
 	const id = c.req.param("id");
 	const row = await c.env.DB.prepare(
@@ -1084,23 +1262,7 @@ issues.get("/:id/photo", async (c) => {
 		return c.json({ error: "Photo not found" }, 404);
 	}
 
-	// 保存時に検証済みの MIME を使う。行に入っていない（NULL の）ときは
-	// 名乗らずにバイト列だけ返す。推測して間違った型を名乗るより安全側
-	const headers = new Headers();
-	if (row.photo_content_type) {
-		headers.set("Content-Type", row.photo_content_type);
-	}
-	headers.set("Content-Disposition", "inline");
-	// 画像は差し替えられない（#65 の範囲外）ので、キーが同じなら中身も同じ。
-	// 詳細ページを開くたびに R2 から読み直さずに済むよう長めに持たせる。
-	// 通報による削除が入ったときは 404 に変わるが、それがキャッシュに
-	// 反映されるまでの遅れは許容する（`private` にはしない ＝ 公開画像なので）
-	headers.set("Cache-Control", "public, max-age=31536000, immutable");
-	// R2 が返す ETag をそのまま通す。条件付きリクエストで 304 を返す
-	// 実装はまだ無いが、中間のキャッシュが使える
-	headers.set("ETag", object.httpEtag);
-
-	return new Response(object.body, { headers });
+	return photoResponse(object, row.photo_content_type);
 });
 
 // GET /issues/:id — Get by ID (public)
@@ -1236,6 +1398,14 @@ issues.delete("/:id", clerkAuth(), requireAuth, async (c) => {
 		await c.env.PHOTOS.delete(String(result.photo_key)).catch(
 			(error: unknown) => {
 				console.error("Failed to delete photo for removed issue", error);
+			},
+		);
+		// 一覧用のサムネイル（#125）も一緒に消す。DB に控えが無いので
+		// 「あるか」は聞かずに消しに行く（R2 の delete は存在しないキーでも
+		// エラーにならない）。残すと原寸と同じく孤児ファイルになる
+		await c.env.PHOTOS.delete(photoThumbnailObjectKey(String(result.id))).catch(
+			(error: unknown) => {
+				console.error("Failed to delete thumbnail for removed issue", error);
 			},
 		);
 	}

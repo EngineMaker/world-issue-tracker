@@ -221,6 +221,7 @@ function buildCreateIssueRequest(
 	input: CreateIssue,
 	photo: File | null,
 	token: string,
+	thumbnail: File | null,
 ): { headers: Record<string, string>; body: BodyInit } {
 	const headers: Record<string, string> = {
 		Authorization: `Bearer ${token}`,
@@ -248,6 +249,11 @@ function buildCreateIssueRequest(
 		form.set("category", input.category);
 	}
 	form.set("photo", photo);
+	// 一覧用のサムネイル（#125）。作れなかったときは送らない。
+	// 受け取る側は無ければ原寸に倒して配信するので、欠けても壊れない
+	if (thumbnail) {
+		form.set("thumbnail", thumbnail);
+	}
 
 	return { headers, body: form };
 }
@@ -260,6 +266,9 @@ function buildCreateIssueRequest(
  * 明示的に渡す必要がある（API 側もこの経路を想定しており、Bearer があれば
  * Origin 検証を免除する — `apps/api/src/middleware/origin.ts`）。
  *
+ * `thumbnail` は一覧のカード用に作った小さい派生物（#125）。写真がある
+ * ときだけ意味を持ち、無ければ送らない。受け取る側は無ければ原寸に倒す。
+ *
  * 写真は送る前にブラウザ側で縮小してある前提（`lib/photo.ts`）。
  * ここでサイズを検査していないのは、縮小しても上限を超えた場合に
  * 「フォームで止めて理由を出す」方が、送信してから 400 を見せるより
@@ -269,6 +278,7 @@ export async function createIssue(
 	input: CreateIssue,
 	token: string | null,
 	photo: File | null = null,
+	thumbnail: File | null = null,
 ): Promise<{ id: string }> {
 	if (!token) {
 		throw new CreateIssueError(
@@ -277,7 +287,12 @@ export async function createIssue(
 		);
 	}
 
-	const { headers, body } = buildCreateIssueRequest(input, photo, token);
+	const { headers, body } = buildCreateIssueRequest(
+		input,
+		photo,
+		token,
+		thumbnail,
+	);
 
 	let response: Response;
 	try {
