@@ -47,19 +47,25 @@
 	// 実行時に読む形へ移す余地を残すため。deploy.yml の値と一致させること。
 	"vars": {
 		"NEXT_PUBLIC_API_URL": "https://world-issue-tracker-api.mktoho.workers.dev",
-		// 地図の配信元（#63 → #118 で MapLibre GL JS へ）。空のままなので
-		// Issue 詳細ページと /map は地図を出さず、座標の数値だけを表示する。
+		// 地図の配信元（#63 → #118 で MapLibre GL JS へ → #115 で本番の配信元）。
 		//
-		// 空にしているのは本番用の配信元がまだ無いため。地図ライブラリの例で
-		// 使われる OpenStreetMap の公開タイルサーバーは、本番アプリからの
-		// 直接利用が利用規約で制限されている
-		// （https://operations.osmfoundation.org/policies/tiles/）。
+		// Protomaps のベースマップ（2026-08-17 ビルド）から日本周辺を
+		// 切り出した PMTiles を R2 に置き、カスタムドメインで配っている。
+		// OpenStreetMap の公開タイルサーバーは本番での直接利用が利用規約で
+		// 制限されているため（https://operations.osmfoundation.org/policies/tiles/）、
+		// 自前配信にしている。
 		//
-		// 本番は PMTiles を自前で配る形になる（#115）。切り出しと R2 への
-		// 配置が済んだら、ここと deploy.yml の両方に `.pmtiles` の URL と
-		// 帰属表示を入れる。受け付ける値の形は .env.local.example 参照。
-		"NEXT_PUBLIC_MAP_TILE_URL": "",
-		"NEXT_PUBLIC_MAP_TILE_ATTRIBUTION": ""
+		// ファイル名に日付が入っているのは、作り直したときに URL が変わり、
+		// キャッシュを気にせず差し替えられるようにするため。更新するときは
+		// 新しいキーで上げてから、ここと deploy.yml の値を差し替える。
+		//
+		// 範囲は東経 122.5〜154.0 / 北緯 20.2〜45.8、ズーム 0〜15。
+		// この範囲の外には地図が出ない（タイルが存在しない）。
+		//
+		// 帰属表示は ODbL の要件。MapLibre がソースの attribution を読んで
+		// 地図の隅に出す（apps/web/src/lib/map-style.ts）。消さないこと。
+		"NEXT_PUBLIC_MAP_TILE_URL": "https://tiles.emaker.dev/japan-z15-20260817.pmtiles",
+		"NEXT_PUBLIC_MAP_TILE_ATTRIBUTION": "© <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\" rel=\"noreferrer\">OpenStreetMap</a> contributors"
 	},
 	// 本番の入口（#98）。
 	//
