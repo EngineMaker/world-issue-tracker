@@ -32,6 +32,18 @@ export type PublicComment = {
 	 * `null` の意味は `lib/issues.ts` の `PublicIssue.display_name` と同じ。
 	 */
 	display_name: string | null;
+
+	/**
+	 * このコメントを書いたのが閲覧者本人か（#99）。
+	 *
+	 * 削除ボタンを出す条件。生の `user_id` は公開されないので、画面が
+	 * 「自分のコメントか」を知る手段はこの値だけになる。
+	 *
+	 * トークンを付けずに取得したときは常に false で返る。詳細ページの
+	 * サーバー側描画がまさにそれなので、ログイン済みの閲覧者に対しては
+	 * `CommentSection` がブラウザ側で取り直す。
+	 */
+	viewer_is_author: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -47,7 +59,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function parsePublicComment(value: unknown): PublicComment | null {
 	if (!isRecord(value)) return null;
 
-	const { id, issue_id, body, created_at, is_anonymous, display_name } = value;
+	const {
+		id,
+		issue_id,
+		body,
+		created_at,
+		is_anonymous,
+		display_name,
+		viewer_is_author,
+	} = value;
 
 	if (typeof id !== "string") return null;
 	if (typeof issue_id !== "string") return null;
@@ -73,6 +93,16 @@ export function parsePublicComment(value: unknown): PublicComment | null {
 		return null;
 	}
 
+	// `viewer_is_author`（#99）も欠けていても弾かない。理由は上と同じで、
+	// 削除ボタンという付加的な機能のために会話が読めなくなってはいけない。
+	//
+	// 倒す先は false（自分のものではない）。true に倒すと、他人のコメントに
+	// 削除ボタンが出る。押しても API が 403 で弾くので消えはしないが、
+	// 消せるように見せて失敗させるのは、出さないより悪い。
+	if (viewer_is_author !== undefined && typeof viewer_is_author !== "boolean") {
+		return null;
+	}
+
 	return {
 		id,
 		issue_id,
@@ -80,6 +110,7 @@ export function parsePublicComment(value: unknown): PublicComment | null {
 		created_at,
 		is_anonymous: is_anonymous ?? true,
 		display_name: display_name ?? null,
+		viewer_is_author: viewer_is_author ?? false,
 	};
 }
 
@@ -281,4 +312,95 @@ export async function postComment(
 		);
 	}
 	return created;
+}
+
+/**
+ * `deleteComment` が削除に失敗したときに投げるエラー（#99）。
+ *
+ * `message` は開発者が状況を読めるようにするためのもので、**画面には出さない**。
+ * 表示する文言は `status` を見て `CommentSection` が `packages/shared` の
+ * 辞書から選ぶ（`PostCommentError` は日本語の `message` をそのまま出しており、
+ * そこだけロケールに追随できていない。同じ作りを増やさない）。
+ */
+export class DeleteCommentError extends Error {
+	readonly status: number | null;
+
+	constructor(message: string, status: number | null) {
+		super(message);
+		this.name = "DeleteCommentError";
+		this.status = status;
+	}
+}
+
+/**
+ * 自分のコメントを削除する（#99）。
+ *
+ * 消せるのは自分のコメントだけで、他人のものは API が 403 で弾く。画面も
+ * `viewer_is_author` が真のコメントにしか削除ボタンを出さないが、
+ * 判定を画面だけに置くと、DOM をいじれば誰の分でも呼べてしまう。
+ *
+ * 投稿と同じく `Authorization: Bearer` でトークンを渡す（別オリジンなので
+ * Clerk のセッション Cookie は届かない）。
+ *
+ * 成功しても返す値は無い。API は 204 を返し、消えたという事実以外に
+ * 画面が使う情報が無いため。
+ */
+export async function deleteComment(
+	issueId: string,
+	commentId: string,
+	token: string | null,
+	fetchImpl: FetchLike = globalThis.fetch,
+): Promise<void> {
+	if (!token) {
+		throw new DeleteCommentError("トークンが無い（未ログイン）", 401);
+	}
+
+	let response: Response;
+	try {
+		response = await fetchImpl(
+			`${API_BASE_URL}/issues/${encodeURIComponent(issueId)}/comments/${encodeURIComponent(commentId)}`,
+			{
+				method: "DELETE",
+				headers: { Authorization: `Bearer ${token}` },
+			},
+		);
+	} catch {
+		// `postComment` と同じく、通信そのものが成立しなかった場合
+		throw new DeleteCommentError("API に接続できなかった", null);
+	}
+
+	if (!response.ok) {
+		throw new DeleteCommentError(
+			`API が ${response.status} を返した`,
+			response.status,
+		);
+	}
+}
+
+/**
+ * 取り直した一覧から「自分のコメントか」だけを手元の一覧へ写す（#99）。
+ *
+ * 詳細ページ（Server Component）はトークンを渡せないので、最初に描画される
+ * 一覧は `viewer_is_author` が全件 false になっている。ブラウザ側で取り直して
+ * 埋め直すのだが、そこで一覧を丸ごと差し替えてはいけない。取り直しが返るまでの
+ * 間に投稿されたコメントは手元にしか無く、置き換えると書いた直後に消える。
+ *
+ * 取り直しの目的は削除ボタンの出し分けだけなので、写すのもその 1 項目に限る。
+ * 真になったものだけを反映し、false へ戻すことはしない。手元で true なのは
+ * 「自分が今このブラウザで投稿した」場合だけで、それが取り直しの結果
+ * （投稿が届く前の一覧かもしれない）で覆されるのは正しくない。
+ */
+export function applyViewerFlags(
+	current: PublicComment[],
+	fetched: PublicComment[],
+): PublicComment[] {
+	const authored = new Set(
+		fetched.filter((comment) => comment.viewer_is_author).map((c) => c.id),
+	);
+
+	return current.map((comment) =>
+		!comment.viewer_is_author && authored.has(comment.id)
+			? { ...comment, viewer_is_author: true }
+			: comment,
+	);
 }

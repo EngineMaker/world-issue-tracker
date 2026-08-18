@@ -557,6 +557,9 @@ describe("起票者とコメント投稿者の表示名（#67）", () => {
 					"created_at",
 					"is_anonymous",
 					"display_name",
+					// 「これを書いたのは閲覧者本人か」（#99）。削除ボタンの出し分けに
+					// 使う真偽値で、これも生の ID を公開しないための代替物
+					"viewer_is_author",
 				].sort(),
 			);
 		});

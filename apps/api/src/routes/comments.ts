@@ -4,7 +4,7 @@ import { type Context, Hono } from "hono";
 import type { CommentRow, IssueRow } from "../db/rows";
 import type { Bindings } from "../index";
 import { fetchDisplayNames } from "../lib/display-names";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, viewerUserId } from "../middleware/auth";
 import { clerkAuth } from "../middleware/clerk";
 
 /**
@@ -100,6 +100,20 @@ const READ_SELECT = [
 type PublicCommentWithAuthor = PublicComment & {
 	is_anonymous: boolean;
 	display_name: string | null;
+
+	/**
+	 * このコメントを書いたのが閲覧者本人か（#99）。
+	 *
+	 * 削除ボタンを出す条件。`user_id` を公開しない方針は変えないので、
+	 * 画面が「自分のコメントか」を知る手段はこの真偽値だけになる
+	 * （`help-offers.ts` の `viewer_offered` と同じ考え方だが、あちらは
+	 * 1 Issue に 1 件しか持てないのでレスポンス全体に 1 つで足りる。
+	 * コメントは同じ人が何件でも書けるため、行ごとに持たせる）。
+	 *
+	 * 未ログイン・Clerk 未初期化なら常に false。判定を「取得できなかった」
+	 * 側に倒すことで、他人のコメントに削除ボタンが出ることが起きない。
+	 */
+	viewer_is_author: boolean;
 };
 
 /**
@@ -140,6 +154,11 @@ async function resolveCommentAuthors(
 			.map((row) => row.user_id as string),
 	);
 
+	// 閲覧者。ログインしていなければ null なので、どの行とも一致しない（#99）。
+	// 匿名の Issue の起票者本人であっても、自分のコメントは自分で消せる。
+	// 匿名は「名前を出さない」ことであって、自分の発言を手放すことではない。
+	const viewer = viewerUserId(c);
+
 	return rows.map((row) => {
 		const anonymous = isAnonymousComment(row);
 		return {
@@ -149,6 +168,7 @@ async function resolveCommentAuthors(
 				anonymous || !row.user_id
 					? null
 					: (displayNames.get(row.user_id) ?? null),
+			viewer_is_author: viewer !== null && row.user_id === viewer,
 		};
 	});
 }
@@ -215,7 +235,17 @@ async function findIssue(
 type IssueOwner = Pick<IssueRow, "id" | "user_id" | "is_anonymous">;
 
 // GET /issues/:id/comments — List (public)
-comments.get("/", async (c) => {
+//
+// 未ログインでも読める。会話は Issue の状況そのものなので、読むのに
+// ログインを要求しない。
+//
+// `clerkAuth()` を差しているのは認証を要求するためではなく、ログイン中なら
+// 「どれが自分のコメントか」(`viewer_is_author`) を一緒に返すため（#99）。
+// このミドルウェアはキー不在・認証失敗のいずれでも未認証のまま先へ進むので
+// （`middleware/clerk.ts`）、公開エンドポイントがログインの成否や Clerk の
+// 可用性に巻き込まれることはない。`requireAuth` は差していない
+// （`/issues/:id/help-offers` の GET と同じ形）。
+comments.get("/", clerkAuth(), async (c) => {
 	const found = await findIssue(c);
 	if ("response" in found) {
 		return found.response;
@@ -297,4 +327,95 @@ comments.post("/", clerkAuth(), requireAuth, async (c) => {
 	// 遷移先が詳細ページで、追記先の一覧を持たないため。
 	const [comment] = await resolveCommentAuthors(c, [result], found.issue);
 	return c.json(comment, 201);
+});
+
+/**
+ * そのコメントを閲覧者が消してよいか確かめる（#99）。
+ *
+ * 消せるのは自分のコメントだけ。起票者に「自分の Issue に付いた他人の
+ * コメント」の削除権は与えていない。「みんなで直す」前提のサービスで、
+ * 都合の悪い指摘を消せる仕組みになりうるため（荒らし対策が要るなら
+ * 通報として別に設計する）。
+ *
+ * 存在しなければ 404、他人のものなら 403 を返す。403 で存在を認めるのは、
+ * コメントに公開 GET がある以上、その ID の存在は元から隠せていないため
+ * （`issues.ts` の `checkOwnership` と同じ判断）。
+ *
+ * `issue_id` も条件に入れる。`:commentId` だけで引くと、親と無関係な URL
+ * （別 Issue のコメント欄）からでも消せてしまう。
+ *
+ * `comments.user_id` は NOT NULL なので、`issues` 側にある「認証導入前の
+ * 行は誰のものでもない」という分岐は要らない。
+ */
+async function checkCommentOwnership(
+	c: Context<{ Bindings: Bindings }>,
+	issueId: string,
+	commentId: string,
+): Promise<Response | null> {
+	const row = await c.env.DB.prepare(
+		"SELECT user_id FROM comments WHERE id = ? AND issue_id = ?",
+	)
+		.bind(commentId, issueId)
+		.first<Pick<CommentRow, "user_id">>();
+
+	if (!row) {
+		return c.json({ error: "Comment not found" }, 404);
+	}
+
+	if (row.user_id !== getAuth(c)?.userId) {
+		return c.json({ error: "Forbidden" }, 403);
+	}
+
+	return null;
+}
+
+// DELETE /issues/:id/comments/:commentId — Delete (auth required, author only)
+//
+// 物理削除。論理削除（「削除されました」を残す）は採らない。Issue 本体の
+// 削除が物理削除で、コメントは `ON DELETE CASCADE` で一緒に消える。ここだけ
+// 墓標が残ると「Issue ごと消せば跡形もないのに、1 件だけ消すと残る」という
+// 不揃いになる（#99 の決定）。
+//
+// `help_offers` の DELETE と違って URL に対象の ID を取る。あちらは
+// 1 ユーザー 1 Issue に 1 件しか持てないので「誰の分を消すか」がトークンから
+// 決まるが、コメントは同じ人が何件でも書けるため、どれを消すかの指定が要る。
+comments.delete("/:commentId", clerkAuth(), requireAuth, async (c) => {
+	// 親 Issue の存在を先に確かめる。存在しない Issue の URL に対して
+	// コメントの有無を答える意味が無い（POST と同じ順序）。
+	const found = await findIssue(c);
+	if ("response" in found) {
+		return found.response;
+	}
+	const issueId = found.issue.id;
+	const commentId = c.req.param("commentId");
+
+	const denied = await checkCommentOwnership(c, issueId, commentId);
+	if (denied) {
+		return denied;
+	}
+
+	const userId = getAuth(c)?.userId;
+
+	// 所有者チェックとの間で行が変わる可能性に備え、DELETE 自体にも
+	// 投稿者の条件を入れる（`DELETE /issues/:id` と同じ二段構え）。
+	// 片方だけでは、チェックを通った後に行が別人のものへ差し替わった場合に
+	// 他人のコメントを消してしまう。
+	const deleted = await c.env.DB.prepare(
+		"DELETE FROM comments WHERE id = ? AND issue_id = ? AND user_id = ? RETURNING id",
+	)
+		.bind(commentId, issueId, userId)
+		.first<Pick<CommentRow, "id">>();
+
+	// チェックを通ったのにここへ来るのは、その隙に行が消えた場合。
+	// 望まれた状態（そのコメントが無い）は成立しているが、削除したのが
+	// 自分の操作だとは言えないので、成功として返さず 404 にする。
+	if (!deleted) {
+		return c.json({ error: "Comment not found" }, 404);
+	}
+
+	// 返す本体は無い。`DELETE /issues/:id` は消した Issue を返しているが、
+	// あちらは写真の後始末に行の内容（`photo_key`）が要るという事情がある。
+	// コメントにはそれが無く、画面も消えたことしか使わない
+	// （`DELETE /issues/:id/help-offers` と同じ 204）。
+	return c.body(null, 204);
 });
