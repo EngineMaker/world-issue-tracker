@@ -208,6 +208,20 @@ export function issuePhotoUrl(issueId: string): string {
 	return `${resolveApiBaseUrl()}/issues/${encodeURIComponent(issueId)}/photo`;
 }
 
+/**
+ * 一覧のカードに出すサムネイルの URL を組み立てる（#125）。
+ *
+ * 一覧は 1 ページ 20 件並ぶので、詳細ページと同じ原寸を指すと
+ * 表示 1 回で数 MB を読むことになる。投稿時にブラウザが作った
+ * 480px の派生物を配る経路を使う。
+ *
+ * 派生物を持たない写真（#125 より前の投稿）に対しても URL は同じで、
+ * API 側が原寸に倒して返す。呼び出し側で出し分ける必要はない。
+ */
+export function issuePhotoThumbnailUrl(issueId: string): string {
+	return `${issuePhotoUrl(issueId)}/thumbnail`;
+}
+
 /** `GET /issues` のレスポンスを検証する。合わなければ null。 */
 export function parseListIssuesResponse(
 	value: unknown,

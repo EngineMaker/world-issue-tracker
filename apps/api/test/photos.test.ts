@@ -9,7 +9,7 @@ vi.mock("@clerk/backend", async () => {
 });
 
 import { createApp } from "../src/index";
-import { photoObjectKey } from "../src/routes/issues";
+import { photoObjectKey, photoThumbnailObjectKey } from "../src/routes/issues";
 import { setMockUserId } from "./helpers/clerk-mock";
 import { applyMigrations } from "./helpers/migrate";
 
@@ -73,6 +73,8 @@ function imageBytes(size: number): Uint8Array {
 async function createIssueWithPhoto(
 	photo: { bytes: Uint8Array; type: string; name?: string } | null,
 	fields: Record<string, string> = {},
+	// 一覧用のサムネイル（#125）。ブラウザが原寸と一緒に送ってくる派生物
+	thumbnail: { bytes: Uint8Array; type: string; name?: string } | null = null,
 ): Promise<Response> {
 	const form = new FormData();
 	form.set("title", fields.title ?? validIssue.title);
@@ -88,6 +90,13 @@ async function createIssueWithPhoto(
 			"photo",
 			new Blob([photo.bytes], { type: photo.type }),
 			photo.name ?? "photo.jpg",
+		);
+	}
+	if (thumbnail) {
+		form.set(
+			"thumbnail",
+			new Blob([thumbnail.bytes], { type: thumbnail.type }),
+			thumbnail.name ?? "thumbnail.jpg",
 		);
 	}
 
@@ -428,6 +437,191 @@ describe("Issue photos", () => {
 			expect(res.headers.get("ETag")).toBeTruthy();
 			// ヘッダしか見ないときもボディは読み切る（理由は "is public"）
 			await res.arrayBuffer();
+		});
+	});
+
+	/*
+	 * 一覧用のサムネイル（Issue #125）。
+	 *
+	 * 一覧に写真が出ておらず、サイトが文字だけに見えるという感想が
+	 * 本番の利用者から届いた。一覧は 20 件並ぶので、詳細ページ用の原寸を
+	 * そのまま並べるわけにはいかない。投稿時にブラウザが作った派生物を
+	 * 別のキーに置き、専用の経路から配る。
+	 *
+	 * ここで確かめたいのは 3 つ:
+	 *  - 送られた派生物が原寸とは別に保存され、そちらが返ること
+	 *  - 派生物を持たない写真（#125 より前の投稿）でも画像が返ること
+	 *  - 派生物も原寸と同じ検査を通ること（配信経路が同じなので）
+	 */
+	describe("photo thumbnails", () => {
+		it("stores the thumbnail under its own key, apart from the original", async () => {
+			const photoBytes = imageBytes(2048);
+			const thumbnailBytes = imageBytes(256);
+			const res = await createIssueWithPhoto(
+				{ bytes: photoBytes, type: "image/jpeg" },
+				{},
+				{ bytes: thumbnailBytes, type: "image/jpeg" },
+			);
+			expect(res.status).toBe(201);
+			const { id } = await readBody(res);
+
+			// 原寸は原寸のキーのまま。サムネイルに上書きされていない
+			const original = await env.PHOTOS.get(photoObjectKey(id));
+			expect(
+				new Uint8Array(await (original as R2ObjectBody).arrayBuffer()),
+			).toEqual(photoBytes);
+
+			const stored = await env.PHOTOS.get(photoThumbnailObjectKey(id));
+			expect(stored, "サムネイルが R2 に置かれていない").not.toBeNull();
+			expect(
+				new Uint8Array(await (stored as R2ObjectBody).arrayBuffer()),
+			).toEqual(thumbnailBytes);
+		});
+
+		it("serves the thumbnail bytes, not the original", async () => {
+			const photoBytes = imageBytes(2048);
+			const thumbnailBytes = imageBytes(256);
+			const created = await createIssueWithPhoto(
+				{ bytes: photoBytes, type: "image/jpeg" },
+				{},
+				{ bytes: thumbnailBytes, type: "image/jpeg" },
+			);
+			const { id } = await readBody(created);
+
+			const res = await app.request(`/issues/${id}/photo/thumbnail`, {}, env);
+
+			expect(res.status).toBe(200);
+			expect(res.headers.get("Content-Type")).toBe("image/jpeg");
+			const received = new Uint8Array(await res.arrayBuffer());
+			// 一覧が原寸を読んでいないこと。ここが原寸に戻ると #125 の
+			// 受け入れ条件（元画像をそのまま並べない）が黙って壊れる
+			expect(received.byteLength).toBe(thumbnailBytes.byteLength);
+			expect(received).toEqual(thumbnailBytes);
+		});
+
+		it("keeps serving the original when no thumbnail was uploaded", async () => {
+			// #125 より前に投稿された写真。派生物が無いからといって 404 に
+			// すると、古い Issue だけ一覧から画像が消える
+			const photoBytes = imageBytes(512);
+			const created = await createIssueWithPhoto({
+				bytes: photoBytes,
+				type: "image/png",
+			});
+			const { id } = await readBody(created);
+
+			const res = await app.request(`/issues/${id}/photo/thumbnail`, {}, env);
+
+			expect(res.status).toBe(200);
+			expect(res.headers.get("Content-Type")).toBe("image/png");
+			expect(new Uint8Array(await res.arrayBuffer())).toEqual(photoBytes);
+		});
+
+		it("returns 404 when the issue has no photo at all", async () => {
+			const res = await createIssueAsJson();
+			const { id } = await readBody(res);
+
+			const thumbRes = await app.request(
+				`/issues/${id}/photo/thumbnail`,
+				{},
+				env,
+			);
+
+			expect(thumbRes.status).toBe(404);
+		});
+
+		it("returns 404 for an unknown issue", async () => {
+			const res = await app.request(
+				"/issues/does-not-exist/photo/thumbnail",
+				{},
+				env,
+			);
+
+			expect(res.status).toBe(404);
+		});
+
+		it("is public and cacheable like the original", async () => {
+			const created = await createIssueWithPhoto(
+				{ bytes: imageBytes(1024), type: "image/jpeg" },
+				{},
+				{ bytes: imageBytes(128), type: "image/jpeg" },
+			);
+			const { id } = await readBody(created);
+
+			setMockUserId(null);
+			const res = await app.request(`/issues/${id}/photo/thumbnail`, {}, env);
+
+			expect(res.status).toBe(200);
+			expect(res.headers.get("Content-Disposition")).toBe("inline");
+			expect(res.headers.get("Cache-Control")).toContain("max-age=");
+			expect(res.headers.get("ETag")).toBeTruthy();
+			// ヘッダしか見ないときもボディは読み切る（理由は "is public"）
+			await res.arrayBuffer();
+		});
+
+		// 配信されるのは原寸と同じ経路（同一オリジンで Content-Type を名乗る）
+		// なので、SVG を通す穴になってはいけない
+		it("rejects a thumbnail with a disallowed content type", async () => {
+			const res = await createIssueWithPhoto(
+				{ bytes: imageBytes(1024), type: "image/jpeg" },
+				{},
+				{ bytes: imageBytes(128), type: "image/svg+xml", name: "t.svg" },
+			);
+
+			expect(res.status).toBe(400);
+			// 弾いたなら Issue そのものも作らない。作ってしまうと
+			// 「エラーになったのに投稿されている」状態になる
+			expect(await countIssues()).toBe(0);
+			expect(await countPhotoObjects()).toBe(0);
+		});
+
+		it("rejects a thumbnail above the size limit", async () => {
+			const res = await createIssueWithPhoto(
+				{ bytes: imageBytes(1024), type: "image/jpeg" },
+				{},
+				{
+					bytes: imageBytes(5 * 1024 * 1024 + 1),
+					type: "image/jpeg",
+				},
+			);
+
+			expect(res.status).toBe(400);
+			expect(await countIssues()).toBe(0);
+		});
+
+		// 写真を付けずにサムネイルだけ送るのは、自前のクライアントが
+		// しない組み合わせ。置く先が無いので黙って捨て、起票は通す
+		it("ignores a thumbnail sent without a photo", async () => {
+			const res = await createIssueWithPhoto(
+				null,
+				{},
+				{
+					bytes: imageBytes(128),
+					type: "image/jpeg",
+				},
+			);
+
+			expect(res.status).toBe(201);
+			expect(await countPhotoObjects()).toBe(0);
+		});
+
+		it("removes the thumbnail from R2 along with the issue", async () => {
+			const created = await createIssueWithPhoto(
+				{ bytes: imageBytes(1024), type: "image/jpeg" },
+				{},
+				{ bytes: imageBytes(128), type: "image/jpeg" },
+			);
+			const { id } = await readBody(created);
+			expect(await countPhotoObjects()).toBe(2);
+
+			const res = await app.request(
+				`/issues/${id}`,
+				{ method: "DELETE", headers: { Origin: ALLOWED_ORIGIN } },
+				env,
+			);
+
+			expect(res.status).toBe(200);
+			// 原寸だけ消してサムネイルが残ると、参照の切れた孤児ファイルになる
+			expect(await countPhotoObjects()).toBe(0);
 		});
 	});
 

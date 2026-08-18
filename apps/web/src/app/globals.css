@@ -1386,6 +1386,56 @@ main p {
 	border-bottom: 1px solid var(--line);
 	list-style: none;
 	transition: background-color var(--transition-fast);
+	/*
+	 * 写真（#125）を左に、文章を右に並べる。写真を持たない Issue は
+	 * 左の列が無いだけで、文章がそのまま行の頭から始まる。
+	 * 縦に並ぶ罫線リストなので、隣り合う行で高さが違っても崩れない
+	 * （格子状に並べていると高さの不揃いが穴になるが、ここは 1 列）
+	 */
+	display: flex;
+	align-items: flex-start;
+	gap: var(--space-4);
+}
+
+/*
+ * 一覧のカードに出す写真（#125）。
+ *
+ * 正方形に固定して `object-fit: cover` で切る。縦横比は投稿ごとに違うので、
+ * 比率に従わせると行ごとに左の列の幅が変わり、タイトルの開始位置が
+ * 揃わなくなる。一覧は「並べて眺める」画面なので、縦の線が通ることを優先する。
+ *
+ * 寸法を属性ではなく CSS で決めているのは詳細ページ（.issue-photo）と
+ * 同じ理由。ただしこちらは枠が固定なので、画像の読み込み前後で
+ * レイアウトがずれることはない
+ */
+.issue-card-photo {
+	/* 文章側が縮んでも、写真は縮ませない（潰れた画像は情報を失う） */
+	flex: none;
+	width: 5.5rem;
+	height: 5.5rem;
+	/* 極端に狭い画面で親を超えないための逃げ場 */
+	max-width: 100%;
+	object-fit: cover;
+	border-radius: var(--radius-md);
+	border: 1px solid var(--line);
+	/*
+	 * 読み込み中・読み込みに失敗したときの下地。地の色のままだと
+	 * 枠だけが浮いて「何かが欠けている」ようにしか見えない
+	 */
+	background: var(--surface-accent);
+}
+
+/*
+ * 写真の隣に置く文章のまとまり（#125）。
+ *
+ * `min-width: 0` が要る。flex の子は既定で内容より縮まないため、
+ * 説明文に折り返せない長い URL が入ると、この列が押し広げられて
+ * 一覧全体に横スクロールが出る（body の overflow-wrap は
+ * 折り返しの許可であって、flex の最小幅までは変えない）
+ */
+.issue-card-body {
+	flex: 1 1 auto;
+	min-width: 0;
 }
 
 /*
