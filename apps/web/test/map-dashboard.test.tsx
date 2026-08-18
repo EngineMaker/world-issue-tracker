@@ -48,6 +48,10 @@ afterEach(() => {
 	restoreEnv("NEXT_PUBLIC_MAP_TILE_URL", originalTileUrl);
 });
 
+/** #115 が本番に設定した帰属表示。配信元の利用条件を満たすためリンクを含む。 */
+const ATTRIBUTION_WITH_LINK =
+	'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors';
+
 const TEMPLATE = "https://tiles.example.com/{z}/{x}/{y}.png";
 
 /** 東京・大阪・札幌。離れた 3 点で、視界の計算が全部を収めるかを見る */
@@ -247,6 +251,28 @@ describe("IssuesMap", () => {
 		const caption = html.match(/class="issues-map-attribution">([^<]*)/)?.[1];
 		expect(caption, "件数の表示が無い").toBeDefined();
 		expect(caption).toContain(String(THREE_CITIES.length));
+	});
+
+	/*
+	 * 詳細ページと同じ理由（`map.test.tsx` 参照）。配信元が要求する文言は
+	 * リンクを含むので、素の文字列として出すとタグが画面に見える。
+	 * 件数の側は React が描くまま変えないので、そちらのエスケープも確かめる。
+	 */
+	it("帰属表示に含まれるリンクをタグのまま出さない", () => {
+		const html = renderToStaticMarkup(
+			<IssuesMap
+				issues={THREE_CITIES}
+				tileUrlTemplate={TEMPLATE}
+				attribution={ATTRIBUTION_WITH_LINK}
+			/>,
+		);
+
+		expect(html).not.toContain("&lt;a href");
+		expect(html).toMatch(
+			/<a [^>]*href="https:\/\/www\.openstreetmap\.org\/copyright"/,
+		);
+		// 件数は変わらず出ている（帰属を HTML にしても壊れていない）
+		expect(html).toContain(String(THREE_CITIES.length));
 	});
 
 	/*

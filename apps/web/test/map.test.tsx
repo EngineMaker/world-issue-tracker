@@ -46,6 +46,13 @@ afterEach(() => {
 
 const TOKYO = { latitude: 35.681236, longitude: 139.767125 };
 
+/**
+ * #115 が本番に設定した帰属表示。配信元の利用条件を満たすためリンクを含む。
+ * 素の文字列として描くとタグが画面に出るため、実物の形で検証する。
+ */
+const ATTRIBUTION_WITH_LINK =
+	'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors';
+
 const TEMPLATE = "https://tiles.example.com/{z}/{x}/{y}.png";
 
 const sampleIssue = {
@@ -232,6 +239,34 @@ describe("IssueMap", () => {
 			/>,
 		);
 		expect(html).toContain("OpenStreetMap contributors");
+	});
+
+	/*
+	 * **配信元が要求する帰属表示にはリンクが含まれる。** #115 で本番に
+	 * 設定した値も `© <a href="...">OpenStreetMap</a> contributors` で、
+	 * MapLibre はこれを HTML として地図の隅に描く。同じ値を素の文字列として
+	 * 出すとタグが画面に見え、「場所」欄に生の `<a href=...>` が並ぶ。
+	 *
+	 * ここで検証しているのは「タグが文字として出ていないこと」。
+	 * 帰属そのものは上のテストが見ている。
+	 */
+	it("帰属表示に含まれるリンクをタグのまま出さない", () => {
+		const html = renderToStaticMarkup(
+			<IssueMap
+				latitude={TOKYO.latitude}
+				longitude={TOKYO.longitude}
+				title="駅前の街灯が切れている"
+				tileUrlTemplate={TEMPLATE}
+				attribution={ATTRIBUTION_WITH_LINK}
+			/>,
+		);
+
+		// エスケープされた `<` が出ていたら、タグが文字として見えている
+		expect(html).not.toContain("&lt;a href");
+		// リンクとして描けていること
+		expect(html).toMatch(
+			/<a [^>]*href="https:\/\/www\.openstreetmap\.org\/copyright"/,
+		);
 	});
 
 	/*
