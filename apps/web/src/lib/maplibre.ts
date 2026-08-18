@@ -111,6 +111,15 @@ export async function createMap(
 			attributionControl: { compact: false },
 		});
 
+		// **MapLibre の失敗は例外では飛んでこない。** スタイルやタイルの
+		// 読み込みに失敗しても `error` イベントとして通知されるだけなので、
+		// 下の try/catch（コンストラクタしか守れない）には届かない。
+		// 購読しないと「地図は白いがコンソールに何も出ない」状態になり、
+		// 配信元・CORS・スタイルのどれが原因かを切り分ける手がかりが消える。
+		map.on("error", (event) => {
+			console.error("[map] 読み込みに失敗しました", event.error ?? event);
+		});
+
 		if (options.interactive !== false) {
 			// 拡大・縮小のボタン。ドラッグとホイールだけだと、
 			// タッチ端末以外のポインタ操作で縮尺を変えづらい
@@ -141,8 +150,11 @@ export async function createMap(
 		}
 
 		return { remove: () => map.remove(), getView };
-	} catch {
-		// WebGL が使えない、スタイルが読めないなど。地図が出ないだけに留める
+	} catch (error) {
+		// WebGL が使えない、スタイルが読めないなど。地図が出ないだけに留める。
+		// ただし黙って消さない。原因が分からないまま「白い地図」だけが
+		// 残ると、配信元の設定ミスと端末の非対応を区別できない
+		console.error("[map] 生成に失敗しました", error);
 		return null;
 	}
 }

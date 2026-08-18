@@ -133,10 +133,22 @@ export function IssueMap({
 			/>
 
 			{attribution ? (
-				// 帰属表示は隠さないことがタイル配信元の利用条件に含まれる。
-				// MapLibre 自身も地図の隅に出すが、地図が読み込めなかったときに
-				// 消えてしまうので、こちらでも地図の直下に置く
-				<figcaption className="issue-map-attribution">{attribution}</figcaption>
+				/*
+				  帰属表示は隠さないことがタイル配信元の利用条件に含まれる。
+				  MapLibre 自身も地図の隅に出すが、地図が読み込めなかったときに
+				  消えてしまうので、こちらでも地図の直下に置く。
+
+				  **HTML として描く理由。** 配信元が要求する文言はリンクを含む
+				  （#115 が設定した値も `<a href="...">OpenStreetMap</a>`）。
+				  素の文字列として出すとタグが画面に見えてしまい、利用条件が
+				  求めるリンクにもならない。値の出所は環境変数
+				  `NEXT_PUBLIC_MAP_TILE_ATTRIBUTION` で、利用者の入力は混ざらない
+				*/
+				<figcaption
+					className="issue-map-attribution"
+					// biome-ignore lint/security/noDangerouslySetInnerHtml: 配信元の帰属表示は環境変数由来で、利用者の入力を含まない
+					dangerouslySetInnerHTML={{ __html: attribution }}
+				/>
 			) : null}
 		</figure>
 	);
