@@ -35,9 +35,19 @@ import { hasActiveFilters, type IssueFilters } from "../../lib/issues";
 export function IssueFilterForm({
 	filters,
 	locale = DEFAULT_LOCALE,
+	action = "/issues",
 }: {
 	filters: IssueFilters;
 	locale?: Locale;
+	/**
+	 * 絞り込んだ結果を表示するページ。
+	 *
+	 * 既定は一覧（`/issues`）。地図（`/map`、#113）もこのフォームを使うが、
+	 * 送信先が一覧に固定されていると**絞り込んだ瞬間に地図から
+	 * 一覧へ飛ばされる**（＝地図の絞り込みが成立しない）。
+	 * 「条件をすべて解除」の戻り先も同じページに揃える必要がある
+	 */
+	action?: string;
 }) {
 	const messages = getUiMessages(locale);
 	const scopeLabels = ISSUE_SCOPE_LABELS[locale];
@@ -54,7 +64,7 @@ export function IssueFilterForm({
 		 * 1 つも当たらない（#93 のコメント欄と同じ症状が、直された後も
 		 * この画面に残っていた）。
 		 */
-		<form method="get" action="/issues" className="issue-form issue-filters">
+		<form method="get" action={action} className="issue-form issue-filters">
 			<fieldset>
 				<legend>{messages.filterForm.legend}</legend>
 
@@ -189,10 +199,11 @@ export function IssueFilterForm({
 					{/*
 					  条件が付いているときだけ解除の導線を出す。
 					  素のリンクなので、フォームの入力状態に関係なく
-					  「条件なしの一覧」へ戻れる
+					  「条件なしの表示」へ戻れる。戻り先は送信先と同じページに
+					  揃える（地図で解除したのに一覧へ移ってしまわないように）
 					*/}
 					{hasActiveFilters(filters) ? (
-						<Link href="/issues">{messages.filterForm.clear}</Link>
+						<Link href={action}>{messages.filterForm.clear}</Link>
 					) : null}
 				</p>
 			</fieldset>

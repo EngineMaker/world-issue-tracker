@@ -381,6 +381,8 @@ const JA_UI_MESSAGES = {
 	/** 画面上部のヘッダ */
 	header: {
 		newIssue: "Issue を起票",
+		/** 地図ダッシュボード（#113）。URL を知らないと辿れない画面にしない */
+		map: "地図で見る",
 		myIssues: "自分の Issue",
 		/**
 		 * Clerk のログインボタン（A3）。
@@ -723,6 +725,34 @@ const JA_UI_MESSAGES = {
 		label: (title: string, latitude: number, longitude: number) =>
 			`${title} の位置。緯度 ${latitude} / 経度 ${longitude}`,
 	},
+
+	/** 地図ダッシュボード（`/map`、#113） */
+	mapPage: {
+		heading: "地図で見る",
+		lead: "投稿された Issue を地図の上に並べます。どこに何が集まっているかを見比べられます。",
+		/** 地図に実際に描かれた件数。表示範囲の外にある Issue は含まない */
+		plotted: (count: number) => `${count} 件を地図に表示しています`,
+		/** 配信元が未設定で地図そのものを出せないとき */
+		tilesUnavailable:
+			"地図の配信元が設定されていないため、地図を表示できません。位置は一覧から確認できます。",
+		/** 取得に失敗したとき。0 件と同じ見た目にしない */
+		fetchFailed:
+			"Issue を取得できませんでした。時間をおいて再度お試しください。",
+		noIssues: "条件に合う Issue はありませんでした。",
+		zoomLabel: "縮尺",
+		zoomIn: "拡大",
+		zoomOut: "縮小",
+		panLabel: "表示位置",
+		panNorth: "北へ",
+		panSouth: "南へ",
+		panEast: "東へ",
+		panWest: "西へ",
+		/** 自動で決めた視界へ戻す。動かしすぎて何も見えなくなったときの逃げ道 */
+		resetView: "全体を表示",
+		listHeading: "地図に出ている Issue",
+		backToList: "一覧で見る",
+		backToHome: "トップへ戻る",
+	},
 } as const;
 
 /**
@@ -765,6 +795,7 @@ const EN_UI_MESSAGES: UiMessages = {
 
 	header: {
 		newIssue: "New issue",
+		map: "Map",
 		myIssues: "My issues",
 		signIn: "Sign In",
 	},
@@ -995,6 +1026,28 @@ const EN_UI_MESSAGES: UiMessages = {
 	map: {
 		label: (title: string, latitude: number, longitude: number) =>
 			`Location of ${title}. Latitude ${latitude} / Longitude ${longitude}`,
+	},
+
+	mapPage: {
+		heading: "Map",
+		lead: "Issues plotted on a map, so you can see where problems cluster.",
+		plotted: (count: number) => `Showing ${count} issue(s) on the map`,
+		tilesUnavailable:
+			"No map tile source is configured, so the map cannot be shown. Locations are still listed below.",
+		fetchFailed: "Could not load issues. Please try again later.",
+		noIssues: "No issues matched your filters.",
+		zoomLabel: "Zoom",
+		zoomIn: "Zoom in",
+		zoomOut: "Zoom out",
+		panLabel: "Pan",
+		panNorth: "North",
+		panSouth: "South",
+		panEast: "East",
+		panWest: "West",
+		resetView: "Fit all",
+		listHeading: "Issues on this map",
+		backToList: "Browse as a list",
+		backToHome: "Back to home",
 	},
 };
 

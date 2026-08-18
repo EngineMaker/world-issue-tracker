@@ -2495,3 +2495,161 @@ main p {
 		padding: var(--space-3);
 	}
 }
+
+/*
+ * 地図ダッシュボード（#113）。
+ *
+ * `.issue-map-*`（詳細ページの 1 件表示）とは別の部品なので、クラスも分けている。
+ * あちらは固定サイズで中央に 1 点、こちらは複数点を任意の縮尺で並べる。
+ * MapLibre GL JS へ移す段階でこのブロックは丸ごと置き換わる。
+ */
+.issues-map {
+	margin: 0 0 var(--space-6);
+	/* 表示領域より狭い画面では横スクロールで見せる（地図を潰さない） */
+	max-width: 100%;
+	overflow-x: auto;
+}
+
+/*
+ * 表示領域の寸法。`lib/map-view.ts` の `MAP_VIEW_WIDTH` / `MAP_VIEW_HEIGHT` と
+ * 同じ値でなければならない（tsx はこの寸法を前提に地点の px を算出する）。
+ * 一致は `map-dashboard.test.tsx` が突き合わせている
+ */
+.issues-map-view {
+	width: 960px;
+	height: 600px;
+	position: relative;
+	overflow: hidden;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	/* タイルが読み込めないときに、枠だけが残って中身が抜けて見えないように */
+	background-color: var(--line);
+	box-shadow: var(--shadow-card);
+}
+
+.issues-map-tiles {
+	position: absolute;
+	top: 0;
+	left: 0;
+	/* タイルの継ぎ目に隙間が出ないよう、行内の余白を殺す */
+	line-height: 0;
+}
+
+.issues-map-row {
+	white-space: nowrap;
+}
+
+/*
+ * 地図の上端・下端より外にはタイルが存在しない。その分の場所だけを空ける。
+ * 寸法はタイル 1 枚（`lib/map.ts` の `TILE_SIZE`）と同じでなければ、
+ * 端の行だけタイルがずれる
+ */
+.issues-map-blank {
+	display: inline-block;
+	vertical-align: top;
+	width: 256px;
+	height: 256px;
+}
+
+/*
+ * マーカーの層。タイルとは別に重ねる（ずらす量の計算を二重に持たないため）。
+ * ここ自体は当たり判定を持たず、中のマーカーだけが押せる
+ */
+.issues-map-markers {
+	position: absolute;
+	inset: 0;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	pointer-events: none;
+}
+
+/*
+ * Issue 1 件を指すマーカー。位置は tsx が算出した px を
+ * インラインで受ける（座標はデータ由来なので CSS に書けない）。
+ * 中心が地点に重なるよう、自分の半分だけ戻す
+ */
+.issues-map-marker {
+	position: absolute;
+	display: block;
+	width: 16px;
+	height: 16px;
+	margin: -8px 0 0 -8px;
+	border: 2px solid var(--surface);
+	border-radius: var(--radius-pill);
+	background-color: var(--danger);
+	box-shadow: var(--shadow-marker);
+	/* 親が pointer-events を切っているので、押せる側で戻す */
+	pointer-events: auto;
+	transition: transform var(--transition-fast);
+}
+
+.issues-map-marker:hover,
+.issues-map-marker:focus-visible {
+	/* どれを指しているかが分かるよう、押せる状態を大きさで示す */
+	transform: scale(1.4);
+}
+
+/* 帰属表示は隠さないことがタイル配信元の利用条件に含まれる */
+.issues-map-attribution {
+	font-size: var(--text-xs);
+	color: var(--ink-soft);
+	margin-top: var(--space-1);
+}
+
+/*
+ * パン・ズームの操作列。リンクを横に並べる。
+ * 折り返しを許すのは、狭い画面で列がはみ出すと押せなくなるため
+ */
+.map-controls {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-3);
+	margin: 0 0 var(--space-6);
+}
+
+.map-controls-label {
+	font-size: var(--text-sm);
+	color: var(--ink-soft);
+}
+
+/*
+ * 端まで動かして、それ以上進めない向き。リンク自体は残す
+ * （押しても同じ場所に留まるだけで、壊れはしない）
+ */
+.map-controls a[aria-disabled="true"] {
+	color: var(--ink-faint);
+}
+
+/* 地図が出せない・0 件・取得失敗の案内 */
+.map-notice {
+	color: var(--ink-soft);
+	margin: 0 0 var(--space-6);
+}
+
+/*
+ * 地図の下に添える一覧。地図が読めない状況でも、
+ * どこに何があるかを文字で辿れるようにするためのもの
+ */
+.map-issue-list {
+	margin: 0 0 var(--space-6);
+	padding-left: var(--space-5);
+	line-height: var(--leading-normal);
+}
+
+/*
+ * 視覚的には隠すが読み上げには残す。マーカーは見た目としては点でも、
+ * 読み上げには何の Issue かが要る
+ */
+.visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
