@@ -73,6 +73,13 @@ export type CreateMapOptions = {
 let protocolRegistered = false;
 
 /**
+ * ワーカーの置き場所を設定済みか。
+ *
+ * `setWorkerUrl` もグローバルへの設定なので、登録と同じく 1 回で済ませる。
+ */
+let workerUrlConfigured = false;
+
+/**
  * 地図を作る。
  *
  * 失敗しても例外を投げずに null を返す。WebGL が使えない環境（古い端末、
@@ -86,6 +93,29 @@ export async function createMap(
 ): Promise<MapHandle | null> {
 	try {
 		const maplibre = await import("maplibre-gl");
+
+		// **ワーカーの置き場所を明示する。**
+		//
+		// MapLibre は自分のモジュールの隣に `maplibre-gl-worker.mjs` がある前提で
+		// `new URL("./maplibre-gl-worker.mjs", import.meta.url)` を組み立てる。
+		// ところがバンドラはファイル名にハッシュを付けて別の場所へ置くため、
+		// その URL は 404 になり、404 ページ（HTML）が返る。すると
+		// `new Worker(url, { type: "module" })` が MIME type の不一致で失敗する。
+		//
+		// **失敗しても MapLibre の `error` には乗らない。** ワーカーが無いまま
+		// 地図は生成され、タイルを 1 枚も処理できずに描画が一度も走らない
+		// （canvas は完全に空のまま、背景レイヤの色すら出ない）。#127 はこれだった。
+		//
+		// `new URL(..., import.meta.url)` はバンドラが解決してハッシュ付きの
+		// 実際の URL に置き換える。ここを人が書いたパスにすると、ビルドの
+		// たびに変わるハッシュに追随できない。
+		if (!workerUrlConfigured) {
+			maplibre.setWorkerUrl(
+				new URL("maplibre-gl/dist/maplibre-gl-worker.mjs", import.meta.url)
+					.href,
+			);
+			workerUrlConfigured = true;
+		}
 
 		// `pmtiles://` は PMTiles を使うときだけ要るが、スタイルの中身を
 		// 見て分岐するより、常に登録しておく方が単純で副作用も無い
