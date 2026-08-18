@@ -19,11 +19,11 @@ import "./helpers/mock-cookies";
 import { afterEach, describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getUiMessages } from "@world-issue-tracker/shared";
+import { DEFAULT_LOCALE, getUiMessages } from "@world-issue-tracker/shared";
 import { renderToStaticMarkup } from "react-dom/server";
 import { IssuesMap } from "../src/app/components/IssuesMap";
 import MapPage from "../src/app/map/page";
-import type { PublicIssue } from "../src/lib/issues";
+import type { PublicIssue, RawSearchParams } from "../src/lib/issues";
 import { TILE_SIZE } from "../src/lib/map";
 import {
 	clampMapZoom,
@@ -155,6 +155,22 @@ describe("複数地点を収める視界の計算", () => {
 	 * 0 件。絞り込みの結果として実際に起きる。中心もズームも決めようが
 	 * 無いので既定値へ倒すが、NaN を返すと地図全体が壊れる
 	 */
+	/*
+	 * 1 件だけのときの縮尺。「どの縮尺が最適か」に正解は無いので値そのものは
+	 * 縛らないが、**建物しか見えないところまで寄り切る**のは困る
+	 * （周りに何があるかが分からず、地図として役に立たない）。
+	 * 広がりが 0 のときに「収まる最大のズーム」を計算すると上限に張り付く
+	 * ので、実際に起こりうる間違いを範囲で押さえる
+	 */
+	it("1 件だけのとき極端な縮尺にならない", () => {
+		const view = fitViewToIssues([issueAt("a", "1 件だけ", TOKYO)]);
+
+		// 上限（建物が見える縮尺）に張り付いていないこと
+		expect(view.zoom, "寄りすぎて周りが見えない").toBeLessThan(16);
+		// 街の様子が分かる程度には寄っていること
+		expect(view.zoom, "引きすぎて点にしか見えない").toBeGreaterThanOrEqual(10);
+	});
+
 	it("0 件でも壊れない", () => {
 		const view = fitViewToIssues([]);
 		expect(Number.isFinite(view.zoom)).toBe(true);
@@ -193,12 +209,21 @@ describe("IssuesMap", () => {
 	/*
 	 * 全件がマーカーとして出るか。1 件でも落ちれば「見比べる」が成立しない
 	 */
+	/*
+	 * クラス名は属性値そのものと照合する。`\bissues-map-marker\b` のような
+	 * 境界付きの部分一致だと、**マーカーを 1 つも描いていなくても
+	 * コンテナの `issues-map-markers` にマッチして通る**（`\b` は
+	 * `marker` と `markers` の間に境界を認めない一方、`marker` の直後の
+	 * `s` の前で境界が成立しないため一見安全に見えるが、`[^"]*` が
+	 * `issues-map-markers` の途中まで食うことで成立してしまう）。
+	 * 実際にこの形で「0 件でも通るテスト」になっていた
+	 */
 	it("渡した Issue の数だけマーカーを描く", () => {
 		const html = renderToStaticMarkup(
 			<IssuesMap issues={THREE_CITIES} tileUrlTemplate={TEMPLATE} />,
 		);
 
-		const markers = [...html.matchAll(/class="[^"]*\bissues-map-marker\b/g)];
+		const markers = [...html.matchAll(/class="issues-map-marker"/g)];
 		expect(markers.length).toBe(THREE_CITIES.length);
 	});
 
@@ -234,6 +259,62 @@ describe("IssuesMap", () => {
 	/*
 	 * 地図から Issue へ辿れないと、点が光るだけで終わる
 	 */
+	/*
+	 * 視界の外にある Issue はマーカーを描かない。
+	 *
+	 * `overflow: hidden` で見えなくはなるが、要素は残る。残ると
+	 * **キーボードで辿れる見えないリンク**が順路に挟まり、Tab を押しても
+	 * 何も起きていないように見える位置でフォーカスが止まる。
+	 * 件数の表示（「N 件を地図に表示しています」）も、見えている数と食い違う。
+	 *
+	 * パンで視界を動かすと実際に起きる（地図の外に Issue が出る）
+	 */
+	it("視界の外にある Issue はマーカーを描かない", () => {
+		// 東京を大きく寄って映す。同じ地図に載せた札幌は画面の外に出る
+		const html = renderToStaticMarkup(
+			<IssuesMap
+				issues={THREE_CITIES}
+				tileUrlTemplate={TEMPLATE}
+				view={{
+					centerLatitude: TOKYO.latitude,
+					centerLongitude: TOKYO.longitude,
+					zoom: 12,
+				}}
+			/>,
+		);
+
+		const markers = [...html.matchAll(/class="issues-map-marker"/g)];
+		expect(markers.length, "画面外の Issue までマーカーを描いている").toBe(1);
+		expect(html).toContain("/issues/aaaa");
+		expect(html, "画面外の札幌が残っている").not.toContain("/issues/cccc");
+	});
+
+	/*
+	 * 添える件数は「地図に見えている数」であること。渡された総数を出すと、
+	 * 画面には 1 件しか無いのに「3 件を表示しています」と嘘になる
+	 */
+	it("件数の表示が実際に描いたマーカーの数と一致する", () => {
+		const html = renderToStaticMarkup(
+			<IssuesMap
+				issues={THREE_CITIES}
+				tileUrlTemplate={TEMPLATE}
+				view={{
+					centerLatitude: TOKYO.latitude,
+					centerLongitude: TOKYO.longitude,
+					zoom: 12,
+				}}
+			/>,
+		);
+
+		const markers = [...html.matchAll(/class="issues-map-marker"/g)].length;
+		const caption = html.match(/class="issues-map-attribution">([^<]*)/)?.[1];
+		expect(caption, "件数の表示が無い").toBeDefined();
+		expect(
+			caption,
+			`マーカー ${markers} 件に対して表示が「${caption}」`,
+		).toContain(String(markers));
+	});
+
 	it("マーカーから Issue の詳細へ辿れる", () => {
 		const html = renderToStaticMarkup(
 			<IssuesMap issues={THREE_CITIES} tileUrlTemplate={TEMPLATE} />,
@@ -309,7 +390,7 @@ describe("/map ページ", () => {
 		const element = await MapPage({ searchParams: Promise.resolve({}) });
 		const html = renderToStaticMarkup(element);
 
-		const markers = [...html.matchAll(/class="[^"]*\bissues-map-marker\b/g)];
+		const markers = [...html.matchAll(/class="issues-map-marker"/g)];
 		expect(markers.length).toBe(THREE_CITIES.length);
 	});
 
@@ -353,6 +434,256 @@ describe("/map ページ", () => {
 		expect(html).toMatch(/href="\/map\?[^"]*zoom=/);
 	});
 
+	/*
+	 * 受け入れ条件の「カテゴリまたはスコープで絞り込める」を、**利用者が
+	 * 実際に踏む経路で**確かめる。
+	 *
+	 * 条件をクエリに直接書いて開けば絞り込みは効くが、画面の絞り込み
+	 * フォームを押したときにどこへ行くかは別の話。`IssueFilterForm` は
+	 * 一覧ページ用に作られていて、送信先が `/issues` に固定されていた。
+	 * そのまま置くと**押した瞬間に一覧へ飛ばされ、地図の絞り込みが
+	 * 成立しない**（テストが URL 直打ちだけを見ていると素通りする）
+	 */
+	it("絞り込みフォームの送信先が地図のままである", async () => {
+		process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
+		process.env.NEXT_PUBLIC_MAP_TILE_URL = TEMPLATE;
+		globalThis.fetch = stubListFetch(THREE_CITIES);
+
+		const element = await MapPage({ searchParams: Promise.resolve({}) });
+		const html = renderToStaticMarkup(element);
+
+		const action = html.match(/<form[^>]*action="([^"]*)"/)?.[1];
+		expect(action, "絞り込みフォームが見つからない").toBeDefined();
+		expect(action, "絞り込むと一覧へ飛ばされる").toBe("/map");
+	});
+
+	/*
+	 * 「条件をすべて解除」も同じ。地図で絞り込んだ状態から解除すると
+	 * 一覧へ飛ぶのでは、地図に戻る手段が無い
+	 */
+	it("条件の解除も地図に留まる", async () => {
+		process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
+		process.env.NEXT_PUBLIC_MAP_TILE_URL = TEMPLATE;
+		globalThis.fetch = stubListFetch(THREE_CITIES);
+
+		const element = await MapPage({
+			searchParams: Promise.resolve({ scope: "national" }),
+		});
+		const html = renderToStaticMarkup(element);
+
+		// 条件が付いているときだけ出る導線。地図側を指していること
+		expect(html).toContain('href="/map"');
+	});
+
+	/*
+	 * ここから下は「パン・ズームができる」を、**操作の結果まで**見る。
+	 *
+	 * レビューで、この受け入れ条件を担保していたのが「`zoom=` を含む href が
+	 * どこかにある」だけだったことが分かった。それだけだと以下が全部すり抜ける:
+	 *  - URL の zoom/lat/lng を読み捨てて常に自動の視界を出す
+	 *  - パンの移動量が 0（押しても動かない）
+	 *  - 拡大と縮小のリンクが逆
+	 *  - 緯度経度の丸めが無く、極を越えたり経度が ±180 を出たりする
+	 *
+	 * どれも「地図は出るしリンクもある」ので、目視でも気付きにくい
+	 */
+
+	/** ページを描いて、操作リンクの href をラベルで引けるようにする */
+	async function renderControls(params: RawSearchParams = {}) {
+		process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
+		process.env.NEXT_PUBLIC_MAP_TILE_URL = TEMPLATE;
+		globalThis.fetch = stubListFetch(THREE_CITIES);
+
+		const element = await MapPage({ searchParams: Promise.resolve(params) });
+		const html = renderToStaticMarkup(element);
+
+		const links = new Map<string, URL>();
+		for (const [, href, label] of html.matchAll(
+			// クエリの付かない `/map`（「全体を表示」）も拾う必要がある
+			/<a[^>]*href="(\/map(?:\?[^"]*)?)"[^>]*>([^<]*)<\/a>/g,
+		)) {
+			// `renderToStaticMarkup` は & を実体参照にする。URL として読む前に戻す
+			links.set(label, new URL(href.replaceAll("&amp;", "&"), "https://x"));
+		}
+		return links;
+	}
+
+	const labels = getUiMessages(DEFAULT_LOCALE).mapPage;
+
+	it("URL のズームと中心が実際の描画に反映される", async () => {
+		process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
+		process.env.NEXT_PUBLIC_MAP_TILE_URL = TEMPLATE;
+		globalThis.fetch = stubListFetch(THREE_CITIES);
+
+		// 自動で決まる視界（日本全体が入る縮尺）とは明らかに違う値を指定する
+		const element = await MapPage({
+			searchParams: Promise.resolve({
+				zoom: "12",
+				lat: String(TOKYO.latitude),
+				lng: String(TOKYO.longitude),
+			}),
+		});
+		const html = renderToStaticMarkup(element);
+
+		// 指定したズームのタイルを取りに行っていること。読み捨てていれば
+		// 自動の縮尺（3 都市が入る z6 前後）のタイルが並ぶ
+		const zooms = new Set(
+			[...html.matchAll(/tiles\.example\.com\/(\d+)\//g)].map((m) => m[1]),
+		);
+		expect(zooms, "URL のズームが描画に反映されていない").toEqual(
+			new Set(["12"]),
+		);
+
+		// 東京を中心にしたので、東京の Issue が表示領域の中央に来る
+		const marker = html.match(
+			/class="issues-map-marker" style="left:([\d.]+)px;top:([\d.]+)px" href="\/issues\/aaaa"/,
+		);
+		expect(marker, "東京のマーカーが描かれていない").not.toBeNull();
+		expect(Number(marker?.[1])).toBeCloseTo(MAP_VIEW_WIDTH / 2, 3);
+		expect(Number(marker?.[2])).toBeCloseTo(MAP_VIEW_HEIGHT / 2, 3);
+	});
+
+	it("拡大は寄り、縮小は引く（向きを取り違えない）", async () => {
+		const links = await renderControls({ zoom: "8", lat: "35", lng: "139" });
+
+		const zoomIn = links.get(labels.zoomIn);
+		const zoomOut = links.get(labels.zoomOut);
+		expect(zoomIn, "拡大のリンクが無い").toBeDefined();
+		expect(zoomOut, "縮小のリンクが無い").toBeDefined();
+
+		expect(Number(zoomIn?.searchParams.get("zoom")), "拡大で寄らない").toBe(9);
+		expect(Number(zoomOut?.searchParams.get("zoom")), "縮小で引かない").toBe(7);
+	});
+
+	it("パンの各向きが実際にその向きへ動かす", async () => {
+		const links = await renderControls({ zoom: "8", lat: "35", lng: "139" });
+
+		const at = (label: string) => {
+			const url = links.get(label);
+			expect(url, `${label} のリンクが無い`).toBeDefined();
+			return {
+				lat: Number(url?.searchParams.get("lat")),
+				lng: Number(url?.searchParams.get("lng")),
+			};
+		};
+
+		// 押しても動かない（移動量 0）なら、ここで全部 35/139 のままになる
+		expect(at(labels.panNorth).lat, "北へ押しても北に行かない").toBeGreaterThan(
+			35,
+		);
+		expect(at(labels.panSouth).lat, "南へ押しても南に行かない").toBeLessThan(
+			35,
+		);
+		expect(at(labels.panEast).lng, "東へ押しても東に行かない").toBeGreaterThan(
+			139,
+		);
+		expect(at(labels.panWest).lng, "西へ押しても西に行かない").toBeLessThan(
+			139,
+		);
+
+		// 向きを変えても縮尺は変わらない
+		for (const label of [
+			labels.panNorth,
+			labels.panSouth,
+			labels.panEast,
+			labels.panWest,
+		]) {
+			expect(Number(links.get(label)?.searchParams.get("zoom"))).toBe(8);
+		}
+	});
+
+	/*
+	 * 端でのパン。緯度は極を越えられず、経度は東西につながっている。
+	 * 丸めが無いと `lat=120` のような存在しない座標や、±180 を出た経度が
+	 * URL に載り、その先で地図が壊れる
+	 */
+	it("端まで動かしても緯度経度が実在する範囲に収まる", async () => {
+		for (const [lat, lng] of [
+			["84", "179"],
+			["-84", "-179"],
+		] as const) {
+			const links = await renderControls({ zoom: "3", lat, lng });
+
+			for (const label of [
+				labels.panNorth,
+				labels.panSouth,
+				labels.panEast,
+				labels.panWest,
+			]) {
+				const url = links.get(label);
+				const nextLat = Number(url?.searchParams.get("lat"));
+				const nextLng = Number(url?.searchParams.get("lng"));
+				expect(nextLat, `${label} で緯度が極を越えた`).toBeLessThanOrEqual(90);
+				expect(nextLat, `${label} で緯度が極を越えた`).toBeGreaterThanOrEqual(
+					-90,
+				);
+				expect(nextLng, `${label} で経度がはみ出した`).toBeLessThanOrEqual(180);
+				expect(nextLng, `${label} で経度がはみ出した`).toBeGreaterThanOrEqual(
+					-180,
+				);
+			}
+		}
+	});
+
+	/*
+	 * ズームの端。上限を超えると存在しないタイルを要求して地図が真っ白になる
+	 */
+	it("ズームの端を越えない", async () => {
+		const top = await renderControls({ zoom: "18", lat: "35", lng: "139" });
+		expect(
+			Number(top.get(labels.zoomIn)?.searchParams.get("zoom")),
+		).toBeLessThanOrEqual(18);
+
+		const bottom = await renderControls({ zoom: "0", lat: "35", lng: "139" });
+		expect(
+			Number(bottom.get(labels.zoomOut)?.searchParams.get("zoom")),
+		).toBeGreaterThanOrEqual(0);
+	});
+
+	/*
+	 * 動かしすぎて何も見えなくなったときの逃げ道。視界を URL から落として
+	 * 全件が収まる範囲へ戻す。ここが視界を持ったままだと戻れない
+	 */
+	it("「全体を表示」は視界の指定を落とす", async () => {
+		const links = await renderControls({ zoom: "16", lat: "0", lng: "0" });
+		const reset = links.get(labels.resetView);
+
+		expect(reset, "全体を表示のリンクが無い").toBeDefined();
+		expect(reset?.searchParams.get("zoom"), "視界が残っている").toBeNull();
+		expect(reset?.searchParams.get("lat")).toBeNull();
+		expect(reset?.searchParams.get("lng")).toBeNull();
+	});
+
+	/*
+	 * 操作しても絞り込みが外れないこと。外れると、絞り込んだ状態で
+	 * 地図を動かした瞬間に全件へ戻る
+	 */
+	it("パン・ズームしても絞り込みが外れない", async () => {
+		const links = await renderControls({
+			zoom: "8",
+			lat: "35",
+			lng: "139",
+			scope: "national",
+		});
+
+		// 「条件をすべて解除」は絞り込みを落とすのが役目なので対象外。
+		// 見るのは地図を動かす操作だけ
+		for (const label of [
+			labels.zoomIn,
+			labels.zoomOut,
+			labels.panNorth,
+			labels.panSouth,
+			labels.panEast,
+			labels.panWest,
+			labels.resetView,
+		]) {
+			expect(
+				links.get(label)?.searchParams.get("scope"),
+				`${label} を押すと絞り込みが外れる`,
+			).toBe("national");
+		}
+	});
+
 	it("配信元が未設定でも画面自体は壊れない", async () => {
 		process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
 		delete process.env.NEXT_PUBLIC_MAP_TILE_URL;
@@ -381,7 +712,7 @@ describe("/map ページ", () => {
 		const element = await MapPage({ searchParams: Promise.resolve({}) });
 		const html = renderToStaticMarkup(element);
 
-		expect(html).not.toMatch(/class="[^"]*\bissues-map-marker\b/);
+		expect(html).not.toMatch(/class="issues-map-marker"/);
 	});
 });
 

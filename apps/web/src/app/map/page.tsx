@@ -150,7 +150,11 @@ export default async function MapPage({
 			<h1>{messages.mapPage.heading}</h1>
 			<p className="section-lead">{messages.mapPage.lead}</p>
 
-			<IssueFilterForm filters={filters} locale={locale} />
+			{/*
+			  絞り込みは一覧と同じ部品を使う。送信先だけ地図に向ける
+			  （既定のままだと、絞り込んだ瞬間に一覧へ飛ばされる）
+			*/}
+			<IssueFilterForm filters={filters} locale={locale} action="/map" />
 
 			{result.ok ? (
 				<>
