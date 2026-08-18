@@ -15,7 +15,9 @@
 	"dependencies": {
 		"@clerk/nextjs": "^6.39.0",
 		"@world-issue-tracker/shared": "workspace:*",
+		"maplibre-gl": "^6.4.0",
 		"next": "^15.3.0",
+		"pmtiles": "^4.5.0",
 		"react": "^19.1.0",
 		"react-dom": "^19.1.0"
 	},
