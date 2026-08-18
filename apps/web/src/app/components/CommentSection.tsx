@@ -23,6 +23,16 @@ import {
 import { EmptyState } from "./EmptyState";
 
 /**
+ * コメント欄の節に付ける id（#114）。
+ *
+ * 「手伝います」を押した人が、そのまま話し始められるようにするための
+ * アンカー先。`HelpOfferButton` の導線がここを指す。
+ * 文字列を両方に直書きすると片方だけ変えたときに黙って壊れるので、
+ * 行き先を持っている側で定数として公開する。
+ */
+export const COMMENTS_SECTION_ID = "comments";
+
+/**
  * Issue 詳細ページのコメント欄。
  *
  * 初期表示ぶんのコメントは Server Component 側（`fetchComments`）で取得して
@@ -87,7 +97,8 @@ export function CommentSection({
 	};
 
 	return (
-		<section>
+		// 見出しではなく節に id を付ける。飛んだときに見出しから読み始められる
+		<section id={COMMENTS_SECTION_ID}>
 			<h2>{messages.comments.heading(comments.length)}</h2>
 			<p className="section-lead">{messages.comments.guide}</p>
 

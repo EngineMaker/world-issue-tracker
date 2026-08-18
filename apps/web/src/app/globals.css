@@ -1754,6 +1754,25 @@ main p {
 	gap: var(--space-2) var(--space-3);
 }
 
+/*
+ * 手を挙げた直後に出す、次の一手（#114）。
+ *
+ * ここまでは「あなたはこの Issue に手を挙げています」で終わっていて、
+ * 押した人がそこで止まっていた。話す場所（コメント欄）はすぐ下にあるので、
+ * そこへ進んでよいことを伝えるだけの帯を置く。
+ *
+ * 左の縦線と淡い面で、周りの説明文とは別の役割の文であることを示す。
+ * 失敗の通知（.error-block）と同じ強さで出すと「何か問題が起きた」と
+ * 読まれるので、色は主役の緑（--accent 系）を使う。
+ */
+.help-offer-next-step {
+	margin-top: var(--space-2);
+	padding: var(--space-2) var(--space-3);
+	background: var(--accent-soft);
+	border-left: 3px solid var(--accent);
+	font-size: var(--text-sm);
+}
+
 /* 起票フォームのように、内容の幅を絞って読みやすくするページ */
 .narrow-page {
 	padding: var(--space-4);

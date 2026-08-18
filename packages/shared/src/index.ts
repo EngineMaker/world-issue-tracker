@@ -635,6 +635,19 @@ const JA_UI_MESSAGES = {
 		 * 障害の内訳を画面で説明しても次の行動が変わらないため。
 		 */
 		unnamedOfferer: "名前未設定の方",
+		/**
+		 * 表明した直後に出す、次の一手（#114）。
+		 *
+		 * ボタンを押すと「あなたはこの Issue に手を挙げています」と出るだけで、
+		 * そこで止まっていた。話を進める場所（コメント欄）はすぐ下にあるのに、
+		 * そこへ進んでよいことがどこにも書かれていなかった。
+		 *
+		 * 連絡先の交換のような閉じた場は作らないと決めているので（#114）、
+		 * 行き先は公開のコメント欄一本にする。
+		 */
+		nextStep: "どう手伝えるかをコメント欄に書いてみましょう。",
+		/** 上の文言から飛ぶリンクのラベル。 */
+		nextStepLink: "コメント欄へ",
 	},
 
 	/** コメント欄（`CommentSection`） */
@@ -914,6 +927,8 @@ const EN_UI_MESSAGES: UiMessages = {
 		offerersHeading: "People who offered",
 		you: "You",
 		unnamedOfferer: "Name not set",
+		nextStep: "Tell everyone how you can help, in the comments below.",
+		nextStepLink: "Go to comments",
 	},
 
 	comments: {

@@ -13,18 +13,24 @@ import "./helpers/mock-cookies";
 import { afterEach, describe, expect, it } from "bun:test";
 import {
 	DEFAULT_LOCALE,
+	getUiMessages,
 	ISSUE_SCOPE_LABELS,
 	ISSUE_STATUS_LABELS,
 } from "@world-issue-tracker/shared";
 import { renderToStaticMarkup } from "react-dom/server";
+import { COMMENTS_SECTION_ID } from "../src/app/components/CommentSection";
 import { IssueList } from "../src/app/components/IssueList";
 import IssueDetailPage from "../src/app/issues/[id]/page";
 import { formatCreatedAt, toIsoDateTime } from "../src/lib/datetime";
 import { fetchIssue } from "../src/lib/issues";
+import { LOCALE_COOKIE_NAME } from "../src/lib/locale";
+import { clearTestCookies, setTestCookies } from "./helpers/mock-cookies";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
 
 afterEach(() => {
+	// ロケールを差し替えたテストが、次のテストへ英語を持ち越さないようにする
+	clearTestCookies();
 	if (originalApiUrl === undefined) {
 		delete process.env.NEXT_PUBLIC_API_URL;
 	} else {
@@ -461,6 +467,55 @@ describe("詳細ページ", () => {
 
 		expect(html).not.toContain("<img ");
 		expect(html).toContain("&lt;img");
+	});
+
+	/*
+	 * 手を挙げた後の導線の行き先（#114）。
+	 *
+	 * 導線そのもの（`HelpOfferButton` が出すリンク）はブラウザ側でしか出ない。
+	 * このページは API へトークンを渡さないので `viewer_offered` は常に false で、
+	 * サーバー描画では表明済みにならないため。
+	 *
+	 * ここで見たいのは**リンクの行き先が実在するか**。リンク側とアンカー側は
+	 * 別のコンポーネントにあるので、片方だけ変えると黙って「押しても何も
+	 * 起きないリンク」になる。実際にページを描いて、飛び先が居ることを確かめる。
+	 */
+	it("手を挙げた後の導線が指す先（コメント欄）がページ上に実在する", async () => {
+		const { html } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+		);
+
+		expect(html).toContain(`id="${COMMENTS_SECTION_ID}"`);
+	});
+
+	/*
+	 * ロケールが配下の Client Component まで届いているか（#82 の配線）。
+	 *
+	 * 各コンポーネントの中で `locale` が使われていることは、それぞれの
+	 * テストが直接 props を渡して見ている。しかしページが `locale={locale}` を
+	 * **渡し忘れた**場合は、既定値（`DEFAULT_LOCALE` = ja）に落ちるだけなので
+	 * どのテストも落ちず、英語を選んだ人に黙って日本語が出る。
+	 *
+	 * ここはページを英語で描いて、渡す側の配線を見る。1 件で
+	 * `HelpOfferButton` / `CommentSection` / `StatusPill` / `IssueMap` /
+	 * `IssueStatusSection` の全部が守られる。
+	 */
+	it("英語ロケールなら、配下のコンポーネントまで英語で描かれる", async () => {
+		setTestCookies({ [LOCALE_COOKIE_NAME]: "en" });
+		const en = getUiMessages("en");
+		const ja = getUiMessages("ja");
+
+		const { html } = await renderDetail(
+			sampleIssue.id,
+			Response.json(sampleIssue),
+		);
+
+		// 「手伝います」（#114 の導線を出す側）とコメント欄の見出し
+		expect(html).toContain(en.helpOffer.heading);
+		expect(html).not.toContain(ja.helpOffer.heading);
+		expect(html).toContain(en.comments.guide);
+		expect(html).not.toContain(ja.comments.guide);
 	});
 });
 
