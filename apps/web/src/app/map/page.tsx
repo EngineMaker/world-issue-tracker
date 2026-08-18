@@ -4,6 +4,7 @@ import {
 	buildIssueQueryString,
 	fetchIssues,
 	type IssueFilters,
+	locatedIssues,
 	parseIssueFilters,
 	type RawSearchParams,
 } from "../../lib/issues";
@@ -134,9 +135,21 @@ export default async function MapPage({
 	const attribution = resolveTileAttribution();
 
 	const issues = result.ok ? result.issues : [];
+	/*
+	 * 地図に載せられるのは座標を持つ Issue だけ（#124）。
+	 *
+	 * 位置を出さずに起票された Issue は座標が null で、そのまま
+	 * `fitViewToIssues` や `IssuesMap` へ渡すと図法の計算に null が入って
+	 * NaN になる。**1 件のせいで地図全体が描けなくなる**ので、ここで絞る。
+	 *
+	 * 絞った分は無かったことにせず、下の一覧の後に件数を出す。
+	 * 黙って落とすと、地図の上の点が「条件に合う Issue の全部」だと読まれる。
+	 */
+	const plotted = locatedIssues(issues);
+	const withoutLocationCount = issues.length - plotted.length;
 	// URL に視界が載っていなければ、取得した Issue が全部収まる範囲を選ぶ。
 	// 初めて開いた人が、いきなり何も映っていない海を見ることがないように
-	const view = parseViewParams(params) ?? fitViewToIssues(issues);
+	const view = parseViewParams(params) ?? fitViewToIssues(plotted);
 
 	const step = panStep(view.zoom);
 	const moved = (dLat: number, dLng: number): MapView => ({
@@ -160,7 +173,7 @@ export default async function MapPage({
 				<>
 					{tileUrlTemplate ? (
 						<IssuesMap
-							issues={issues}
+							issues={plotted}
 							tileUrlTemplate={tileUrlTemplate}
 							attribution={attribution}
 							view={view}
@@ -230,16 +243,32 @@ export default async function MapPage({
 					*/}
 					<section>
 						<h2>{messages.mapPage.listHeading}</h2>
-						{issues.length === 0 ? (
+						{/*
+						  「該当なし」は、絞り込みに合う Issue が本当に 0 件の
+						  ときだけ出す。位置なしの Issue があるのに
+						  「条件に合う Issue はありませんでした」と書くと、
+						  直後に出る「位置情報のない Issue が N 件あります」と
+						  同じ画面で矛盾する（#124）
+						*/}
+						{plotted.length === 0 && issues.length === 0 ? (
 							<p className="map-notice">{messages.mapPage.noIssues}</p>
 						) : (
 							<ul className="map-issue-list">
-								{issues.map((issue) => (
+								{plotted.map((issue) => (
 									<li key={issue.id}>
 										<Link href={`/issues/${issue.id}`}>{issue.title}</Link>
 									</li>
 								))}
 							</ul>
+						)}
+						{/*
+						  地図に出ていない Issue があることを伝える（#124）。
+						  件数だけ出して、読むには一覧へ行けばよいと分かるようにする
+						*/}
+						{withoutLocationCount > 0 && (
+							<p className="map-notice">
+								{messages.mapPage.withoutLocation(withoutLocationCount)}
+							</p>
 						)}
 					</section>
 				</>

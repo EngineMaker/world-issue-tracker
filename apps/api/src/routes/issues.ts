@@ -9,6 +9,7 @@ import {
 	isIssuePhotoContentType,
 	ListIssuesQuerySchema,
 	parseIssueCursor,
+	roundIssueCoordinate,
 	UpdateIssueSchema,
 } from "@world-issue-tracker/shared";
 import { type Context, Hono } from "hono";
@@ -102,6 +103,27 @@ const INTERNAL_AUTHOR_COLUMNS = [
  * 「匿名かどうか」は真偽値だという契約をレスポンスの形で固定する。
  */
 const BOOLEAN_ISSUE_COLUMNS: ReadonlySet<string> = new Set(["is_anonymous"]);
+
+/**
+ * 返す前に精度を落とすカラム（#124）。
+ *
+ * 保存する時点で丸めている（POST が `roundIssueCoordinate` を通す）ので、
+ * ここを通る行は通常すでに 3 桁になっている。それでも返す直前にもう一度
+ * 丸めるのは、内部フィールドを落とす二段構えと同じ考え方。
+ *
+ *  - 丸める前の行がこの関数へ届く経路（別のスクリプト、手作業で入れた行、
+ *    このマイグレーションより前のバックアップからの復元）が将来生まれても、
+ *    **公開レスポンスからは細かい桁が出ない**
+ *  - 保存側の丸めを消す変更が入っても、レスポンスの契約はここが守る
+ *
+ * 逆に、ここだけに頼らないこと。生の座標を持ったままだと、この関数を
+ * 通らない経路（管理用の SQL、バックアップ）から出うる。保存側の丸めが
+ * 本体で、こちらは最後の関門。
+ */
+const COORDINATE_ISSUE_COLUMNS: ReadonlySet<string> = new Set([
+	"latitude",
+	"longitude",
+]);
 
 /**
  * レスポンスに載る Issue。`IssueRow` から公開カラムだけを取り出し、
@@ -228,6 +250,10 @@ export const PUBLIC_SELECT_WITH_COUNTS = `${PUBLIC_ISSUE_COLUMNS.map((column) =>
  * `photo_key` は明示的に列挙から外し、有無だけを `has_photo` に畳む。
  * 空文字が入ることは無い想定だが、`Boolean()` ではなく null 比較にすると
  * 「キーはあるが空」を写真ありと誤って扱うため、真値判定に寄せている。
+ *
+ * 座標は `COORDINATE_ISSUE_COLUMNS` の分だけ丸めて返す（#124）。
+ * 内部フィールドを落とすのと同じ位置に置いているのは、どちらも
+ * 「レスポンスに出してよい形へ整える」ための最後の関門だから。
  */
 export function toPublicIssue(row: IssueRowLike): PublicIssue {
 	return {
@@ -237,7 +263,13 @@ export function toPublicIssue(row: IssueRowLike): PublicIssue {
 				// 真偽値のカラムだけ 0/1 を boolean に直す。NULL は「値が無い」
 				// ではなく「匿名でない」に倒さないよう、Boolean() ではなく
 				// 明示的に 0 との比較で判定する（NOT NULL なので通常は来ない）。
-				BOOLEAN_ISSUE_COLUMNS.has(column) ? row[column] !== 0 : row[column],
+				BOOLEAN_ISSUE_COLUMNS.has(column)
+					? row[column] !== 0
+					: // 座標は返す直前にもう一度丸める（#124）。位置なしの行は
+						// `null` のまま通る（`roundIssueCoordinate` が null を返す）。
+						COORDINATE_ISSUE_COLUMNS.has(column)
+						? roundIssueCoordinate(row[column] as number | null)
+						: row[column],
 			]),
 			// 真偽値へ直したカラムがあるので、`IssueRow` そのままの形にはならない。
 			// 変換後の形（＝レスポンスの形）で受ける
@@ -403,9 +435,10 @@ issues.onError((err, c) => {
  *
  * multipart のときは全フィールドが文字列で届くため、数値項目
  * （latitude / longitude）はここで数値に直してからスキーマへ渡す。
- * `Number("")` が 0 になるのを避けるため、空文字は undefined に倒して
- * 「未入力」としてスキーマの required エラーに落とす（web 側の
- * `toNumber` と同じ考え方）。
+ * `Number("")` が 0 になるのを避けるため、空文字は undefined に倒す
+ * （web 側の `toNumber` と同じ考え方）。位置は任意になったので（#124）、
+ * undefined はそのまま「位置なし」として通る。ここで 0 に化けると、
+ * 緯度経度 0（ギニア湾沖）の Issue が黙って作られる。
  *
  * 写真そのものは `photo` パートから取り出し、スキーマの検証対象には
  * しない（Zod は File を検証する用途に向かず、サイズと MIME の検査は
@@ -604,6 +637,17 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 	const auth = getAuth(c);
 	const userId = auth?.userId;
 
+	// 保存する前に精度を落とす（#124）。**生の座標は DB に入れない。**
+	//
+	// 返すときにだけ丸める方式も採れるが、それだと細かい値が残り続け、
+	// この経路を通らない読み方（管理用の SQL、バックアップの流出、
+	// 将来足すエンドポイント）から出うる。持たなければ漏れない。
+	//
+	// 位置を出さない起票では両方 null。片方だけの指定はスキーマが弾いて
+	// いるので、ここに来るのは「両方ある」か「両方ない」かのどちらか。
+	const storedLatitude = roundIssueCoordinate(latitude);
+	const storedLongitude = roundIssueCoordinate(longitude);
+
 	// タイムスタンプは CTE で 1 度だけ求めて両方の列に使う。
 	// 式を2回書くと評価も2回になり、その間にミリ秒が進むと
 	// `created_at` と `updated_at` が作成時点でずれる。
@@ -617,8 +661,8 @@ issues.post("/", clerkAuth(), requireAuth, async (c) => {
 			title,
 			description,
 			scope,
-			latitude,
-			longitude,
+			storedLatitude,
+			storedLongitude,
 			category ?? null,
 			userId,
 			// D1 に真偽値をそのまま渡せないため 0/1 に直す。

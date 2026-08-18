@@ -679,6 +679,104 @@ describe("/map ページ", () => {
 
 		expect(html).not.toMatch(/class="issues-map-marker"/);
 	});
+
+	/*
+	 * 位置を出さずに起票された Issue（#124）。
+	 *
+	 * 座標が null のまま図法の計算（`fitViewToIssues`）へ渡ると NaN になり、
+	 * **1 件のせいで地図が丸ごと描けなくなる**。位置を出さないという
+	 * 1 人の選択が、他の全員の Issue を地図から消してはいけない。
+	 */
+	describe("位置情報を持たない Issue", () => {
+		const MIXED = [
+			...THREE_CITIES,
+			issueAt("dddd", "位置なしの Issue", TOKYO, {
+				latitude: null,
+				longitude: null,
+			}),
+		];
+
+		it("位置なしが混ざっても、位置のある Issue は地図に出る", async () => {
+			process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
+			process.env.NEXT_PUBLIC_MAP_TILE_URL = TEMPLATE;
+			globalThis.fetch = stubListFetch(MIXED);
+
+			const element = await MapPage({ searchParams: Promise.resolve({}) });
+			const html = renderToStaticMarkup(element);
+
+			expect(html).toMatch(/class="issues-map-view"/);
+			// 地図に載るのは座標を持つ 3 件だけ。4 件と出ていたら
+			// 位置なしを数えており、地図の中身と食い違う
+			const caption = html.match(/class="issues-map-attribution">([^<]*)/)?.[1];
+			expect(caption).toContain(String(THREE_CITIES.length));
+			expect(html).toContain("東京の Issue");
+		});
+
+		// 黙って落とすと、地図の上の点が「条件に合う Issue の全部」だと読まれる
+		it("地図に出ていない件数を伝える", async () => {
+			process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
+			process.env.NEXT_PUBLIC_MAP_TILE_URL = TEMPLATE;
+			globalThis.fetch = stubListFetch(MIXED);
+
+			const element = await MapPage({ searchParams: Promise.resolve({}) });
+			const html = renderToStaticMarkup(element);
+
+			expect(html).toContain(getUiMessages("ja").mapPage.withoutLocation(1));
+		});
+
+		it("位置なしが 1 件も無ければ、その注記は出さない", async () => {
+			process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
+			process.env.NEXT_PUBLIC_MAP_TILE_URL = TEMPLATE;
+			globalThis.fetch = stubListFetch(THREE_CITIES);
+
+			const element = await MapPage({ searchParams: Promise.resolve({}) });
+			const html = renderToStaticMarkup(element);
+
+			expect(html).not.toContain(
+				getUiMessages("ja").mapPage.withoutLocation(0),
+			);
+		});
+
+		// 全件が位置なしのとき。`fitViewToIssues([])` は既定の視界へ倒れるので
+		// 地図自体は描けるが、マーカーは 0 件になる。
+		//
+		// このとき「条件に合う Issue はありませんでした」は**出さない**。
+		// 該当する Issue はあって、地図に出せないだけ。両方出すと
+		// 「無い」と「N 件ある」が同じ画面に並んで矛盾する
+		it("位置のある Issue が 1 件も無くても壊れない", async () => {
+			process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
+			process.env.NEXT_PUBLIC_MAP_TILE_URL = TEMPLATE;
+			globalThis.fetch = stubListFetch([
+				issueAt("eeee", "位置なしの Issue", TOKYO, {
+					latitude: null,
+					longitude: null,
+				}),
+			]);
+
+			const element = await MapPage({ searchParams: Promise.resolve({}) });
+			const html = renderToStaticMarkup(element);
+
+			expect(html).not.toContain(getUiMessages("ja").mapPage.noIssues);
+			expect(html).toContain(getUiMessages("ja").mapPage.withoutLocation(1));
+			expect(html).not.toContain("NaN");
+		});
+
+		// 絞り込みに 1 件も合わないときは、これまでどおり「該当なし」を出す。
+		// 上の変更で「該当なし」が二度と出なくなっていないことの裏取り
+		it("本当に 0 件のときは「該当なし」を出す", async () => {
+			process.env.NEXT_PUBLIC_API_URL = "https://api.example.com";
+			process.env.NEXT_PUBLIC_MAP_TILE_URL = TEMPLATE;
+			globalThis.fetch = stubListFetch([]);
+
+			const element = await MapPage({ searchParams: Promise.resolve({}) });
+			const html = renderToStaticMarkup(element);
+
+			expect(html).toContain(getUiMessages("ja").mapPage.noIssues);
+			expect(html).not.toContain(
+				getUiMessages("ja").mapPage.withoutLocation(0),
+			);
+		});
+	});
 });
 
 describe("CSS と視界の計算の寸法が一致している", () => {

@@ -70,12 +70,91 @@ export const ISSUE_LIFECYCLE_HIGHLIGHT_VALUES = ISSUE_STATUS_VALUES.filter(
 	(status) => status !== "closed",
 );
 
-export const CreateIssueSchema = z.object({
+/**
+ * 公開する座標の小数点以下桁数（#124）。
+ *
+ * 3 桁は緯度で約 111m、日本の緯度における経度で約 91m にあたる。
+ * 「どのあたりの困りごとか」を地図で見るには足りて、**建物や敷地を
+ * 指すには足りない**、という境目としてこの桁を選んだ。
+ *
+ * 4 桁（約 11m）だと戸建ての敷地に収まってしまい、名前を伏せても
+ * 家が分かる。2 桁（約 1.1km）まで落とすと、同じ通りの困りごとが
+ * すべて 1 点に重なり、地図としての用途が失われる。
+ *
+ * この桁は**保存する値**にも**返す値**にも同じように効く
+ * （`apps/api/src/routes/issues.ts`）。細かい値を持ったまま丸めて返す
+ * 方式にしていないのは、持っていれば別の経路（管理用の SQL、将来の
+ * 別エンドポイント、バックアップの流出）から出うるため。
+ * 匿名を選んだ人の生活圏は、そもそも保存しないのが一番強い。
+ */
+export const ISSUE_COORDINATE_PRECISION = 3;
+
+const COORDINATE_SCALE = 10 ** ISSUE_COORDINATE_PRECISION;
+
+/**
+ * 座標を `ISSUE_COORDINATE_PRECISION` 桁へ丸める（#124）。
+ *
+ * `null` / `undefined`（位置を出さない起票）はそのまま `null` を返す。
+ * 有限でない数値も `null` に倒す。座標として使えない値を丸めても
+ * 座標にはならず、地図に渡せば壊れるため。
+ *
+ * `Math.round(value * 1000) / 1000` は「整数 ÷ 1000」なので、
+ * 結果の 10 進表現は必ず 3 桁以内に収まる（倍精度の最短表現が
+ * 元の 3 桁小数へ戻るため）。JSON に 13 桁が復活することはない。
+ *
+ * 半端値（ちょうど 0.0005）の丸め方向は SQLite の `ROUND` と一致しない。
+ * `Math.round` は +∞ 側へ、SQLite は 0 から遠い側へ倒すので、負の座標で
+ * 1 桁分（0.001 = 約 100m）ずれることがある。既存行を丸めたマイグレーション
+ * （`0010_coarsen_location.sql`）とここで、同じ入力から違う値が出るのは
+ * その範囲。**どちらも 3 桁に収まるので、隠したい精度は同じだけ落ちる。**
+ * 揃えるために片方へ寄せる処理は入れていない（丸めの目的は値の一致ではなく
+ * 精度を落とすことで、境界のちょうど半端値は実データにまず現れない）。
+ */
+export function roundIssueCoordinate(
+	value: number | null | undefined,
+): number | null {
+	if (value === null || value === undefined) return null;
+	if (!Number.isFinite(value)) return null;
+	return Math.round(value * COORDINATE_SCALE) / COORDINATE_SCALE;
+}
+
+/**
+ * 緯度と経度が「両方ある」か「両方ない」かのどちらかであること（#124）。
+ *
+ * 片方だけの座標は地図に置けない。黙って捨てると、入力した側は
+ * 位置を伝えたつもりでいるのに伝わっていない状態になるため、
+ * 入力の誤りとして返す。
+ */
+export const LOCATION_PAIR_REQUIRED_MESSAGE =
+	"latitude and longitude must be provided together";
+
+/**
+ * 起票で受け取る各項目。`CreateIssueSchema` から `superRefine` を外した形。
+ *
+ * 項目単位のスキーマ（`CreateIssueFields.shape.category` など）を引きたい
+ * 場面があるため、素の `ZodObject` としても公開している。
+ * **リクエストの検証には `CreateIssueSchema` の方を使うこと。**
+ * こちらは緯度経度が揃っているかの検査を通らない。
+ */
+export const CreateIssueFields = z.object({
 	title: z.string().min(1).max(200),
 	description: z.string().min(1).max(5000),
 	scope: IssueScope,
-	latitude: z.number().min(-90).max(90),
-	longitude: z.number().min(-180).max(180),
+	/**
+	 * 困りごとが起きている場所（#124）。**任意**。
+	 *
+	 * 必須だった頃は、位置を出したくない人に「起票しない」以外の
+	 * 選択肢が無かった。匿名で書けても場所が残れば地図上の 1 点として
+	 * 特定され得るため、名前を伏せる選択（#88）と釣り合っていなかった。
+	 *
+	 * 値そのものは保存前に `roundIssueCoordinate` を通す。ここで
+	 * `.transform()` を掛けていないのは、**入力の検証と保存の加工を
+	 * 混ぜないため**。このスキーマは web 側の入力チェックにも使われ
+	 * （`apps/web/src/lib/api.ts`）、そこで丸めてしまうと「送った値」と
+	 * 「画面が持っている値」が食い違う。丸めるのは保存する側の責務。
+	 */
+	latitude: z.number().min(-90).max(90).nullish(),
+	longitude: z.number().min(-180).max(180).nullish(),
 	category: z.string().min(1).max(100).optional(),
 	/**
 	 * 匿名で起票するかどうか。既定は匿名（#88）。
@@ -91,6 +170,28 @@ export const CreateIssueSchema = z.object({
 	 * 倒れる二重の担保になっている。
 	 */
 	is_anonymous: z.boolean().default(true),
+});
+
+/**
+ * 起票リクエストの検証スキーマ。
+ *
+ * 位置は任意だが（#124）、緯度と経度は対で意味を持つので、
+ * 片方だけの指定は入力の誤りとして弾く。両方のフィールドに
+ * エラーを付けるのは、画面がフィールドごとにエラーを出すため
+ * （片方にしか出さないと、もう片方の欄が正常に見える）。
+ */
+export const CreateIssueSchema = CreateIssueFields.superRefine((data, ctx) => {
+	const hasLatitude = data.latitude !== null && data.latitude !== undefined;
+	const hasLongitude = data.longitude !== null && data.longitude !== undefined;
+	if (hasLatitude === hasLongitude) return;
+
+	for (const path of ["latitude", "longitude"] as const) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			path: [path],
+			message: LOCATION_PAIR_REQUIRED_MESSAGE,
+		});
+	}
 });
 export type CreateIssue = z.infer<typeof CreateIssueSchema>;
 
@@ -612,6 +713,23 @@ const JA_UI_MESSAGES = {
 		/** 地図の下に残す座標の数値表示 */
 		coordinates: (latitude: number, longitude: number) =>
 			`緯度 ${latitude} / 経度 ${longitude}`,
+		/**
+		 * 位置を出さずに起票された Issue の「場所」欄（#124）。
+		 *
+		 * 「未設定」ではなく、書いた人が選んだ結果であることが伝わる書き方に
+		 * している。入れ忘れたように読めると、他の人が場所を尋ねる流れになり、
+		 * 出したくないという選択が守られない。
+		 */
+		locationUnset: "起票した方が位置情報を出さない選択をしています",
+		/**
+		 * 表示している座標がおおよそのものであることの注記（#124）。
+		 *
+		 * 保存している座標が約 100m の粗さに丸めてあるため、地図のピンは
+		 * 実際の場所とずれる。断りが無いと、ピンの指す建物が現場だと
+		 * 読まれてしまう。
+		 */
+		coordinatesApproximate:
+			"位置はおよそ 100m の範囲に丸めてあります。地図のピンは実際の場所とずれます。",
 		createdAt: "作成日時",
 		updatedAt: "最終更新",
 	},
@@ -768,15 +886,25 @@ const JA_UI_MESSAGES = {
 		photoUnreadable:
 			"この画像は読み込めませんでした。JPEG・PNG・WebP のいずれかの写真を選んでください。",
 		photoNotReady: "写真を準備しています。完了までお待ちください。",
-		locationLegend: "場所",
+		locationLegend: "場所（任意）",
+		/**
+		 * 場所の入力の説明（#124 で任意になった）。
+		 *
+		 * 最初に「空欄でよい」と言い切っている。必須だと思ったまま読み進めると、
+		 * 位置を出したくない人はそこで起票をやめてしまう。
+		 * 丸めることも先に伝える。入力した値がそのまま公開されると思っている
+		 * 人にとっては、それが入力するかどうかの判断材料になる。
+		 */
 		locationHint:
-			"困りごとが起きている場所の座標です。「現在地から入力」を押すと、ブラウザが位置情報の使用許可を確認します（許可すると緯度経度が自動で入ります）。現地にいないときは、地図サービスで目的の地点を右クリックすると座標を調べられます。",
+			"困りごとが起きている場所の座標です。空欄のままでも起票できます。入力した座標は、およそ 100m の範囲に丸めてから保存・公開します（建物までは特定できません）。「現在地から入力」を押すと、ブラウザが位置情報の使用許可を確認します（許可すると緯度経度が自動で入ります）。現地にいないときは、地図サービスで目的の地点を右クリックすると座標を調べられます。",
 		latitude: "緯度",
-		latitudeHint: "-90 〜 90",
+		latitudeHint: "-90 〜 90（任意）",
 		latitudePlaceholder: "例: 35.681236",
 		longitude: "経度",
-		longitudeHint: "-180 〜 180",
+		longitudeHint: "-180 〜 180（任意）",
 		longitudePlaceholder: "例: 139.767125",
+		/** 入力した座標を消して「位置なし」に戻す（#124） */
+		clearLocation: "位置情報を入力しない",
 		useCurrentPosition: "現在地から入力",
 		locating: "取得中…",
 		geolocationFailed:
@@ -819,6 +947,15 @@ const JA_UI_MESSAGES = {
 		fetchFailed:
 			"Issue を取得できませんでした。時間をおいて再度お試しください。",
 		noIssues: "条件に合う Issue はありませんでした。",
+		/**
+		 * 位置情報を持たない Issue の件数（#124）。
+		 *
+		 * 地図に出ないものがあることを黙っていると、地図の上の点が
+		 * 「条件に合う Issue の全部」だと読まれる。件数を出すことで、
+		 * 一覧で見れば続きがあると分かる。
+		 */
+		withoutLocation: (count: number) =>
+			`位置情報のない Issue が ${count} 件あります。地図には出ていないので、一覧で読めます。`,
 		zoomLabel: "縮尺",
 		zoomIn: "拡大",
 		zoomOut: "縮小",
@@ -995,6 +1132,9 @@ const EN_UI_MESSAGES: UiMessages = {
 		location: "Location",
 		coordinates: (latitude: number, longitude: number) =>
 			`Latitude ${latitude} / Longitude ${longitude}`,
+		locationUnset: "The person who posted this chose not to share a location",
+		coordinatesApproximate:
+			"The location is rounded to about 100m, so the pin does not mark the exact spot.",
 		createdAt: "Created",
 		updatedAt: "Last updated",
 	},
@@ -1103,15 +1243,16 @@ const EN_UI_MESSAGES: UiMessages = {
 			"This image could not be read. Choose a JPEG, PNG, or WebP photo.",
 		photoNotReady:
 			"The photo is still being prepared. Please wait until it is done.",
-		locationLegend: "Location",
+		locationLegend: "Location (optional)",
 		locationHint:
-			"The coordinates of where the problem is. Pressing “Use my location” asks the browser for permission to use your location (allowing it fills in the latitude and longitude). If you are not on site, right-click the spot in a map service to look up its coordinates.",
+			"The coordinates of where the problem is. You can leave this empty and still post. Coordinates you enter are rounded to about 100m before they are stored and published, so no building can be pinpointed. Pressing “Use my location” asks the browser for permission to use your location (allowing it fills in the latitude and longitude). If you are not on site, right-click the spot in a map service to look up its coordinates.",
 		latitude: "Latitude",
-		latitudeHint: "-90 to 90",
+		latitudeHint: "-90 to 90 (optional)",
 		latitudePlaceholder: "e.g. 35.681236",
 		longitude: "Longitude",
-		longitudeHint: "-180 to 180",
+		longitudeHint: "-180 to 180 (optional)",
 		longitudePlaceholder: "e.g. 139.767125",
+		clearLocation: "Post without a location",
 		useCurrentPosition: "Use my location",
 		locating: "Locating…",
 		geolocationFailed:
@@ -1146,6 +1287,8 @@ const EN_UI_MESSAGES: UiMessages = {
 			"No map tile source is configured, so the map cannot be shown. Locations are still listed below.",
 		fetchFailed: "Could not load issues. Please try again later.",
 		noIssues: "No issues matched your filters.",
+		withoutLocation: (count: number) =>
+			`${count} issue(s) have no location. They are not on the map, but you can read them in the list.`,
 		zoomLabel: "Zoom",
 		zoomIn: "Zoom in",
 		zoomOut: "Zoom out",

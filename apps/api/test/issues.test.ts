@@ -609,6 +609,327 @@ describe("Issues CRUD", () => {
 		});
 	});
 
+	// --- 位置情報のプライバシー（#124）---
+	//
+	// 本番の利用者から「場所を特定されると嫌なので、丸めるか必須をやめてほしい」
+	// という要望が匿名で寄せられた。当時 API から取れたのは小数点以下 13 桁
+	// （ミリメートル未満）の座標で、匿名で書いた人の**自宅の敷地内まで**
+	// 誰でも指せる状態だった。名前を伏せても場所が残れば、地図上の 1 点として
+	// 特定され得る。#88 で用意した匿名の選択が、位置情報の外側にあった。
+	//
+	// ここが見張るのは 2 つ。
+	//
+	//  - **保存する値も返す値も丸まっている**こと（建物を特定できない）
+	//  - **位置を出さずに起票できる**こと（丸めても嫌な人に選択肢を残す）
+	describe("Location privacy", () => {
+		/**
+		 * 家の中まで指せる細かさの座標。小数点以下 13 桁で、Issue #124 で
+		 * 問題になった値と同じ精度。
+		 *
+		 * **値そのものは架空のものにしてある。** 問題になった実際の座標は
+		 * 匿名で投稿した人の生活圏で、このリポジトリは公開されている。
+		 * DB から消しても、同じ値をテストに書けば git 履歴に恒久的に残る。
+		 * 検査したいのは「この精度を落とせること」なので、桁数さえ同じなら
+		 * 値は何でもよい。
+		 */
+		const RAW_LATITUDE = 35.4062938174615;
+		const RAW_LONGITUDE = 139.7461829365072;
+		const ROUNDED_LATITUDE = 35.406;
+		const ROUNDED_LONGITUDE = 139.746;
+
+		/**
+		 * 数値の小数点以下の桁数。
+		 *
+		 * 座標の範囲（±180）で丸めた後の値は指数表記にならない
+		 * （`String(0.001)` は `"0.001"`）ので、文字列表現から数えてよい。
+		 * 丸め忘れた値は `35.4062938174615` のようにそのまま桁が残る。
+		 */
+		function decimalPlaces(value: number): number {
+			const text = String(value);
+			const dot = text.indexOf(".");
+			return dot === -1 ? 0 : text.length - dot - 1;
+		}
+
+		/** 位置を持つ Issue を、指定の細かさの座標で起票する */
+		async function createAtRawPosition(overrides: Partial<IssueInput> = {}) {
+			return readBody(
+				await createIssue({
+					...validIssue,
+					latitude: RAW_LATITUDE,
+					longitude: RAW_LONGITUDE,
+					...overrides,
+				}),
+			);
+		}
+
+		// 返す値だけでなく DB に入る値も丸める。
+		//
+		// 「保存は生のまま、返すときだけ丸める」方式だと、細かい座標が
+		// DB に残り続ける。別の経路（管理用の SQL、将来足すエンドポイント、
+		// バックアップの流出）から出うるので、そもそも持たない方に倒す。
+		it("stores coordinates already rounded, not the raw input", async () => {
+			const created = await createAtRawPosition();
+
+			const stored = await readStoredIssue(created.id);
+			expect(stored.latitude).toBe(ROUNDED_LATITUDE);
+			expect(stored.longitude).toBe(ROUNDED_LONGITUDE);
+		});
+
+		it("returns coordinates too coarse to point at a building", async () => {
+			const created = await createAtRawPosition({ is_anonymous: true });
+
+			setMockUserId(null);
+			const detail = await readBody(
+				await app.request(`/issues/${created.id}`, {}, env),
+			);
+
+			expect(detail.latitude).toBe(ROUNDED_LATITUDE);
+			expect(detail.longitude).toBe(ROUNDED_LONGITUDE);
+			expect(decimalPlaces(detail.latitude)).toBeLessThanOrEqual(3);
+			expect(decimalPlaces(detail.longitude)).toBeLessThanOrEqual(3);
+			// レスポンス本文のどこにも生の桁が現れないこと。キーを見落としても
+			// 気づけるよう、JSON 全体を文字列として見る
+			expect(JSON.stringify(detail)).not.toContain(String(RAW_LATITUDE));
+			expect(JSON.stringify(detail)).not.toContain(String(RAW_LONGITUDE));
+		});
+
+		// 匿名かどうかで丸め方を変えない。
+		//
+		// 匿名のときだけ丸めると、匿名と記名を後から切り替える機能が入った
+		// 瞬間に穴が空く（記名で保存した細かい座標が、匿名に変えても残る）。
+		// 記名で書いた人も、名前を出すことと自宅を指されることは別の話。
+		it("rounds coordinates for named issues too", async () => {
+			const created = await createAtRawPosition({ is_anonymous: false });
+
+			expect(created.latitude).toBe(ROUNDED_LATITUDE);
+			expect(created.longitude).toBe(ROUNDED_LONGITUDE);
+			const stored = await readStoredIssue(created.id);
+			expect(stored.latitude).toBe(ROUNDED_LATITUDE);
+		});
+
+		it("returns rounded coordinates in the list response", async () => {
+			await createAtRawPosition();
+
+			setMockUserId(null);
+			const list = await readBody(await app.request("/issues", {}, env));
+
+			expect(list.data[0].latitude).toBe(ROUNDED_LATITUDE);
+			expect(list.data[0].longitude).toBe(ROUNDED_LONGITUDE);
+			expect(JSON.stringify(list)).not.toContain(String(RAW_LATITUDE));
+		});
+
+		// multipart は写真を付けるときの経路（#65）。JSON 側だけ丸めても、
+		// 写真付きの投稿がそのまま細かい座標を通してしまう
+		it("rounds coordinates sent as multipart/form-data", async () => {
+			const form = new FormData();
+			form.set("title", validIssue.title);
+			form.set("description", validIssue.description);
+			form.set("scope", validIssue.scope);
+			form.set("latitude", String(RAW_LATITUDE));
+			form.set("longitude", String(RAW_LONGITUDE));
+
+			const res = await app.request(
+				"/issues",
+				{ method: "POST", headers: { Origin: ALLOWED_ORIGIN }, body: form },
+				env,
+			);
+
+			expect(res.status).toBe(201);
+			const created = await readBody(res);
+			expect(created.latitude).toBe(ROUNDED_LATITUDE);
+			const stored = await readStoredIssue(created.id);
+			expect(stored.latitude).toBe(ROUNDED_LATITUDE);
+		});
+
+		// --- 位置を出さない選択 ---
+		describe("issues without a location", () => {
+			it("creates an issue when latitude and longitude are omitted", async () => {
+				const res = await createIssue({
+					title: validIssue.title,
+					description: validIssue.description,
+					scope: validIssue.scope,
+				} as never);
+
+				expect(res.status).toBe(201);
+				const created = await readBody(res);
+				expect(created.latitude).toBeNull();
+				expect(created.longitude).toBeNull();
+
+				const stored = await readStoredIssue(created.id);
+				expect(stored.latitude).toBeNull();
+				expect(stored.longitude).toBeNull();
+			});
+
+			it("creates an issue when latitude and longitude are explicitly null", async () => {
+				const res = await createIssue({
+					...validIssue,
+					latitude: null,
+					longitude: null,
+				} as never);
+
+				expect(res.status).toBe(201);
+				const created = await readBody(res);
+				expect(created.latitude).toBeNull();
+				expect(created.longitude).toBeNull();
+			});
+
+			it("returns null coordinates when reading the issue back", async () => {
+				const created = await readBody(
+					await createIssue({
+						title: validIssue.title,
+						description: validIssue.description,
+						scope: validIssue.scope,
+					} as never),
+				);
+
+				setMockUserId(null);
+				const detail = await readBody(
+					await app.request(`/issues/${created.id}`, {}, env),
+				);
+				expect(detail.latitude).toBeNull();
+
+				const list = await readBody(await app.request("/issues", {}, env));
+				expect(list.data[0].latitude).toBeNull();
+				expect(list.data[0].longitude).toBeNull();
+			});
+
+			// 空文字は multipart で「入力しなかった」ときに届く形。
+			// `Number("")` は 0 になるので、緯度経度 0（ギニア湾沖）の
+			// Issue が黙って作られてはいけない
+			it("treats empty multipart location fields as no location", async () => {
+				const form = new FormData();
+				form.set("title", validIssue.title);
+				form.set("description", validIssue.description);
+				form.set("scope", validIssue.scope);
+				form.set("latitude", "");
+				form.set("longitude", "");
+
+				const res = await app.request(
+					"/issues",
+					{ method: "POST", headers: { Origin: ALLOWED_ORIGIN }, body: form },
+					env,
+				);
+
+				expect(res.status).toBe(201);
+				const created = await readBody(res);
+				expect(created.latitude).toBeNull();
+				expect(created.longitude).toBeNull();
+			});
+
+			// 片方だけの座標は地図に置けない。黙って捨てると、書いた人は
+			// 位置を伝えたつもりでいるのに伝わっていない状態になる
+			it("rejects a location with only latitude", async () => {
+				const res = await createIssue({
+					...validIssue,
+					longitude: null,
+				} as never);
+
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.longitude).toBeDefined();
+			});
+
+			it("rejects a location with only longitude", async () => {
+				const res = await createIssue({
+					...validIssue,
+					latitude: undefined,
+				} as never);
+
+				expect(res.status).toBe(400);
+				const body = await readBody(res);
+				expect(body.error.fieldErrors.latitude).toBeDefined();
+			});
+		});
+
+		// --- 二段構えの 2 段目（返す直前の丸め）---
+		//
+		// 保存時の丸めが本体だが、それだけだと「この経路を通らずに入った行」を
+		// 守れない。手作業の SQL、別のスクリプト、移行前のバックアップからの
+		// 復元。そういう行が公開 API に出るときの最後の関門を見る。
+		//
+		// 保存側の丸めが効いていると、API 経由の起票ではこの段が効いているか
+		// どうか分からない（どちらか片方でも 3 桁になる）。**DB へ直接
+		// 細かい座標を入れて**確かめる。
+		describe("rounding on the way out", () => {
+			it("rounds a row that was inserted straight into the database", async () => {
+				await env.DB.prepare(
+					"INSERT INTO issues (id, title, description, scope, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?)",
+				)
+					.bind(
+						"raw-row",
+						"直接入れた行",
+						"移行後に細かい座標が入った行",
+						"personal",
+						RAW_LATITUDE,
+						RAW_LONGITUDE,
+					)
+					.run();
+
+				// 保存されている値は細かいまま。ここが丸まっていると、
+				// このテストは 2 段目ではなく DB の状態を見たことになる
+				const stored = await readStoredIssue("raw-row");
+				expect(stored.latitude).toBe(RAW_LATITUDE);
+
+				setMockUserId(null);
+				const detail = await readBody(
+					await app.request("/issues/raw-row", {}, env),
+				);
+				expect(detail.latitude).toBe(ROUNDED_LATITUDE);
+				expect(detail.longitude).toBe(ROUNDED_LONGITUDE);
+
+				const list = await readBody(await app.request("/issues", {}, env));
+				expect(list.data[0].latitude).toBe(ROUNDED_LATITUDE);
+			});
+
+			// 関数を直接呼ぶ。経路を通さずに、丸める責務がここにあることを固定する
+			it("rounds in toPublicIssue itself", () => {
+				const issue = toPublicIssueForTest({
+					id: "x",
+					title: "t",
+					description: "d",
+					scope: "personal",
+					status: "open",
+					latitude: RAW_LATITUDE,
+					longitude: RAW_LONGITUDE,
+					category: null,
+					created_at: "2026-08-18 00:00:00.000",
+					updated_at: "2026-08-18 00:00:00.000",
+					is_anonymous: 1,
+				});
+
+				expect(issue.latitude).toBe(ROUNDED_LATITUDE);
+				expect(issue.longitude).toBe(ROUNDED_LONGITUDE);
+			});
+
+			it("keeps null coordinates null", () => {
+				const issue = toPublicIssueForTest({
+					id: "x",
+					title: "t",
+					description: "d",
+					scope: "personal",
+					status: "open",
+					latitude: null,
+					longitude: null,
+					category: null,
+					created_at: "2026-08-18 00:00:00.000",
+					updated_at: "2026-08-18 00:00:00.000",
+					is_anonymous: 1,
+				});
+
+				expect(issue.latitude).toBeNull();
+				expect(issue.longitude).toBeNull();
+			});
+		});
+
+		// 範囲の検証は位置を任意にした後も効いていること。
+		// `nullish()` を足したときに `min`/`max` ごと外してしまうと、
+		// 検証が消えたことに気づけない
+		it("still rejects an out-of-range latitude", async () => {
+			const res = await createIssue({ ...validIssue, latitude: 90.5 });
+			expect(res.status).toBe(400);
+		});
+	});
+
 	// --- GET /issues ---
 	describe("GET /issues", () => {
 		it("returns empty list initially", async () => {

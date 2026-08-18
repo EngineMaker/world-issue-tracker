@@ -211,18 +211,40 @@ export default async function IssueDetailPage({
 					  地図を出しても座標の数値は消さない（#63）。タイル配信元が
 					  落ちていたり未設定だったりすると地図は出ないが、そのときに
 					  位置情報まで失われるのは避けたい。
-					  桁を丸めると別の地点を指すため、受け取った値を加工しない
+					  ここで桁を加工しないのも同じ理由で、受け取った値をそのまま出す。
+					  丸めるのは API 側の責務（#124。保存も公開も 3 桁）で、画面が
+					  独自に丸めると「地図のピン」と「数値」が別の地点を指す。
+
+					  位置を出さずに起票された Issue（#124）は座標が null で届く。
+					  地図も座標も出さず、書いた人の選択として伝える。「未設定」と
+					  書くと入れ忘れに読め、周りが場所を尋ねる流れになってしまう
 					*/}
 					<dd>
-						<IssueMap
-							latitude={issue.latitude}
-							longitude={issue.longitude}
-							title={issue.title}
-							tileUrlTemplate={resolveTileUrlTemplate()}
-							attribution={resolveTileAttribution()}
-							locale={locale}
-						/>
-						{messages.issueDetail.coordinates(issue.latitude, issue.longitude)}
+						{issue.latitude === null || issue.longitude === null ? (
+							messages.issueDetail.locationUnset
+						) : (
+							<>
+								<IssueMap
+									latitude={issue.latitude}
+									longitude={issue.longitude}
+									title={issue.title}
+									tileUrlTemplate={resolveTileUrlTemplate()}
+									attribution={resolveTileAttribution()}
+									locale={locale}
+								/>
+								{messages.issueDetail.coordinates(
+									issue.latitude,
+									issue.longitude,
+								)}
+								{/*
+								  ピンが実際の場所とずれることを断る。断りが無いと、
+								  ピンの指す建物が現場だと読まれる
+								*/}
+								<span className="field-hint">
+									{messages.issueDetail.coordinatesApproximate}
+								</span>
+							</>
+						)}
 					</dd>
 
 					<dt>{messages.issueDetail.createdAt}</dt>

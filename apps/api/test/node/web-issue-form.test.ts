@@ -104,6 +104,10 @@ describe("validateIssueForm", () => {
 
 	// 緯度経度は空欄でも `Number("")` が 0 になるため、
 	// 「未入力」が「赤道・本初子午線の座標」として通ってしまう事故が起きうる。
+	//
+	// 位置は #124 で任意になったが、**片方だけ空**はいまも誤りとして弾く。
+	// 座標は対で意味を持つので、片方を落として通すと「位置を伝えたつもりが
+	// 伝わっていない」状態になる。両方が空の場合は下のテストが見る。
 	it.each([
 		["緯度", "latitude"],
 		["経度", "longitude"],
@@ -113,6 +117,37 @@ describe("validateIssueForm", () => {
 		expect(result.success).toBe(false);
 		if (result.success) return;
 		expect(result.fieldErrors[field]?.length).toBeGreaterThan(0);
+	});
+
+	// 位置を出したくない人が起票できること（#124）。
+	//
+	// これが通らないと、位置を出したくない人に「起票しない」以外の
+	// 選択肢が無い状態に戻る。空欄は 0 ではなく「位置なし」として送る。
+	it("緯度経度が両方とも空欄なら、位置なしとして通す", () => {
+		const result = validateIssueForm({
+			...VALID_INPUT,
+			latitude: "",
+			longitude: "",
+		});
+
+		expect(result.success).toBe(true);
+		if (!result.success) return;
+		// `0` ではないこと。`Number("")` が 0 に化ける経路を塞いでいるか
+		expect(result.data.latitude ?? null).toBeNull();
+		expect(result.data.longitude ?? null).toBeNull();
+		// 他の項目は普通に通ること（位置なしが全体を巻き込んでいない）
+		expect(result.data.title).toBe(VALID_INPUT.title);
+	});
+
+	// 片方だけ入力したとき、エラーを両方の欄に出す。
+	// 片方にしか出さないと、もう片方の欄が正常に見えて直しどころが分からない
+	it("片方だけの座標は両方の欄にエラーを出す", () => {
+		const result = validateIssueForm({ ...VALID_INPUT, longitude: "" });
+
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		expect(result.fieldErrors.latitude?.length).toBeGreaterThan(0);
+		expect(result.fieldErrors.longitude?.length).toBeGreaterThan(0);
 	});
 
 	it("数値でない緯度を弾く", () => {
