@@ -17,7 +17,7 @@
 |---------|------|
 | モノレポ | Turborepo |
 | API サーバー | Hono (TypeScript) → Cloudflare Workers |
-| フロントエンド | Next.js (App Router) → Cloudflare Pages (OpenNext) |
+| フロントエンド | Next.js (App Router) → Cloudflare Workers (OpenNext) |
 | データベース | Cloudflare D1 (SQLite 互換) |
 | 認証 | Clerk |
 | 共有型定義 | Zod スキーマ (`packages/shared`) |
@@ -32,7 +32,7 @@
 world-issue-tracker/
 ├── apps/
 │   ├── api/          # Hono API (Cloudflare Workers)
-│   └── web/          # Next.js フロントエンド (Cloudflare Pages)
+│   └── web/          # Next.js フロントエンド (Cloudflare Workers)
 ├── packages/
 │   └── shared/       # Zod スキーマ、型定義、バリデーション
 ├── turbo.json
@@ -78,16 +78,16 @@ API は `http://localhost:8787`、Web は `http://localhost:3000` で起動し�
 | サービス | URL |
 |---------|-----|
 | API | https://world-issue-tracker-api.mktoho.workers.dev |
-| Web | https://world-issue-tracker-web.mktoho.workers.dev |
+| Web | https://issues.emaker.dev |
 
-> **独自ドメインへの切り替えを準備中（#98）。**
-> Web の入口は `https://issues.emaker.dev` になる予定です。Clerk の本番
-> インスタンスは独自ドメインを必須としており、`*.workers.dev` では本番キー
-> （`pk_live_` / `sk_live_`）を使えないため。
+> **Web の入口は独自ドメイン `https://issues.emaker.dev` に切り替え済み（#98 クローズ）。**
+> Clerk の本番インスタンスは独自ドメインを必須としており、`*.workers.dev` では
+> 本番キー（`pk_live_` / `sk_live_`）を使えないためです。
 >
-> コード側の受け入れ準備（CORS の許可オリジン、Clerk の `authorizedParties`）は
-> 済んでいて、値は `packages/shared` の `PRODUCTION_WEB_ORIGIN` に集約してあります。
-> DNS と Clerk 側の設定が終わって実際に切り替わったら、この表を更新すること。
+> 旧 URL `https://world-issue-tracker-web.mktoho.workers.dev` は
+> `issues.emaker.dev` へ 308 リダイレクトします（`apps/web/src/middleware.ts`）。
+> 本番の Web オリジンは `packages/shared` の `PRODUCTION_WEB_ORIGIN` に集約してあり、
+> CORS の許可オリジンや Clerk の `authorizedParties` もこの値を参照します。
 
 ### GitHub Actions による自動デプロイ
 
@@ -195,7 +195,9 @@ curl -fs https://world-issue-tracker-api.mktoho.workers.dev/health
 curl -fs "https://world-issue-tracker-api.mktoho.workers.dev/issues?limit=1"
 
 # Web から API へ実際に到達できているか（Server Component の fetch 経路の確認）
-curl -fs https://world-issue-tracker-web.mktoho.workers.dev/ | grep -q "最近の Issue" && echo OK
+# 本番の Web オリジン（issues.emaker.dev）を直接叩く。旧 URL の *.workers.dev は
+# ここへ 308 リダイレクトするため、-L 無しの curl だと本文が取れず OK が出ない
+curl -fs https://issues.emaker.dev/ | grep -q "最近の Issue" && echo OK
 ```
 
 起票・更新まで含めて確かめたい場合は、本番ではなくローカル（`bun dev`）か、

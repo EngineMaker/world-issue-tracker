@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PRODUCTION_WEB_ORIGIN } from "@world-issue-tracker/shared";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -213,6 +214,22 @@ describe("README のデプロイ後確認手順", () => {
 		expect(verification, "GET /issues への言及がない").toMatch(
 			/GET\s+\/issues|\/issues\?/,
 		);
+	});
+
+	it("Web の到達確認が本番の Web オリジンを指している", () => {
+		// 「最近の Issue」を grep して Web の疎通を見るコマンドは、旧 URL
+		// （*.workers.dev）のままだと 308 リダイレクトを追わず本文が取れず、
+		// 正常な本番を「失敗」と誤判定する（#140）。確認先が本番の Web
+		// オリジン（PRODUCTION_WEB_ORIGIN）と一致していることを検査する。
+		const webCheckLine = verification
+			.split("\n")
+			.find((line) => line.includes("curl") && line.includes("最近の Issue"));
+
+		expect(webCheckLine, "Web の到達確認コマンドが見当たらない").toBeTruthy();
+
+		const url = webCheckLine?.match(/https?:\/\/[^\s/"']+/)?.[0];
+		expect(url, "確認コマンドに URL が無い").toBeTruthy();
+		expect(url).toBe(new URL(PRODUCTION_WEB_ORIGIN).origin);
 	});
 
 	it("本番へ起票して確認しないよう促している", () => {
