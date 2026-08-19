@@ -6,12 +6,14 @@ import {
 } from "./issues";
 
 /**
- * ステータス変更に関わる通信（Issue #62）。
+ * 起票者による Issue への操作に関わる通信（Issue #62 / #144）。
  *
  * 「閲覧者が起票者か」の判定（`GET /issues/:id/viewer`）と、
- * ステータスの更新（`PATCH /issues/:id`）を扱う。
+ * ステータスの更新（`PATCH /issues/:id`）、Issue 自体の削除
+ * （`DELETE /issues/:id`）を扱う。いずれも起票者だけができる操作で、
+ * 起票者判定を土台に共有する（詳細ページで `/viewer` を二重に叩かないため）。
  *
- * どちらもブラウザから呼ぶ。Web と API は別オリジンなので Clerk の
+ * どれもブラウザから呼ぶ。Web と API は別オリジンなので Clerk の
  * セッション Cookie は届かず、`Authorization: Bearer` で明示的に渡す
  * （`lib/help-offers.ts` と同じ事情）。
  */
@@ -231,4 +233,61 @@ export async function updateIssueStatus(
 	}
 
 	return issue;
+}
+
+/**
+ * `deleteIssue` が削除に失敗したときに投げるエラー（#144）。
+ *
+ * `message` は開発者が状況を読めるようにするためのもので、**画面には出さない**。
+ * 表示する文言は `status` を見て呼び出し側（`DeleteIssueButton`）が
+ * `packages/shared` の辞書から選ぶ（`DeleteCommentError` と同じ作法。
+ * 日本語の `message` をそのまま出す `IssueStatusError` の作りは増やさない）。
+ */
+export class DeleteIssueError extends Error {
+	readonly status: number | null;
+
+	constructor(message: string, status: number | null) {
+		super(message);
+		this.name = "DeleteIssueError";
+		this.status = status;
+	}
+}
+
+/**
+ * 起票者が自分の Issue を削除する（`DELETE /issues/:id`、#144）。
+ *
+ * 消せるのは自分の Issue だけで、他人のものは API が 403 で弾く。画面も
+ * 起票者にしか削除ボタンを出さないが、判定を画面だけに置くと DOM をいじれば
+ * 誰の分でも呼べてしまう（`deleteComment` と同じ）。実際の権限は API 側の
+ * `WHERE id = ? AND user_id = ?` が強制する。
+ *
+ * 削除は写真・サムネイル（R2）とコメントまで含む物理削除で元に戻せない
+ * （後始末は API 側が行う。`apps/api/src/routes/issues.ts` の DELETE）。
+ *
+ * API は削除した Issue を 200 で返すが、消えた事実以外に画面が使う情報は
+ * 無いため戻り値は無い（`deleteComment` と同じ）。
+ */
+export async function deleteIssue(
+	issueId: string,
+	token: string | null,
+	{ fetchImpl = defaultFetch }: UpdateIssueStatusOptions = {},
+): Promise<void> {
+	if (!token) {
+		throw new DeleteIssueError("トークンが無い（未ログイン）", 401);
+	}
+
+	let res: Awaited<ReturnType<FetchLike>>;
+	try {
+		res = await fetchImpl(issueUrl(issueId), {
+			cache: "no-store",
+			method: "DELETE",
+			headers: { Authorization: `Bearer ${token}` },
+		});
+	} catch {
+		throw new DeleteIssueError("API に接続できなかった", null);
+	}
+
+	if (!res.ok) {
+		throw new DeleteIssueError(`API が ${res.status} を返した`, res.status);
+	}
 }

@@ -15,14 +15,20 @@ import {
 	IssueStatusError,
 	updateIssueStatus,
 } from "../../lib/issue-status";
+import { DeleteIssueButton } from "./DeleteIssueButton";
 import { StatusPill } from "./StatusPill";
 
 /**
- * ステータス欄。起票者かどうかを自分で確かめてから `StatusControl` を出す。
+ * 起票者向けの操作欄。起票者かどうかを自分で確かめてから、ステータス変更
+ * （`StatusControl`）と Issue 自体の削除（`DeleteIssueButton`、#144）を出す。
  *
  * 詳細ページ（Server Component）は Clerk のトークンを API へ渡していないため、
  * サーバー側の描画では「誰として見ているか」が分からない。`HelpOfferButton` が
  * `viewer_offered` をブラウザ側で取り直しているのと同じ事情で、判定はここで行う。
+ *
+ * 起票者判定（`GET /issues/:id/viewer`）はここ 1 箇所に集約する。ステータス変更と
+ * 削除で別々に `/viewer` を叩くと、詳細ページで判定が二重になる（#144 の依存メモ）。
+ * 編集（#143）も同じ所有者向け操作なので、増えるときはこの判定を共有すること。
  *
  * 判定が付くまでは現在のステータスだけを出す。まだ分からない段階で操作 UI を
  * 出すと、起票者以外の画面に一瞬だけ出て消えることになり、押せたように見えて
@@ -94,16 +100,26 @@ export function IssueStatusSection({
 		return <StatusUnavailable status={status} locale={locale} />;
 	}
 
+	// 判定が付いていて、かつ起票者のときだけ操作 UI を出す。
+	// `loading` を owner 扱いに倒すと、起票者以外の画面にもボタンが一瞬出て消える
+	const isOwner = relation.state === "ready" && relation.isOwner;
+
 	return (
-		<StatusControl
-			issueId={issueId}
-			initialStatus={status}
-			// 判定が付いていて、かつ起票者のときだけ操作 UI を出す。
-			// `loading` を owner 扱いに倒すと、起票者以外の画面にも
-			// ボタンが一瞬出て消える
-			viewerIsOwner={relation.state === "ready" && relation.isOwner}
-			locale={locale}
-		/>
+		<>
+			<StatusControl
+				issueId={issueId}
+				initialStatus={status}
+				viewerIsOwner={isOwner}
+				locale={locale}
+			/>
+			{/*
+			  起票者にだけ、Issue 自体の削除を出す（#144）。ステータス変更が
+			  「状態を進める」操作なのに対し、これは投稿そのものの取り下げなので、
+			  ステータス欄とは別の section に分ける。判定は上で 1 度だけ済ませており、
+			  削除側で `/viewer` を叩き直さない
+			*/}
+			{isOwner && <DeleteIssueButton issueId={issueId} locale={locale} />}
+		</>
 	);
 }
 
