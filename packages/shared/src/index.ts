@@ -749,6 +749,27 @@ const JA_UI_MESSAGES = {
 		updatedAt: "最終更新",
 	},
 
+	/**
+	 * 見つからないページ（404）の文言（Issue #145）。
+	 *
+	 * `not-found.tsx` が無いと、Next.js は英語・無装飾・戻り導線なしの
+	 * 既定 404（"This page could not be found."）を出す。他の画面が
+	 * ja/en を出し分けているのに 404 だけ英語のまま行き止まりになるのを防ぐ。
+	 *
+	 * 共有リンクの寿命切れ（渡した後に Issue が削除される）や URL の
+	 * 打ち間違いで実際に踏まれる経路なので、「何が起きたか」と「次にどこへ
+	 * 行けるか」を必ず出す。文言は「消えた/見つからない」を断定しすぎない
+	 * ——削除されたのか URL 違いなのかはこちらでは区別できないため。
+	 */
+	notFound: {
+		heading: "ページが見つかりません",
+		body: "お探しのページは見つかりませんでした。Issue が削除されたか、URL が間違っている可能性があります。",
+		/** 一覧へ。詳細ページと同じ行き先だが、404 の受け皿として独立に持つ */
+		browseIssues: "Issue 一覧を見る",
+		writeIssue: "Issue を書く",
+		backToHome: "トップへ戻る",
+	},
+
 	/** ステータスの表示と変更（`StatusControl`） */
 	statusControl: {
 		heading: "ステータス",
@@ -1152,6 +1173,14 @@ const EN_UI_MESSAGES: UiMessages = {
 			"The location is rounded to about 100m, so the pin does not mark the exact spot.",
 		createdAt: "Created",
 		updatedAt: "Last updated",
+	},
+
+	notFound: {
+		heading: "Page not found",
+		body: "We couldn't find the page you were looking for. The issue may have been deleted, or the URL may be wrong.",
+		browseIssues: "Browse issues",
+		writeIssue: "Write an issue",
+		backToHome: "Back to home",
 	},
 
 	statusControl: {
