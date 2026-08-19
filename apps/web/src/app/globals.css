@@ -1777,6 +1777,28 @@ main p {
 }
 
 /*
+ * ページ遷移中のフォールバック（Issue #146）。
+ *
+ * 押した瞬間に手応えを返すのが目的なので、面を持たせて「反応した」と
+ * 分かる形にする。0 件（.empty-state）と違い「待っている途中」なので、
+ * 暖色ではなく落ち着いた面（--surface）で出し、失敗（.error-block の赤）とも
+ * 区別する。中身は文言 1 行だけで、遷移が終われば本来の画面に置き換わる。
+ */
+.loading-state {
+	background: var(--surface);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	padding: var(--space-5);
+	text-align: center;
+	color: var(--ink-soft);
+}
+
+.loading-state-message {
+	margin-bottom: 0;
+	color: var(--ink);
+}
+
+/*
  * ページ末尾の導線（Issue #95）。
  *
  * これまで「Issue を書く / トップへ戻る」を文字の「/」で区切っていた。
