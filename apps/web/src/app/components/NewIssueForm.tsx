@@ -10,7 +10,7 @@ import {
 	roundIssueCoordinate,
 } from "@world-issue-tracker/shared";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IssueCreated } from "@/app/components/IssueCreated";
 import {
 	CreateIssueError,
@@ -20,7 +20,10 @@ import {
 	type IssueFormValues,
 	validateIssueForm,
 } from "@/lib/api";
-import { createThumbnailFile, resizeImageFile } from "@/lib/photo";
+import {
+	createPhotoSelectionHandler,
+	type PhotoState,
+} from "@/lib/photo-selection";
 
 // カテゴリの候補は定数から引く（`@/lib/api`）。
 // ここに直書きすると、表記ゆれを防ぐという目的そのものが崩れる
@@ -56,28 +59,6 @@ function coordinateFieldValue(value: number): string {
 }
 
 /**
- * 選ばれた写真の状態（#65）。
- *
- * 縮小はブラウザ側で行うため、選んでから送れる状態になるまでに間がある。
- * 「選んだのに何も起きない」時間を作らないよう、処理中も状態として持つ。
- */
-type PhotoState =
-	| { status: "empty" }
-	| { status: "processing" }
-	/**
-	 * `thumbnail` は一覧のカード用に作る小さい派生物（#125）。
-	 * 作れなかったときは null になるが、送信は止めない
-	 * （API 側が原寸に倒して配信する）。
-	 */
-	| {
-			status: "ready";
-			file: File;
-			thumbnail: File | null;
-			previewUrl: string;
-	  }
-	| { status: "failed"; message: string };
-
-/**
  * 起票フォームの本体（Issue #82 で `issues/new/page.tsx` から切り出し）。
  *
  * Client Component なので Cookie を直接読めない（`cookies()` は
@@ -98,6 +79,49 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [geolocation, setGeolocation] = useState<GeolocationState>("idle");
 	const [photo, setPhoto] = useState<PhotoState>({ status: "empty" });
+
+	/*
+	 * プレビュー URL をアンマウント時に解放する（#141）。`ready` のまま別画面へ
+	 * 遷移すると blob URL が宙に残るため、最新の写真状態を ref で追い、
+	 * アンマウント時にだけ解放する（`photo` を依存に入れて毎回解放すると、
+	 * 表示中の画像まで消えてしまう）。
+	 *
+	 * ブロックコメントで書くのは、行コメントだと `（#141）` が `#rgb` の
+	 * 直書きと見分けが付かず design-tokens.test.tsx が落ちるため
+	 * （あちらはブロックコメントだけを剥がす）。
+	 */
+	const photoRef = useRef(photo);
+	photoRef.current = photo;
+	useEffect(() => {
+		return () => {
+			const current = photoRef.current;
+			if (current.status === "ready") {
+				URL.revokeObjectURL(current.previewUrl);
+			}
+		};
+	}, []);
+
+	// 縮小・サムネイル生成の失敗文言はロケール依存。ハンドラは世代カウンタを
+	// 保つため一度だけ生成するので、文言は ref 経由で最新を読む。
+	const messagesRef = useRef(messages);
+	messagesRef.current = messages;
+
+	/*
+	 * 写真選択ハンドラ（#141）。選び直しの競合を世代ガードで防ぐため、
+	 * 一度だけ生成して使い回す（呼び出しのたびに作り直すとカウンタが戻る）。
+	 * 取り消し（`clearPhoto`）も同じ世代カウンタに乗せるため、ここでまとめて
+	 * 受け取る。別々に持つと、送信成功後の取り消しと進行中の選択がすれ違う。
+	 */
+	const photoHandlerRef = useRef<ReturnType<
+		typeof createPhotoSelectionHandler
+	> | null>(null);
+	if (photoHandlerRef.current === null) {
+		photoHandlerRef.current = createPhotoSelectionHandler({
+			setPhoto,
+			getMessages: () => messagesRef.current.newIssue,
+		});
+	}
+	const { handlePhotoChange, clearPhoto } = photoHandlerRef.current;
 
 	// 文字列の入力欄用。チェックボックス（`showName`）は値が真偽値なので
 	// `updateShowName` を使う。1 つの関数で両方を受けると、
@@ -170,69 +194,6 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 				setGeolocation("failed");
 			},
 		);
-	};
-
-	/**
-	 * 選ばれた写真を縮小して、送れる状態にする（#65）。
-	 *
-	 * 縮小してから送るのは負荷対策ではなく、利用者の失敗を防ぐため。
-	 * スマホの写真は 1 枚 3〜8MB あり、そのままだと 5MB の上限に
-	 * 引っかかる。詳細は `lib/photo.ts`。
-	 *
-	 * プレビュー用の URL は、差し替え時と選択解除時に必ず解放する。
-	 * 解放しないと、選び直すたびに前の画像がメモリに残る。
-	 */
-	const handlePhotoChange = async (file: File | null) => {
-		// 直前のプレビューを解放してから次に進む
-		setPhoto((current) => {
-			if (current.status === "ready") {
-				URL.revokeObjectURL(current.previewUrl);
-			}
-			return file ? { status: "processing" } : { status: "empty" };
-		});
-
-		if (!file) {
-			return;
-		}
-
-		const result = await resizeImageFile(file);
-		if (!result.ok) {
-			setPhoto({
-				status: "failed",
-				message:
-					result.reason === "too-large"
-						? messages.newIssue.photoTooLarge
-						: messages.newIssue.photoUnreadable,
-			});
-			return;
-		}
-
-		/*
-		 * 一覧用のサムネイル（#125）。縮小済みのファイルから作る。
-		 * 失敗しても null になるだけで、投稿は止めない。
-		 *
-		 * 行コメントで書くと、Issue 番号が 3 桁以上のときに
-		 * `#rgb` の直書きと見分けが付かず design-tokens.test.tsx が落ちる
-		 * （あちらはブロックコメントだけを剥がす）
-		 */
-		const thumbnail = await createThumbnailFile(result.file);
-
-		setPhoto({
-			status: "ready",
-			file: result.file,
-			thumbnail,
-			previewUrl: URL.createObjectURL(result.file),
-		});
-	};
-
-	/** 選択した写真を取り消す。プレビューの URL も解放する。 */
-	const clearPhoto = () => {
-		setPhoto((current) => {
-			if (current.status === "ready") {
-				URL.revokeObjectURL(current.previewUrl);
-			}
-			return { status: "empty" };
-		});
 	};
 
 	const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
