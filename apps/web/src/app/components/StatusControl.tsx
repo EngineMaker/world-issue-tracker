@@ -10,15 +10,23 @@ import {
 	type Locale,
 } from "@world-issue-tracker/shared";
 import { useEffect, useRef, useState } from "react";
+import type { IssueEditFormValues } from "../../lib/api";
 import {
 	fetchViewerRelation,
 	IssueStatusError,
 	updateIssueStatus,
 } from "../../lib/issue-status";
+import { EditIssueForm } from "./EditIssueForm";
 import { StatusPill } from "./StatusPill";
 
 /**
- * ステータス欄。起票者かどうかを自分で確かめてから `StatusControl` を出す。
+ * 詳細ページの起票者向け操作をまとめるセクション。
+ *
+ * 起票者かどうかを `GET /issues/:id/viewer` で**一度だけ**確かめ、その結果を
+ * ステータス変更（`StatusControl`、#62）と本文編集（`EditIssueForm`、#143）の
+ * 両方に配る。判定を別々に作ると、詳細ページに「所有者向け操作」と `/viewer`
+ * 判定が二重にでき、コンフリクトの元になる（Issue #143 / #144 の
+ * 「依存・土台の共有」）。削除（#144）を足すときも、ここで得た判定を共有すること。
  *
  * 詳細ページ（Server Component）は Clerk のトークンを API へ渡していないため、
  * サーバー側の描画では「誰として見ているか」が分からない。`HelpOfferButton` が
@@ -31,14 +39,19 @@ import { StatusPill } from "./StatusPill";
  * 判定に失敗したときも操作 UI は出さない。「取得に失敗した」を
  * 「あなたが起票者だ」に倒すと、変えられない人にボタンを見せることになる。
  * 起票者本人から見ると操作できないので、その旨を出して再読み込みを促す。
+ *
+ * `editInitialValues` は本文編集フォームの初期値（起票者のときだけ使う）。
+ * 詳細ページから渡す。省略された場合は編集フォームを出さない。
  */
 export function IssueStatusSection({
 	issueId,
 	status,
+	editInitialValues,
 	locale = DEFAULT_LOCALE,
 }: {
 	issueId: string;
 	status: IssueStatusType;
+	editInitialValues?: IssueEditFormValues;
 	locale?: Locale;
 }) {
 	const { isLoaded, isSignedIn, getToken } = useAuth();
@@ -94,16 +107,34 @@ export function IssueStatusSection({
 		return <StatusUnavailable status={status} locale={locale} />;
 	}
 
+	// 判定が付いていて、かつ起票者のときだけ操作 UI を出す。
+	// `loading` を owner 扱いに倒すと、起票者以外の画面にもボタンが一瞬出て消える
+	const viewerIsOwner = relation.state === "ready" && relation.isOwner;
+
 	return (
-		<StatusControl
-			issueId={issueId}
-			initialStatus={status}
-			// 判定が付いていて、かつ起票者のときだけ操作 UI を出す。
-			// `loading` を owner 扱いに倒すと、起票者以外の画面にも
-			// ボタンが一瞬出て消える
-			viewerIsOwner={relation.state === "ready" && relation.isOwner}
-			locale={locale}
-		/>
+		<>
+			<StatusControl
+				issueId={issueId}
+				initialStatus={status}
+				viewerIsOwner={viewerIsOwner}
+				locale={locale}
+			/>
+			{/*
+			  本文編集（#143）。ステータスと同じ判定結果で出し分ける。
+			  `editInitialValues` を渡された場合だけ描く（詳細ページからは常に渡す。
+			  省略時は編集フォームを出さない）。`EditIssueForm` は起票者以外なら
+			  自身で何も描かないが、非起票者向けに mount する必要も無いので、
+			  ここでも `viewerIsOwner` を渡して二重に絞る
+			*/}
+			{editInitialValues && (
+				<EditIssueForm
+					issueId={issueId}
+					viewerIsOwner={viewerIsOwner}
+					initial={editInitialValues}
+					locale={locale}
+				/>
+			)}
+		</>
 	);
 }
 

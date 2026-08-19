@@ -279,6 +279,14 @@ export default async function IssueDetailPage({
 			<IssueStatusSection
 				issueId={issue.id}
 				status={issue.status}
+				// 本文編集（Issue 143）の初期値。起票者のときだけ使われる。
+				// カテゴリ未設定（null）は空欄として渡す
+				editInitialValues={{
+					title: issue.title,
+					description: issue.description,
+					scope: issue.scope,
+					category: issue.category ?? "",
+				}}
 				locale={locale}
 			/>
 

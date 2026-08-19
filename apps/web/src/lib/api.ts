@@ -1,6 +1,8 @@
 import {
 	type CreateIssue,
 	CreateIssueSchema,
+	type UpdateIssue,
+	UpdateIssueSchema,
 } from "@world-issue-tracker/shared";
 
 /**
@@ -151,6 +153,66 @@ export function validateIssueForm(values: IssueFormValues): ValidationResult {
 	return {
 		success: false,
 		fieldErrors: flattened.fieldErrors as FieldErrors,
+		formErrors: flattened.formErrors,
+	};
+}
+
+/**
+ * Issue の本文編集フォームの入力値（すべて文字列）（#143）。
+ *
+ * 編集できるのはタイトル・説明・スコープ・カテゴリの 4 項目。位置や写真は
+ * 含めない（`PATCH /issues/:id` は現状これらを JSON で受けない）。
+ * ステータスは別 UI（`StatusControl`）が扱うのでここには入れない。
+ */
+export type IssueEditFormValues = {
+	title: string;
+	description: string;
+	scope: string;
+	category: string;
+};
+
+/** 編集フォームのフィールド名 → そのフィールドのエラーメッセージ。 */
+export type IssueEditFieldErrors = Partial<
+	Record<keyof IssueEditFormValues, string[]>
+>;
+
+export type IssueEditValidationResult =
+	| { success: true; data: UpdateIssue }
+	| { success: false; fieldErrors: IssueEditFieldErrors; formErrors: string[] };
+
+/**
+ * 編集フォームの入力値を `UpdateIssueSchema` で検証する（#143）。
+ *
+ * 起票フォームの `validateIssueForm` と同じく、項目や制約（最大長など）は
+ * `packages/shared` のスキーマ一本に寄せていて、ここで書き直していない。
+ *
+ * カテゴリの空文字は「カテゴリなし」として `null` に倒す。`UpdateIssueSchema`
+ * の `category` は `nullable` なので、`null` を送るとカテゴリを外す更新になる。
+ * `omitEmpty` で `undefined` に倒すと「変更しない」の意味になり、一度付けた
+ * カテゴリを画面から外せなくなる。編集画面は 4 項目すべてを毎回送る前提なので、
+ * ここでは「空欄＝外す」に確定させる。
+ *
+ * タイトル・説明は空文字を渡すとスキーマの `min(1)` に弾かれ、そのフィールドの
+ * エラーになる（＝本文を空にする編集は通さない）。
+ */
+export function validateIssueEdit(
+	values: IssueEditFormValues,
+): IssueEditValidationResult {
+	const parsed = UpdateIssueSchema.safeParse({
+		title: values.title.trim(),
+		description: values.description.trim(),
+		scope: values.scope,
+		category: omitEmpty(values.category) ?? null,
+	});
+
+	if (parsed.success) {
+		return { success: true, data: parsed.data };
+	}
+
+	const flattened = parsed.error.flatten();
+	return {
+		success: false,
+		fieldErrors: flattened.fieldErrors as IssueEditFieldErrors,
 		formErrors: flattened.formErrors,
 	};
 }

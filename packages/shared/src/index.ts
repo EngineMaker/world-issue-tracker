@@ -764,6 +764,31 @@ const JA_UI_MESSAGES = {
 	},
 
 	/**
+	 * 本文の編集（`EditIssueForm`、#143）。
+	 *
+	 * 起票者だけが、投稿した Issue のタイトル・説明・スコープ・カテゴリを
+	 * 後から直せるようにする。入力欄のラベルや補助テキストは起票フォーム
+	 * （`newIssue`）と同じものを使い回すので、ここには編集に固有の文言だけを置く。
+	 */
+	issueEdit: {
+		/** 起票者だけに見せる、編集フォームを開く入口 */
+		edit: "内容を編集する",
+		heading: "Issue を編集",
+		lead: "誤字の修正や、状況が変わったときの追記ができます。編集できるのは起票した本人だけです。",
+		cancel: "やめる",
+		submit: "変更を保存",
+		submitting: "保存中…",
+		/**
+		 * 保存完了の通知。ページ上部の見出しなどは Server Component が
+		 * 描いた静的な表示なので、その場では変わらない。再読み込みで
+		 * 全体に反映されることを添える（`StatusControl` と同じ、
+		 * 自分のセクション内で完結させる方針）。
+		 */
+		updated: "内容を更新しました。ページを再読み込みすると全体に反映されます。",
+		validationFailed: "入力内容を確認してください。",
+	},
+
+	/**
 	 * 「私も困っている」（`ReactionButton`、#112）。
 	 *
 	 * 「手伝います」と対にして置いている。あちらの見出しが「解決に動く人」で、
@@ -1163,6 +1188,17 @@ const EN_UI_MESSAGES: UiMessages = {
 		submit: "Update status",
 		submitting: "Updating…",
 		updated: (statusLabel: string) => `Status updated to “${statusLabel}”.`,
+	},
+
+	issueEdit: {
+		edit: "Edit details",
+		heading: "Edit issue",
+		lead: "Fix typos or add updates as the situation changes. Only the person who opened the issue can edit it.",
+		cancel: "Cancel",
+		submit: "Save changes",
+		submitting: "Saving…",
+		updated: "Updated. Reload the page to see it reflected everywhere.",
+		validationFailed: "Please check your input.",
 	},
 
 	reaction: {
