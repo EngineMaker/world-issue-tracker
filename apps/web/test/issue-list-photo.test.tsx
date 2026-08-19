@@ -183,25 +183,41 @@ describe("一覧のカードのレイアウト（CSS）", () => {
  * 全件が原寸へのフォールバックになり、受け入れ条件が黙って壊れる。
  */
 describe("起票フォーム — サムネイルの生成", () => {
-	const source = readFileSync(
-		join(import.meta.dir, "../src/app/components/NewIssueForm.tsx"),
-		"utf8",
-	);
 	/** コメントを落とす。「コメントに書いただけ」で通らないようにする */
-	const body = source
-		.replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
-		.replace(/\/\*[\s\S]*?\*\//g, "")
-		.replace(/^\s*\/\/.*$/gm, "");
+	function stripComments(source: string): string {
+		return source
+			.replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+			.replace(/\/\*[\s\S]*?\*\//g, "")
+			.replace(/^\s*\/\/.*$/gm, "");
+	}
+
+	function readStripped(relativePath: string): string {
+		return stripComments(
+			readFileSync(join(import.meta.dir, relativePath), "utf8"),
+		);
+	}
+
+	// サムネイル生成の呼び出しは、写真状態のライフサイクル（世代ガード）と
+	// 一緒に `lib/photo-selection.ts` へ切り出した（#141）。フォームからは
+	// このハンドラ経由で写真を処理する
+	const selectionBody = readStripped("../src/lib/photo-selection.ts");
+	// `createIssue` への受け渡しはフォーム本体（送信処理）に残っている
+	const formBody = readStripped("../src/app/components/NewIssueForm.tsx");
 
 	/*
 	 * 名前が出てくるだけでは足りない。import に残っていれば通ってしまい、
 	 * 呼び出しを消した変異体を検出できなかった。呼び出しの形まで見る
 	 */
 	it("縮小した写真からサムネイルを作る", () => {
-		expect(body).toMatch(/createThumbnailFile\(/);
+		// 既定の依存として実物（ブラウザ実装）を配線していること。
+		// テストのために差し替え可能にしてあるが、本番はこれを使う
+		expect(selectionBody).toMatch(/createThumbnailFile\b/);
+		// 実際に生成を呼んでいること。呼び出しを消した変異体はここで落ちる
+		// （import に残っているだけでは上の配線しか満たさない）
+		expect(selectionBody).toMatch(/await createThumbnail\(/);
 	});
 
 	it("作ったサムネイルを createIssue に渡す", () => {
-		expect(body).toMatch(/createIssue\([\s\S]*?thumbnail[\s\S]*?\)/);
+		expect(formBody).toMatch(/createIssue\([\s\S]*?thumbnail[\s\S]*?\)/);
 	});
 });
