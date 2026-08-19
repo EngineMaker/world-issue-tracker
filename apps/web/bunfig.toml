@@ -19,4 +19,13 @@
 # `useRouter` を呼ぶが、実物はルーターコンテキストが無いと
 # `invariant expected app router to be mounted` で落ちる。
 # 個別に import する形にすると、また実行順で結果が変わる状態に戻る。
-preload = ["./test/helpers/mock-cookies.ts", "./test/helpers/mock-navigation.ts"]
+#
+# `register-dom` は **必ず先頭**に置く（Issue #138）。onClick / onSubmit /
+# useEffect を実際に踏むテストは `@testing-library/react` の `createRoot` で
+# クライアント描画するため、`document` / `window` が無いと import 時点で落ちる。
+# cookies / navigation のモックより先に DOM を用意する必要がある。
+preload = [
+	"./test/helpers/register-dom.ts",
+	"./test/helpers/mock-cookies.ts",
+	"./test/helpers/mock-navigation.ts",
+]
