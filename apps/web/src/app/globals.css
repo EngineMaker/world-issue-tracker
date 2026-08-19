@@ -1682,6 +1682,32 @@ main p {
 	color: var(--ink-soft);
 }
 
+/*
+  Issue 自体の削除（#144）。起票者だけに、ステータス欄の下に出る。
+  取り消しのための操作なので上の操作から少し離し、間違って押しにくくする
+*/
+.issue-delete {
+	margin-top: var(--space-5);
+}
+
+/*
+  確認中は「本当に消すか」の問いかけと 2 つのボタンが横に並ぶ。
+  コメント削除（.comment-actions）と同じ作法で、幅が足りなければ折り返す
+*/
+.issue-delete-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+	margin: 0;
+}
+
+/* 削除の確認。押すと戻せないことをここで伝える（コメント削除と同じ） */
+.issue-delete-confirm {
+	font-size: var(--text-sm);
+	color: var(--ink-soft);
+}
+
 /* コメント欄の冒頭に置く、何を書く場所かの説明 */
 .section-lead {
 	color: var(--ink-soft);

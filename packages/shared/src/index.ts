@@ -763,6 +763,27 @@ const JA_UI_MESSAGES = {
 			"位置はおよそ 100m の範囲に丸めてあります。地図のピンは実際の場所とずれます。",
 		createdAt: "作成日時",
 		updatedAt: "最終更新",
+		/**
+		 * 起票者による Issue 自体の削除（#144）。起票者にだけ出る。
+		 *
+		 * 削除は写真・サムネイル・コメントまで含む物理削除で元に戻せないため、
+		 * コメント削除（#99）と同じく押してすぐには消さず、その場で一度確認を
+		 * 挟む（`deleteConfirm`）。文言・作法はコメント削除に揃えている。
+		 */
+		delete: "この Issue を削除",
+		deleteConfirm:
+			"この Issue を削除しますか？ 写真やコメントも含めて元に戻せません。",
+		deleteConfirmYes: "削除する",
+		deleteConfirmCancel: "やめる",
+		deleting: "削除中…",
+		deleteFailed:
+			"Issue を削除できませんでした。時間をおいて再度お試しください。",
+		/**
+		 * 401 のときだけ出す文言。削除ボタンは起票者にしか出ないので、
+		 * 通常の失敗は 401（セッション切れ）くらいしか起きない（`comments` と同じ判断）。
+		 */
+		deleteSignInRequired:
+			"ログインの有効期限が切れている可能性があります。ログインし直してから削除してください。",
 	},
 
 	/** ステータスの表示と変更（`StatusControl`） */
@@ -1170,6 +1191,17 @@ const EN_UI_MESSAGES: UiMessages = {
 			"The location is rounded to about 100m, so the pin does not mark the exact spot.",
 		createdAt: "Created",
 		updatedAt: "Last updated",
+		/** Issue 自体の削除（#144）。日本語側のコメントを参照。 */
+		delete: "Delete this issue",
+		deleteConfirm:
+			"Delete this issue? Photos and comments will be removed too. This cannot be undone.",
+		// 確認の前後でボタンの文字が変わるようにする（`comments` と同じ理由）。
+		deleteConfirmYes: "Yes, delete",
+		deleteConfirmCancel: "Keep it",
+		deleting: "Deleting…",
+		deleteFailed: "Could not delete the issue. Please try again later.",
+		deleteSignInRequired:
+			"Your session may have expired. Sign in again, then delete.",
 	},
 
 	statusControl: {
