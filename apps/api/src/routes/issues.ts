@@ -328,9 +328,15 @@ async function withAuthorNames(
 		.filter(({ row, issue }) => !issue.is_anonymous && row.user_id)
 		.map(({ row }) => row.user_id as string);
 
+	// 表示名は KV にキャッシュする（#135）。Issue の一覧・詳細も無認証で叩ける
+	// 公開エンドポイントなので、キャッシュが無いと連打で Clerk への問い合わせが
+	// 増幅し、レート制限を使い切ると認証（JWKS 取得）まで巻き添えになる。
+	// Clerk のレート制限はインスタンス単位でグローバルなため、help-offers だけ
+	// 塞いでもここが開いていれば同じ脅威が成立する（同根なので同じ cache を通す）。
 	const displayNames = await fetchDisplayNames(
 		c.env.CLERK_SECRET_KEY,
 		namedUserIds,
+		{ cache: c.env.DISPLAY_NAME_CACHE },
 	);
 
 	return shaped.map(({ row, issue }) => ({

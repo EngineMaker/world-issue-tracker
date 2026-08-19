@@ -15,6 +15,15 @@ export type Bindings = {
 	PHOTOS: R2Bucket;
 	CLERK_SECRET_KEY: string;
 	CLERK_PUBLISHABLE_KEY: string;
+	/**
+	 * 表明者の表示名を Clerk から引いた結果を載せる KV（#135）。
+	 * 設定は wrangler.jsonc の `kv_namespaces`。
+	 *
+	 * オプショナルにしているのは、バインディングが未設定の環境でも公開エンドポイント
+	 * を落とさないため。未設定なら `fetchDisplayNames` は毎回 Clerk へ問い合わせる
+	 * （従来どおり動くが、無認証の連打による増幅は止まらない）。
+	 */
+	DISPLAY_NAME_CACHE?: KVNamespace;
 };
 
 /**

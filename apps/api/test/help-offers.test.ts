@@ -83,6 +83,16 @@ async function listOffers(issueId: string) {
 	return app.request(offerUrl(issueId), {}, env);
 }
 
+/** 表示名キャッシュ（#135）を空にする。テスト間でキャッシュを持ち越さないため。 */
+async function clearDisplayNameCache(): Promise<void> {
+	const cache = env.DISPLAY_NAME_CACHE;
+	if (!cache) {
+		return;
+	}
+	const { keys } = await cache.list();
+	await Promise.all(keys.map((key) => cache.delete(key.name)));
+}
+
 /** DB に実際に入っている表明の件数。レスポンスを信じずに永続化を確かめる。 */
 async function countStoredOffers(issueId: string): Promise<number> {
 	const row = await env.DB.prepare(
@@ -109,6 +119,10 @@ describe("Help offers", () => {
 		// 表示名まわりのモック（#108）。前のテストのユーザーや呼び出し記録が
 		// 残っていると、「引けた」「1 回で済んだ」を取り違える
 		resetMockClerkUsers();
+		// 表示名キャッシュ（#135）も落とす。前のテストで載った名前が残ると、
+		// 「連打しても Clerk を 1 回しか叩かない」の検証が、実は前のテストの
+		// キャッシュのおかげで通ってしまい、退行を見逃す。
+		await clearDisplayNameCache();
 	});
 
 	describe("POST /issues/:id/help-offers", () => {
@@ -432,6 +446,51 @@ describe("Help offers", () => {
 
 				expect(body.total).toBe(0);
 				expect(getUserListCalls()).toHaveLength(0);
+			});
+
+			// #135（このファイルの主眼）。無認証の第三者が同じ一覧を連打しても、
+			// Clerk への問い合わせが回数分だけ増幅しないこと。増幅を放置すると
+			// Clerk のレート制限を使い切り、認証（JWKS 取得）まで巻き添えになって
+			// 全ユーザーのログインが止まりうる。KV キャッシュでこれを止める。
+			it("同じ一覧を連打しても Clerk への問い合わせは増幅しない", async () => {
+				setMockClerkUsers([
+					{ id: HELPER, firstName: "花子", lastName: "山田", username: null },
+				]);
+				await postOffer(ISSUE_ID);
+
+				// 未ログインの第三者として、続けて 3 回引く
+				setMockUserId(null);
+				const bodies = [
+					await readBody(await listOffers(ISSUE_ID)),
+					await readBody(await listOffers(ISSUE_ID)),
+					await readBody(await listOffers(ISSUE_ID)),
+				];
+
+				// どの回も表示名は返る（キャッシュから解決される）
+				for (const body of bodies) {
+					expect(body.data[0].display_name).toBe("花子 山田");
+				}
+				// 3 回叩いても Clerk への getUserList は 1 回だけ。
+				// キャッシュが無ければ 3 回になり、これが増幅そのものだった。
+				expect(getUserListCalls()).toHaveLength(1);
+			});
+
+			// 名前を設定していない表明者でも、連打で増幅しないこと（ネガティブ
+			// キャッシュ）。名前が無いと毎回 Clerk に聞き直す実装だと、ここが
+			// 呼び出し回数分に増える。
+			it("表示名が無い表明者でも連打で増幅しない", async () => {
+				setMockClerkUsers([
+					{ id: HELPER, firstName: null, lastName: null, username: null },
+				]);
+				await postOffer(ISSUE_ID);
+
+				setMockUserId(null);
+				const first = await readBody(await listOffers(ISSUE_ID));
+				const second = await readBody(await listOffers(ISSUE_ID));
+
+				expect(first.data[0].display_name).toBeNull();
+				expect(second.data[0].display_name).toBeNull();
+				expect(getUserListCalls()).toHaveLength(1);
 			});
 
 			// 生の User ID を新たに増やしていないこと（#108 の方針 4）。
