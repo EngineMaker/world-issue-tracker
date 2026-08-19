@@ -23,7 +23,7 @@
 
 - **モノレポ**: Turborepo
 - **API サーバー**: Hono (TypeScript) → Cloudflare Workers
-- **フロントエンド**: Next.js (App Router) → Cloudflare Pages (OpenNext)
+- **フロントエンド**: Next.js (App Router) → Cloudflare Workers (OpenNext)
 - **データベース**: Cloudflare D1 (SQLite互換)
 - **共有型定義**: Zod スキーマ → packages/shared
 - **IaC**: wrangler.jsonc
@@ -37,7 +37,7 @@ world-issue-tracker/
 │   ├── api/          # Hono API (Cloudflare Workers)
 │   │   ├── src/
 │   │   └── wrangler.jsonc
-│   └── web/          # Next.js フロントエンド (Cloudflare Pages)
+│   └── web/          # Next.js フロントエンド (Cloudflare Workers)
 │       └── src/
 ├── packages/
 │   └── shared/       # Zod スキーマ、型定義、バリデーション
