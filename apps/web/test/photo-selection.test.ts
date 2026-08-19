@@ -69,7 +69,7 @@ describe("createPhotoSelectionHandler — 選び直しの競合", () => {
 		const revoked: string[] = [];
 		const store = makePhotoStore();
 
-		const handle = createPhotoSelectionHandler({
+		const { handlePhotoChange: handle } = createPhotoSelectionHandler({
 			setPhoto: store.setPhoto,
 			getMessages: () => MESSAGES,
 			resize: resize.fn as typeof import("../src/lib/photo").resizeImageFile,
@@ -130,7 +130,7 @@ describe("createPhotoSelectionHandler — 選び直しの競合", () => {
 		const created: string[] = [];
 		const store = makePhotoStore();
 
-		const handle = createPhotoSelectionHandler({
+		const { handlePhotoChange: handle } = createPhotoSelectionHandler({
 			setPhoto: store.setPhoto,
 			getMessages: () => MESSAGES,
 			resize: resize.fn as typeof import("../src/lib/photo").resizeImageFile,
@@ -174,7 +174,7 @@ describe("createPhotoSelectionHandler — 選び直しの競合", () => {
 		const thumb = deferredFactory<File, File | null>();
 		const store = makePhotoStore();
 
-		const handle = createPhotoSelectionHandler({
+		const { handlePhotoChange: handle } = createPhotoSelectionHandler({
 			setPhoto: store.setPhoto,
 			getMessages: () => MESSAGES,
 			resize: resize.fn as typeof import("../src/lib/photo").resizeImageFile,
@@ -210,7 +210,7 @@ describe("createPhotoSelectionHandler — 単一選択の基本動作", () => {
 		const thumb = deferredFactory<File, File | null>();
 		const store = makePhotoStore();
 
-		const handle = createPhotoSelectionHandler({
+		const { handlePhotoChange: handle } = createPhotoSelectionHandler({
 			setPhoto: store.setPhoto,
 			getMessages: () => MESSAGES,
 			resize: resize.fn as typeof import("../src/lib/photo").resizeImageFile,
@@ -242,7 +242,7 @@ describe("createPhotoSelectionHandler — 単一選択の基本動作", () => {
 		const resize = deferredFactory<File, ResizeResult>();
 		const store = makePhotoStore();
 
-		const handle = createPhotoSelectionHandler({
+		const { handlePhotoChange: handle } = createPhotoSelectionHandler({
 			setPhoto: store.setPhoto,
 			getMessages: () => MESSAGES,
 			resize: resize.fn as typeof import("../src/lib/photo").resizeImageFile,
@@ -265,7 +265,7 @@ describe("createPhotoSelectionHandler — 単一選択の基本動作", () => {
 		const revoked: string[] = [];
 		const store = makePhotoStore();
 
-		const handle = createPhotoSelectionHandler({
+		const { handlePhotoChange: handle } = createPhotoSelectionHandler({
 			setPhoto: store.setPhoto,
 			getMessages: () => MESSAGES,
 			resize: resize.fn as typeof import("../src/lib/photo").resizeImageFile,
@@ -301,7 +301,7 @@ describe("createPhotoSelectionHandler — 単一選択の基本動作", () => {
 		const revoked: string[] = [];
 		const store = makePhotoStore();
 
-		const handle = createPhotoSelectionHandler({
+		const { handlePhotoChange: handle } = createPhotoSelectionHandler({
 			setPhoto: store.setPhoto,
 			getMessages: () => MESSAGES,
 			resize: resize.fn as typeof import("../src/lib/photo").resizeImageFile,
@@ -327,5 +327,88 @@ describe("createPhotoSelectionHandler — 単一選択の基本動作", () => {
 		handle(makeFile("second.jpg", 4_000_000));
 		// 選び直した瞬間に直前の URL が解放される
 		expect(revoked).toEqual(["blob:resized-1.jpg"]);
+	});
+});
+
+describe("createPhotoSelectionHandler — clearPhoto と世代の共有", () => {
+	it("ready を取り消すと empty に戻し、プレビュー URL を解放する", async () => {
+		const resize = deferredFactory<File, ResizeResult>();
+		const thumb = deferredFactory<File, File | null>();
+		const revoked: string[] = [];
+		const store = makePhotoStore();
+
+		const { handlePhotoChange: handle, clearPhoto } =
+			createPhotoSelectionHandler({
+				setPhoto: store.setPhoto,
+				getMessages: () => MESSAGES,
+				resize: resize.fn as typeof import("../src/lib/photo").resizeImageFile,
+				createThumbnail:
+					thumb.fn as typeof import("../src/lib/photo").createThumbnailFile,
+				createObjectURL: (blob) => `blob:${(blob as File).name}`,
+				revokeObjectURL: (url) => {
+					revoked.push(url);
+				},
+			});
+
+		const p = handle(makeFile("photo.jpg", 4_000_000));
+		resize.calls[0].resolve({
+			ok: true,
+			file: makeFile("resized.jpg", 80_000),
+		});
+		await flush();
+		thumb.calls[0].resolve(null);
+		await p;
+		await flush();
+		expect(store.current.status).toBe("ready");
+
+		clearPhoto();
+		expect(store.current.status).toBe("empty");
+		expect(revoked).toEqual(["blob:resized.jpg"]);
+	});
+
+	// 指摘1（レビュー）: 送信成功後に clearPhoto で empty にした直後、送信中に
+	// 選び直して進行中だった処理が遅れて解決すると、消したはずの写真が復活する。
+	// clearPhoto が世代を進めることで、進行中の選択が破棄されることを見る。
+	it("clearPhoto の後に進行中の選択が解決しても、写真は復活しない", async () => {
+		const resize = deferredFactory<File, ResizeResult>();
+		const thumb = deferredFactory<File, File | null>();
+		const store = makePhotoStore();
+
+		const { handlePhotoChange: handle, clearPhoto } =
+			createPhotoSelectionHandler({
+				setPhoto: store.setPhoto,
+				getMessages: () => MESSAGES,
+				resize: resize.fn as typeof import("../src/lib/photo").resizeImageFile,
+				createThumbnail:
+					thumb.fn as typeof import("../src/lib/photo").createThumbnailFile,
+				createObjectURL: (blob) => `blob:${(blob as File).name}`,
+				revokeObjectURL: () => {},
+			});
+
+		// 送信中に写真を選び直した想定。縮小が進行中のまま…
+		const p = handle(makeFile("late.jpg", 4_000_000));
+		expect(store.current.status).toBe("processing");
+
+		// …送信が成功して取り消される
+		clearPhoto();
+		expect(store.current.status).toBe("empty");
+
+		// 遅れて選び直し分が解決する。これが empty を上書きしてはいけない
+		resize.calls[0].resolve({
+			ok: true,
+			file: makeFile("resized.jpg", 80_000),
+		});
+		await flush();
+
+		// 世代が古いので resize 直後で捨てられ、サムネイル段に進まない。
+		// ここを `await p` の前に確かめる。clearPhoto が世代を進めない実装だと
+		// この選択はサムネイル生成へ進み（thumb が呼ばれ）、`await p` は
+		// 未解決のサムネイルで止まってしまう。順序を保って明示的に落とす
+		expect(thumb.calls.length).toBe(0);
+		expect(store.current.status).toBe("empty");
+
+		// 正しい実装なら resize 直後の世代チェックで return 済み＝ p も解決済み
+		await p;
+		expect(store.current.status).toBe("empty");
 	});
 });

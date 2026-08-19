@@ -109,17 +109,19 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 	/*
 	 * 写真選択ハンドラ（#141）。選び直しの競合を世代ガードで防ぐため、
 	 * 一度だけ生成して使い回す（呼び出しのたびに作り直すとカウンタが戻る）。
+	 * 取り消し（`clearPhoto`）も同じ世代カウンタに乗せるため、ここでまとめて
+	 * 受け取る。別々に持つと、送信成功後の取り消しと進行中の選択がすれ違う。
 	 */
-	const handlePhotoChangeRef = useRef<
-		((file: File | null) => Promise<void>) | null
-	>(null);
-	if (handlePhotoChangeRef.current === null) {
-		handlePhotoChangeRef.current = createPhotoSelectionHandler({
+	const photoHandlerRef = useRef<ReturnType<
+		typeof createPhotoSelectionHandler
+	> | null>(null);
+	if (photoHandlerRef.current === null) {
+		photoHandlerRef.current = createPhotoSelectionHandler({
 			setPhoto,
 			getMessages: () => messagesRef.current.newIssue,
 		});
 	}
-	const handlePhotoChange = handlePhotoChangeRef.current;
+	const { handlePhotoChange, clearPhoto } = photoHandlerRef.current;
 
 	// 文字列の入力欄用。チェックボックス（`showName`）は値が真偽値なので
 	// `updateShowName` を使う。1 つの関数で両方を受けると、
@@ -192,16 +194,6 @@ export function NewIssueForm({ locale = DEFAULT_LOCALE }: { locale?: Locale }) {
 				setGeolocation("failed");
 			},
 		);
-	};
-
-	/** 選択した写真を取り消す。プレビューの URL も解放する。 */
-	const clearPhoto = () => {
-		setPhoto((current) => {
-			if (current.status === "ready") {
-				URL.revokeObjectURL(current.previewUrl);
-			}
-			return { status: "empty" };
-		});
 	};
 
 	const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {

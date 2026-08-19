@@ -72,7 +72,7 @@ export function createPhotoSelectionHandler(deps: PhotoSelectionDeps) {
 	// 世代と一致しなければ「選び直された」と判断して結果を捨てる。
 	let latestGeneration = 0;
 
-	return async function handlePhotoChange(file: File | null): Promise<void> {
+	async function handlePhotoChange(file: File | null): Promise<void> {
 		const generation = ++latestGeneration;
 
 		// 直前のプレビューを解放してから次に進む
@@ -125,5 +125,25 @@ export function createPhotoSelectionHandler(deps: PhotoSelectionDeps) {
 			thumbnail,
 			previewUrl: createObjectURL(result.file),
 		});
-	};
+	}
+
+	/**
+	 * 選択を取り消して empty に戻す（#141）。
+	 *
+	 * ここでも世代を進めるのが要点。進めないと、送信成功後にこの関数で
+	 * empty にした直後、送信中に選び直して進行中だった処理が遅れて解決し、
+	 * `ready` を復活させてしまう（利用者が消したはずの写真が戻る）。
+	 * 直前が `ready` ならプレビュー URL も解放する。
+	 */
+	function clearPhoto(): void {
+		latestGeneration++;
+		deps.setPhoto((current) => {
+			if (current.status === "ready") {
+				revokeObjectURL(current.previewUrl);
+			}
+			return { status: "empty" };
+		});
+	}
+
+	return { handlePhotoChange, clearPhoto };
 }
