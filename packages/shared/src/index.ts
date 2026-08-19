@@ -511,6 +511,16 @@ const JA_UI_MESSAGES = {
 			"予期しないエラーが発生しました。時間をおいて再度お試しください。",
 		signIn: "ログイン",
 		submitting: "送信中…",
+		/*
+		 * ページ遷移中に出すフォールバックの文言（#146）。
+		 *
+		 * App Router のクライアント遷移では、遷移先の Server Component が
+		 * 届くまで画面が前のまま据え置かれ、視覚的な手応えがゼロになる。
+		 * ボタン操作には「送信中…」（`submitting`）で手応えを出しているのに、
+		 * ページ遷移だけがこの原則から漏れていた。各ルートの `loading.tsx`
+		 * （Suspense フォールバック）でこの文言を出し、押した瞬間に反応させる。
+		 */
+		loading: "読み込み中…",
 	},
 
 	/** 画面上部のヘッダ */
@@ -709,6 +719,12 @@ const JA_UI_MESSAGES = {
 
 	/** Issue 詳細ページ（`/issues/[id]`） */
 	issueDetail: {
+		/*
+		 * 読み込み中の見出し（#146）。詳細ページは Issue タイトルが取得前で
+		 * 分からないため、一覧のように既存の見出しを流用できない。遷移した
+		 * 瞬間に「Issue を開いている」ことが伝わる汎用の見出しを別に持つ。
+		 */
+		loadingHeading: "Issue を読み込んでいます",
 		unavailableHeading: "Issue を表示できませんでした",
 		retryLater: "時間をおいて再度お試しください。",
 		backToList: "Issue 一覧へ戻る",
@@ -1023,6 +1039,7 @@ const EN_UI_MESSAGES: UiMessages = {
 		unexpectedError: "Something went wrong. Please try again later.",
 		signIn: "Sign in",
 		submitting: "Submitting…",
+		loading: "Loading…",
 	},
 
 	header: {
@@ -1130,6 +1147,7 @@ const EN_UI_MESSAGES: UiMessages = {
 	},
 
 	issueDetail: {
+		loadingHeading: "Loading the issue",
 		unavailableHeading: "Could not display this issue",
 		retryLater: "Please try again later.",
 		backToList: "Back to the issue list",
