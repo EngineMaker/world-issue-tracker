@@ -166,7 +166,25 @@ export default async function IssueDetailPage({
 			  API には届かない）。「自分が反応済みか」はブラウザ側で
 			  `ReactionButton` が取り直す。件数だけは JS の実行前から読める
 			*/}
+			{/*
+			  配下の Client Component に issue 単位の key を付ける理由（#142）。
+			  これらは初期値を props から `useState(initial…)` で受けて内部 state に
+			  持つ。詳細→詳細のクライアントソフト遷移（/issues/A → /issues/B）では、
+			  同じ位置の同じ型のインスタンスが再マウントされず保持されるため、
+			  key が無いと A の件数・コメント・選択中ステータスを B の画面に
+			  持ち越してしまう。id を含む key にすると、id が変わった時点で React が
+			  別インスタンスとして作り直し、B の props から初期化し直す。
+			  現状は詳細→詳細のリンクがまだ無いが、#70 等で入った瞬間に踏むため
+			  先に塞いでおく（reaction / help-offer / status / comment の 4 つ）。
+
+			  この 4 つは `<main>` の直接の子（兄弟）なので、素の `issue.id` を
+			  そのまま key にすると 4 兄弟が同一 key になり、React が「同じ key の
+			  兄弟が複数」と警告する（まさに狙っている A→B 遷移で出る）。
+			  コンポーネントごとの接頭辞で兄弟間の一意性を保ちつつ、id の変化で
+			  key が変わるようにする。
+			*/}
 			<ReactionButton
+				key={`reaction-${issue.id}`}
 				issueId={issue.id}
 				initialSummary={reactions.ok ? reactions.summary : null}
 				locale={locale}
@@ -277,6 +295,7 @@ export default async function IssueDetailPage({
 			  操作で、Issue 本文を読み終えた直後に続く流れになるため
 			*/}
 			<IssueStatusSection
+				key={`status-${issue.id}`}
 				issueId={issue.id}
 				status={issue.status}
 				locale={locale}
@@ -287,12 +306,14 @@ export default async function IssueDetailPage({
 			  動き出しやすく、議論を読み進めた先に置くと埋もれる
 			*/}
 			<HelpOfferButton
+				key={`help-offer-${issue.id}`}
 				issueId={issue.id}
 				initialSummary={offers.ok ? offers.summary : null}
 				locale={locale}
 			/>
 
 			<CommentSection
+				key={`comments-${issue.id}`}
 				issueId={issue.id}
 				initialResult={commentsResult}
 				locale={locale}

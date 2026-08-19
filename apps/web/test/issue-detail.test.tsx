@@ -18,9 +18,16 @@ import {
 	ISSUE_SCOPE_LABELS,
 	ISSUE_STATUS_LABELS,
 } from "@world-issue-tracker/shared";
+import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { COMMENTS_SECTION_ID } from "../src/app/components/CommentSection";
+import {
+	COMMENTS_SECTION_ID,
+	CommentSection,
+} from "../src/app/components/CommentSection";
+import { HelpOfferButton } from "../src/app/components/HelpOfferButton";
 import { IssueList } from "../src/app/components/IssueList";
+import { ReactionButton } from "../src/app/components/ReactionButton";
+import { IssueStatusSection } from "../src/app/components/StatusControl";
 import IssueDetailPage from "../src/app/issues/[id]/page";
 import { formatCreatedAt, toIsoDateTime } from "../src/lib/datetime";
 import { fetchIssue } from "../src/lib/issues";
@@ -757,6 +764,131 @@ describe("詳細ページ", () => {
 		// 地図の箱が出ていること。これが無いと、上の「位置なしなら地図を
 		// 出さない」は「そもそも地図を出さない実装」でも通ってしまう
 		expect(html).toMatch(/class="[^"]*\bissue-map-view\b/);
+	});
+});
+
+/**
+ * 詳細→詳細のクライアント遷移で前 Issue の state が残らないこと（#142）。
+ *
+ * 「私も困っている」「手伝います」「コメント欄」「ステータス変更」は、初期値を
+ * props から `useState(initial…)` で受けて内部 state に持つ Client Component。
+ * これらが `key` 無しで描画されていると、`/issues/A` → `/issues/B` の
+ * クライアントソフト遷移でインスタンスが再マウントされず、A の件数・コメント・
+ * 選択中ステータスを持ち越したまま B を描いてしまう。
+ *
+ * `key={issue.id}` を付けておけば、id が変われば React が別インスタンスとして
+ * 作り直し、B の props から初期化し直す。これが唯一の防波堤なので、ここで
+ * 「各コンポーネントに issue.id が key として渡っている」ことを直接見る。
+ *
+ * `key` は DOM/HTML には出ないため `renderToStaticMarkup` では確かめられない。
+ * ページが返す React element ツリーを走査して element の `.key` を読む。
+ */
+describe("詳細→詳細遷移での state 持ち越し防止（#142）", () => {
+	/** ページを描画して React element ツリーを得る（HTML 化はしない）。 */
+	async function renderTree(id: string, response: Response) {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			const url = typeof input === "string" ? input : input.toString();
+			if (url.endsWith("/comments")) {
+				return Response.json({ data: [], total: 0 });
+			}
+			if (url.endsWith("/reactions")) {
+				return Response.json({ total: 0, viewer_reacted: false });
+			}
+			if (url.endsWith("/help-offers")) {
+				return Response.json({
+					data: [],
+					total: 0,
+					viewer_offered: false,
+					viewer_user_id: null,
+				});
+			}
+			return response;
+		}) as unknown as typeof globalThis.fetch;
+
+		try {
+			return await IssueDetailPage({ params: Promise.resolve({ id }) });
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	}
+
+	/** children を辿って element を平坦に集める。 */
+	function collectElements(
+		node: ReactNode,
+		acc: ReactElement[] = [],
+	): ReactElement[] {
+		if (Array.isArray(node)) {
+			for (const child of node) collectElements(child, acc);
+			return acc;
+		}
+		if (!isValidElement(node)) return acc;
+		acc.push(node);
+		collectElements((node.props as { children?: ReactNode }).children, acc);
+		return acc;
+	}
+
+	// 初期値を内部 state に取り込む 4 つの Client Component。key が無いと
+	// ソフト遷移で前 Issue の state を持ち越す（#142 の失敗シナリオ）。
+	// 4 つは `<main>` の兄弟なので、素の issue.id をそのまま key にすると
+	// 兄弟間で key が重複し React が警告する。コンポーネントごとの接頭辞で
+	// 一意にしつつ、id の変化で key が変わるようにしている
+	const KEYED_COMPONENTS = [
+		["ReactionButton", ReactionButton, "reaction"],
+		["HelpOfferButton", HelpOfferButton, "help-offer"],
+		["CommentSection", CommentSection, "comments"],
+		["IssueStatusSection", IssueStatusSection, "status"],
+	] as const;
+
+	it.each(
+		KEYED_COMPONENTS,
+	)("%s に issue.id を含む key を渡して、id 遷移で再マウントさせる", async (_name, component, prefix) => {
+		const tree = await renderTree(sampleIssue.id, Response.json(sampleIssue));
+		const elements = collectElements(tree);
+
+		const target = elements.find((el) => el.type === component);
+		// そもそもページに置かれていること（結線は他テストが見るが前提として確認）
+		expect(target).toBeDefined();
+		// key に issue.id が含まれていること。null（key 無し）や id を含まない
+		// 固定値だと、A→B のソフト遷移でインスタンスが保持され A の state を
+		// 持ち越す。接頭辞で兄弟間の一意性も担保する
+		expect(target?.key).toBe(`${prefix}-${sampleIssue.id}`);
+	});
+
+	// 4 兄弟が同一 key だと、まさに #142 が狙う A→B 遷移で React が
+	// 「同じ key の兄弟が複数」と警告する。key が兄弟間で一意であることを見る
+	it("4 コンポーネントの key が互いに衝突しない", async () => {
+		const tree = await renderTree(sampleIssue.id, Response.json(sampleIssue));
+		const elements = collectElements(tree);
+
+		const keys = KEYED_COMPONENTS.map(
+			([, component]) => elements.find((el) => el.type === component)?.key,
+		);
+		// 全て取得できていること（4 件）
+		expect(keys.every((key) => typeof key === "string")).toBe(true);
+		// 重複が無いこと（Set のサイズが件数と一致）
+		expect(new Set(keys).size).toBe(keys.length);
+	});
+
+	// id が変われば全コンポーネントの key が変わること（＝再マウントされること）。
+	// これが持ち越し防止の本体。別 id で描画して key が総取っ替えになるのを見る
+	it("issue.id が変わると全 key が変わる", async () => {
+		const otherId = "ffffffffffffffffffffffffffffffff";
+		const treeA = await renderTree(sampleIssue.id, Response.json(sampleIssue));
+		const treeB = await renderTree(
+			otherId,
+			Response.json({ ...sampleIssue, id: otherId }),
+		);
+		const elementsA = collectElements(treeA);
+		const elementsB = collectElements(treeB);
+
+		for (const [, component] of KEYED_COMPONENTS) {
+			const keyA = elementsA.find((el) => el.type === component)?.key;
+			const keyB = elementsB.find((el) => el.type === component)?.key;
+			expect(keyA).toBeTruthy();
+			expect(keyB).toBeTruthy();
+			expect(keyA).not.toBe(keyB);
+		}
 	});
 });
 
