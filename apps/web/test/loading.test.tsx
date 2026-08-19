@@ -22,8 +22,21 @@ import { clearTestCookies, setTestCookies } from "./helpers/mock-cookies";
  * 描画して中身を確かめる。
  */
 
-/** 問題の該当箇所として Issue が名指ししている 4 ルート。 */
+/**
+ * 主要ルートの loading.tsx 一覧。
+ *
+ * Issue が名指しした 4 ルート（issues / issues/[id] / map / my-issues）に加え、
+ * fetch を待つトップ（app 直下の既定フォールバック）と、親の見出しが誤って
+ * 降るのを防ぐ issues/new も含める。`heading` が null のルートは、サブツリー
+ * 全体に降る既定フォールバック（app/loading.tsx）で、特定ページの見出しを
+ * 持たない（他ルートのフォールバックに見出しが漏れるのを避けるため）。
+ */
 const LOADING_ROUTES = [
+	{
+		label: "root（トップ・既定）",
+		load: () => import("../src/app/loading"),
+		heading: null,
+	},
 	{
 		label: "issues（一覧）",
 		load: () => import("../src/app/issues/loading"),
@@ -34,6 +47,11 @@ const LOADING_ROUTES = [
 		load: () => import("../src/app/issues/[id]/loading"),
 		heading: (locale: "ja" | "en") =>
 			getUiMessages(locale).issueDetail.loadingHeading,
+	},
+	{
+		label: "issues/new（起票）",
+		load: () => import("../src/app/issues/new/loading"),
+		heading: (locale: "ja" | "en") => getUiMessages(locale).newIssue.heading,
 	},
 	{
 		label: "map（地図）",
@@ -78,17 +96,23 @@ describe("各ルートの loading.tsx（読み込み中フォールバック）"
 
 		// 骨格（見出し）が保たれたまま中身だけがフォールバックへ切り替わる。
 		// 遷移していることが分かるように、そのページの見出しを出す
-		it(`${route.label}: そのページの見出しを出す`, async () => {
-			const html = await renderLoading(route, "ja");
-			expect(html).toContain(route.heading("ja"));
-		});
+		// （既定フォールバックは見出しを持たないので対象外）
+		if (route.heading) {
+			const heading = route.heading;
+			it(`${route.label}: そのページの見出しを出す`, async () => {
+				const html = await renderLoading(route, "ja");
+				expect(html).toContain(heading("ja"));
+			});
+		}
 
 		// 表示言語が英語なら、フォールバックも英語で出る（#82 の原則を
 		// ページ遷移区間にも通す）
 		it(`${route.label}: 英語ロケールでは英語で出る`, async () => {
 			const html = await renderLoading(route, "en");
 			expect(html).toContain(getUiMessages("en").common.loading);
-			expect(html).toContain(route.heading("en"));
+			if (route.heading) {
+				expect(html).toContain(route.heading("en"));
+			}
 			// UI 文言に日本語が残っていないこと
 			expect(html.replace(/<[^>]*>/g, "")).not.toMatch(/[ぁ-んァ-ヶ一-龠]/);
 		});
