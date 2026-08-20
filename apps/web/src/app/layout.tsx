@@ -1,6 +1,7 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import { getUiMessages } from "@world-issue-tracker/shared";
 import type { Metadata } from "next";
+import { buildClerkLocalization } from "../lib/clerk-localization";
 import { getLocale } from "../lib/locale";
 import { Header } from "./components/Header";
 import "./globals.css";
@@ -29,7 +30,7 @@ export default async function RootLayout({
 	const messages = getUiMessages(locale);
 
 	return (
-		<ClerkProvider>
+		<ClerkProvider localization={buildClerkLocalization(locale)}>
 			{/*
 			  `lang` は読み上げの発音とブラウザの翻訳提案に効く。日本語で固定すると、
 			  英語で表示していても読み上げが日本語の発音規則で読まれる
