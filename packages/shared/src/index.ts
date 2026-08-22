@@ -784,6 +784,31 @@ const JA_UI_MESSAGES = {
 		 */
 		deleteSignInRequired:
 			"ログインの有効期限が切れている可能性があります。ログインし直してから削除してください。",
+
+		/**
+		 * 起票者による Issue 本文の編集（#143）。起票者にだけ出る。
+		 *
+		 * API（`PATCH /issues/:id`）は `title` / `description` / `scope` /
+		 * `category` の部分更新を所有者限定で受けていたが、画面から送っていたのは
+		 * `status` だけで、本文を後から直す導線がどこにも無かった。誤字・情報の
+		 * 追記・状況の変化に対して、起票者が自分の Issue を直せない状態だった。
+		 *
+		 * 入力欄のラベル・補助文言は起票フォーム（`newIssue`）と同じものを流用する。
+		 * 同じ項目を編集するのに別の語彙を持つと、起票時と編集時で文言がずれる。
+		 * 写真と位置は含めない（`PATCH` は現状 JSON で写真非対応。本文 4 項目に絞る）。
+		 */
+		editHeading: "Issue の内容を編集",
+		edit: "内容を編集",
+		editSave: "変更を保存",
+		editSaving: "保存中…",
+		editCancel: "やめる",
+		editUpdated: "変更を保存しました。",
+		editFailed: "変更を保存できませんでした。時間をおいて再度お試しください。",
+		/** タイトル・説明が空のまま保存しようとしたとき。API へ送る前に止める */
+		editInvalid: "タイトルと説明は必須です。入力内容を確認してください。",
+		/** 401 のときだけ出す文言（削除の `deleteSignInRequired` と同じ判断）。 */
+		editSignInRequired:
+			"ログインの有効期限が切れている可能性があります。ログインし直してから保存してください。",
 	},
 
 	/**
@@ -1223,6 +1248,18 @@ const EN_UI_MESSAGES: UiMessages = {
 		deleteFailed: "Could not delete the issue. Please try again later.",
 		deleteSignInRequired:
 			"Your session may have expired. Sign in again, then delete.",
+
+		/** Issue 本文の編集（#143）。日本語側のコメントを参照。 */
+		editHeading: "Edit this issue",
+		edit: "Edit content",
+		editSave: "Save changes",
+		editSaving: "Saving…",
+		editCancel: "Cancel",
+		editUpdated: "Your changes have been saved.",
+		editFailed: "Could not save your changes. Please try again later.",
+		editInvalid: "Title and description are required. Please check your input.",
+		editSignInRequired:
+			"Your session may have expired. Sign in again, then save.",
 	},
 
 	notFound: {

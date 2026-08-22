@@ -1,4 +1,9 @@
-import type { IssueStatus as IssueStatusType } from "@world-issue-tracker/shared";
+import {
+	type IssueScope as IssueScopeType,
+	type IssueStatus as IssueStatusType,
+	type UpdateIssue,
+	UpdateIssueSchema,
+} from "@world-issue-tracker/shared";
 import {
 	type PublicIssue,
 	parsePublicIssue,
@@ -290,4 +295,121 @@ export async function deleteIssue(
 	if (!res.ok) {
 		throw new DeleteIssueError(`API が ${res.status} を返した`, res.status);
 	}
+}
+
+/**
+ * `updateIssue` が本文の更新に失敗したときに投げるエラー（#143）。
+ *
+ * `message` は開発者向けで、**画面には出さない**。表示する文言は `status` を見て
+ * 呼び出し側（`EditIssueForm`）が `packages/shared` の辞書から選ぶ
+ * （`DeleteIssueError` と同じ作法。日本語の `message` をそのまま出す
+ * `IssueStatusError` の作りは増やさない）。
+ */
+export class EditIssueError extends Error {
+	readonly status: number | null;
+
+	constructor(message: string, status: number | null) {
+		super(message);
+		this.name = "EditIssueError";
+		this.status = status;
+	}
+}
+
+/**
+ * 起票者が自分の Issue の本文を更新する（`PATCH /issues/:id`、#143）。
+ *
+ * 送るのは編集フォームで変更しうる本文 4 項目（`title` / `description` /
+ * `scope` / `category`）に絞る。写真と位置は含めない（`PATCH` は現状 JSON で
+ * 写真非対応。位置は別の入力補助を伴うため、この Issue の範囲外）。
+ *
+ * `updateIssueStatus` が `status` だけを送るのに対し、こちらは起票者が編集
+ * フォームで確定させた本文を丸ごと送る。フォームは現在の値を初期表示してから
+ * 編集させるので、変更していない項目も込みで「今この画面に見えている内容」で
+ * 確定させる意図になる。`UpdateIssueSchema` は部分更新を受けるので、呼び出し側で
+ * 送る項目を組み立てて渡す。
+ *
+ * 権限は API 側の `WHERE id = ? AND user_id = ?` が強制する。画面が操作 UI を
+ * 隠すのは表示の都合であって、保護ではない。
+ */
+export async function updateIssue(
+	issueId: string,
+	changes: UpdateIssue,
+	token: string | null,
+	{ fetchImpl = defaultFetch }: UpdateIssueStatusOptions = {},
+): Promise<PublicIssue> {
+	if (!token) {
+		throw new EditIssueError("トークンが無い（未ログイン）", 401);
+	}
+
+	let res: Awaited<ReturnType<FetchLike>>;
+	try {
+		res = await fetchImpl(issueUrl(issueId), {
+			cache: "no-store",
+			method: "PATCH",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${token}`,
+			},
+			body: JSON.stringify(changes),
+		});
+	} catch {
+		throw new EditIssueError("API に接続できなかった", null);
+	}
+
+	if (!res.ok) {
+		throw new EditIssueError(`API が ${res.status} を返した`, res.status);
+	}
+
+	// 200 が返っても中身が想定と違えば成功として扱わない。画面がそのまま
+	// 新しい本文を表示すると、実際には保存されていない値を「保存された」と
+	// 見せることになる（`updateIssueStatus` と同じ判断）
+	const issue = parsePublicIssue(await res.json());
+	if (!issue) {
+		throw new EditIssueError("レスポンスの形式が想定と異なる", null);
+	}
+
+	return issue;
+}
+
+/** 編集フォームの入力値（本文 4 項目）。すべて画面が持つ生の値。 */
+export type IssueEditInput = {
+	title: string;
+	description: string;
+	scope: IssueScopeType;
+	/** 入力欄の生の文字列。空欄は「未設定へ戻す」を表す */
+	category: string;
+};
+
+/**
+ * 編集フォームの入力値を、`PATCH /issues/:id` へ送る形に整えて検証する（#143）。
+ *
+ * 送信前の組み立てと検証を、ハンドラ（`EditIssueForm.handleSubmit`）から
+ * 切り出した純粋関数にしている。起票フォームが `validateIssueForm`（`lib/api.ts`）に
+ * 同じことをしているのと同じ理由で、**web に DOM を踏むテスト基盤が無くても
+ * ここだけは検証できる**ようにするため（title/説明の必須・カテゴリの null 化・
+ * scope を落とさないこと、を lib のテストで直接見られる）。
+ *
+ * カテゴリは前後の空白を落としたうえで、空なら `null`（未設定へ戻す）に倒す。
+ * 空文字のまま送ると `UpdateIssueSchema` の `min(1)` に当たるため。title と
+ * description も trim してから検証する（末尾の空白だけの入力を通さない）。
+ *
+ * 検証は `UpdateIssueSchema` に委ねる。項目や制約（最大長など）をここで
+ * 書き直すと、スキーマと二重管理になる。
+ */
+export function buildIssueUpdate(
+	input: IssueEditInput,
+): { success: true; changes: UpdateIssue } | { success: false } {
+	const trimmedCategory = input.category.trim();
+	const changes = {
+		title: input.title.trim(),
+		description: input.description.trim(),
+		scope: input.scope,
+		category: trimmedCategory === "" ? null : trimmedCategory,
+	};
+
+	const parsed = UpdateIssueSchema.safeParse(changes);
+	if (!parsed.success) {
+		return { success: false };
+	}
+	return { success: true, changes: parsed.data };
 }

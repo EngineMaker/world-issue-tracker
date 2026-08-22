@@ -5,6 +5,7 @@ import {
 	DEFAULT_LOCALE,
 	getUiMessages,
 	ISSUE_STATUS_LABELS,
+	type IssueScope as IssueScopeType,
 	IssueStatus,
 	type IssueStatus as IssueStatusType,
 	type Locale,
@@ -16,6 +17,7 @@ import {
 	updateIssueStatus,
 } from "../../lib/issue-status";
 import { DeleteIssueButton } from "./DeleteIssueButton";
+import { EditIssueForm } from "./EditIssueForm";
 import { StatusPill } from "./StatusPill";
 
 /**
@@ -26,9 +28,9 @@ import { StatusPill } from "./StatusPill";
  * サーバー側の描画では「誰として見ているか」が分からない。`HelpOfferButton` が
  * `viewer_offered` をブラウザ側で取り直しているのと同じ事情で、判定はここで行う。
  *
- * 起票者判定（`GET /issues/:id/viewer`）はここ 1 箇所に集約する。ステータス変更と
- * 削除で別々に `/viewer` を叩くと、詳細ページで判定が二重になる（#144 の依存メモ）。
- * 編集（#143）も同じ所有者向け操作なので、増えるときはこの判定を共有すること。
+ * 起票者判定（`GET /issues/:id/viewer`）はここ 1 箇所に集約する。ステータス変更・
+ * 削除・本文編集（#143）で別々に `/viewer` を叩くと、詳細ページで判定が重複する
+ * （#143 / #144 の依存メモ）。所有者向け操作はこの判定を土台に共有する。
  *
  * 判定が付くまでは現在のステータスだけを出す。まだ分からない段階で操作 UI を
  * 出すと、起票者以外の画面に一瞬だけ出て消えることになり、押せたように見えて
@@ -41,10 +43,19 @@ import { StatusPill } from "./StatusPill";
 export function IssueStatusSection({
 	issueId,
 	status,
+	title,
+	description,
+	scope,
+	category,
 	locale = DEFAULT_LOCALE,
 }: {
 	issueId: string;
 	status: IssueStatusType;
+	/** 本文編集（#143）の初期値。起票者に編集フォームを出すために受け取る */
+	title: string;
+	description: string;
+	scope: IssueScopeType;
+	category: string | null;
 	locale?: Locale;
 }) {
 	const { isLoaded, isSignedIn, getToken } = useAuth();
@@ -106,6 +117,22 @@ export function IssueStatusSection({
 
 	return (
 		<>
+			{/*
+			  起票者にだけ、本文（タイトル・説明・スコープ・カテゴリ）の編集を出す
+			  （#143）。ステータス変更より前に置くのは、本文の訂正が「状態を進める」
+			  より基本的な操作で、Issue を読んだ直後に直したくなる流れになるため。
+			  判定は上で 1 度だけ済ませており、編集側で `/viewer` を叩き直さない
+			*/}
+			{isOwner && (
+				<EditIssueForm
+					issueId={issueId}
+					initialTitle={title}
+					initialDescription={description}
+					initialScope={scope}
+					initialCategory={category}
+					locale={locale}
+				/>
+			)}
 			<StatusControl
 				issueId={issueId}
 				initialStatus={status}
