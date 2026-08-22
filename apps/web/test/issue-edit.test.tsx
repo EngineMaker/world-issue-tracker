@@ -40,7 +40,9 @@ mock.module("next/navigation", () => ({
 
 // 静的 import は巻き上げられて `mock.module` より先に解決されるため、
 // テスト対象は動的 import で読み込む。
-const { updateIssue, EditIssueError } = await import("../src/lib/issue-status");
+const { updateIssue, buildIssueUpdate, EditIssueError } = await import(
+	"../src/lib/issue-status"
+);
 const { EditIssueForm } = await import("../src/app/components/EditIssueForm");
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
@@ -219,6 +221,84 @@ describe("updateIssue", () => {
 });
 
 /**
+ * 送信前の本文の組み立てと検証（`buildIssueUpdate`）。
+ *
+ * `EditIssueForm.handleSubmit` の中身は `renderToStaticMarkup` では実行されず、
+ * web に DOM を踏むテスト基盤が無い（happy-dom がこの環境の共有 node_modules に
+ * 反映されていない）。そこで、送信本文の組み立て・カテゴリの null 化・必須検証を
+ * 純粋関数に切り出し、ここで直接見る。ハンドラがこの関数を使う結線は下の
+ * 「ソース上の確認」が担保する（起票フォームの `validateIssueForm` と同じ考え方）。
+ */
+describe("buildIssueUpdate", () => {
+	const base = {
+		title: "駅前の街灯が切れている",
+		description: "夜道が暗くて危ない",
+		scope: "community" as const,
+		category: "防犯・安全",
+	};
+
+	it("本文 4 項目をすべて含んだ changes を返す", () => {
+		const result = buildIssueUpdate(base);
+
+		expect(result.success).toBe(true);
+		if (!result.success) return;
+		// scope を落とすと、選んだスコープが送られず保存されない。
+		// 4 項目が揃っていることを名指しで見る
+		expect(result.changes).toEqual({
+			title: "駅前の街灯が切れている",
+			description: "夜道が暗くて危ない",
+			scope: "community",
+			category: "防犯・安全",
+		});
+	});
+
+	it("title と description の前後の空白を落とす", () => {
+		const result = buildIssueUpdate({
+			...base,
+			title: "  街灯  ",
+			description: "  暗い  ",
+		});
+
+		expect(result.success).toBe(true);
+		if (!result.success) return;
+		expect(result.changes.title).toBe("街灯");
+		expect(result.changes.description).toBe("暗い");
+	});
+
+	it("カテゴリの前後の空白を落とす", () => {
+		const result = buildIssueUpdate({ ...base, category: "  防犯・安全  " });
+
+		expect(result.success).toBe(true);
+		if (!result.success) return;
+		expect(result.changes.category).toBe("防犯・安全");
+	});
+
+	// 空欄は「未設定へ戻す」。空文字を送ると `min(1)` で 400 になるので null に倒す
+	it("カテゴリが空欄なら null（未設定へ戻す）", () => {
+		for (const category of ["", "   "]) {
+			const result = buildIssueUpdate({ ...base, category });
+
+			expect(result.success).toBe(true);
+			if (!result.success) continue;
+			expect(result.changes.category).toBeNull();
+		}
+	});
+
+	// タイトル・説明は必須。空（や空白のみ）は API へ送らずその場で弾く
+	it("title が空（または空白のみ）なら success:false", () => {
+		for (const title of ["", "   "]) {
+			expect(buildIssueUpdate({ ...base, title }).success).toBe(false);
+		}
+	});
+
+	it("description が空（または空白のみ）なら success:false", () => {
+		for (const description of ["", "   "]) {
+			expect(buildIssueUpdate({ ...base, description }).success).toBe(false);
+		}
+	});
+});
+
+/**
  * 編集フォームの描画（`EditIssueForm`）。
  *
  * この部品は「起票者だと確定しているとき」にしか `IssueStatusSection` から
@@ -337,9 +417,15 @@ describe("画面と API の結線（ソース上の確認）", () => {
 		expect(formSource).toContain('type="submit"');
 	});
 
-	it("handleSubmit が API の updateIssue を呼ぶ", () => {
+	it("handleSubmit が送信本文を buildIssueUpdate で組み立てる", () => {
+		// 組み立て・検証の中核は buildIssueUpdate（lib テストが担保）。
+		// ハンドラがそれを使わず自前で body を作ると、そのテストが素通りになる
+		expect(formSource).toContain("buildIssueUpdate({");
+	});
+
+	it("handleSubmit が組み立てた changes で updateIssue を呼ぶ", () => {
 		// ここが消えると、画面は保存できたように見えても DB は変わらない
-		expect(formSource).toMatch(/await updateIssue\(issueId,/);
+		expect(formSource).toMatch(/await updateIssue\(issueId, result\.changes,/);
 	});
 
 	it("保存に成功したら詳細ページを取り直す", () => {

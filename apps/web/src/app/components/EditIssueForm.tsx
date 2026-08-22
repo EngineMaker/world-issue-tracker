@@ -8,12 +8,15 @@ import {
 	IssueScope,
 	type IssueScope as IssueScopeType,
 	type Locale,
-	UpdateIssueSchema,
 } from "@world-issue-tracker/shared";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ISSUE_CATEGORY_SUGGESTIONS } from "@/lib/api";
-import { EditIssueError, updateIssue } from "@/lib/issue-status";
+import {
+	buildIssueUpdate,
+	EditIssueError,
+	updateIssue,
+} from "@/lib/issue-status";
 
 /**
  * 起票者による Issue 本文の編集（#143）。
@@ -96,28 +99,20 @@ export function EditIssueForm({
 		setError(null);
 		setUpdated(false);
 
-		// 送る本文を組み立てる。カテゴリは空欄なら未設定（null）へ倒す。
-		// 空文字のまま送ると `UpdateIssueSchema` の `min(1)` に当たる
-		const trimmedCategory = category.trim();
-		const changes = {
-			title: title.trim(),
-			description: description.trim(),
-			scope,
-			category: trimmedCategory === "" ? null : trimmedCategory,
-		};
-
-		// API へ送る前にフォーム側で検証する。タイトル・説明が空だと 400 になるので、
-		// 往復せずその場で理由を出す（起票フォームが `validateIssueForm` で
-		// 送信前に止めるのと同じ考え方）
-		const parsed = UpdateIssueSchema.safeParse(changes);
-		if (!parsed.success) {
+		// 送る本文の組み立てと検証は `buildIssueUpdate` に委ねる。カテゴリの
+		// null 化や title/説明の必須はそちらが持ち、lib のテストで直接見られる。
+		// API へ送る前にフォーム側で検証するのは、タイトル・説明が空だと 400 に
+		// なるので往復せずその場で理由を出すため（起票フォームが
+		// `validateIssueForm` で送信前に止めるのと同じ考え方）
+		const result = buildIssueUpdate({ title, description, scope, category });
+		if (!result.success) {
 			setError(messages.issueDetail.editInvalid);
 			return;
 		}
 
 		setIsSubmitting(true);
 		try {
-			await updateIssue(issueId, parsed.data, await getToken());
+			await updateIssue(issueId, result.changes, await getToken());
 			// 保存できたら欄を閉じて、詳細ページを取り直す。表示中の本文
 			// （Server Component が持つ値）を新しい内容へ入れ替えるため
 			setEditing(false);

@@ -1,6 +1,8 @@
-import type {
-	IssueStatus as IssueStatusType,
-	UpdateIssue,
+import {
+	type IssueScope as IssueScopeType,
+	type IssueStatus as IssueStatusType,
+	type UpdateIssue,
+	UpdateIssueSchema,
 } from "@world-issue-tracker/shared";
 import {
 	type PublicIssue,
@@ -367,4 +369,47 @@ export async function updateIssue(
 	}
 
 	return issue;
+}
+
+/** 編集フォームの入力値（本文 4 項目）。すべて画面が持つ生の値。 */
+export type IssueEditInput = {
+	title: string;
+	description: string;
+	scope: IssueScopeType;
+	/** 入力欄の生の文字列。空欄は「未設定へ戻す」を表す */
+	category: string;
+};
+
+/**
+ * 編集フォームの入力値を、`PATCH /issues/:id` へ送る形に整えて検証する（#143）。
+ *
+ * 送信前の組み立てと検証を、ハンドラ（`EditIssueForm.handleSubmit`）から
+ * 切り出した純粋関数にしている。起票フォームが `validateIssueForm`（`lib/api.ts`）に
+ * 同じことをしているのと同じ理由で、**web に DOM を踏むテスト基盤が無くても
+ * ここだけは検証できる**ようにするため（title/説明の必須・カテゴリの null 化・
+ * scope を落とさないこと、を lib のテストで直接見られる）。
+ *
+ * カテゴリは前後の空白を落としたうえで、空なら `null`（未設定へ戻す）に倒す。
+ * 空文字のまま送ると `UpdateIssueSchema` の `min(1)` に当たるため。title と
+ * description も trim してから検証する（末尾の空白だけの入力を通さない）。
+ *
+ * 検証は `UpdateIssueSchema` に委ねる。項目や制約（最大長など）をここで
+ * 書き直すと、スキーマと二重管理になる。
+ */
+export function buildIssueUpdate(
+	input: IssueEditInput,
+): { success: true; changes: UpdateIssue } | { success: false } {
+	const trimmedCategory = input.category.trim();
+	const changes = {
+		title: input.title.trim(),
+		description: input.description.trim(),
+		scope: input.scope,
+		category: trimmedCategory === "" ? null : trimmedCategory,
+	};
+
+	const parsed = UpdateIssueSchema.safeParse(changes);
+	if (!parsed.success) {
+		return { success: false };
+	}
+	return { success: true, changes: parsed.data };
 }
