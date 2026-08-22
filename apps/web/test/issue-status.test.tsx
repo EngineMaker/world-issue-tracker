@@ -354,7 +354,14 @@ describe("IssueStatusSection", () => {
 	function render(auth: AuthState = { isLoaded: true, isSignedIn: true }) {
 		authState = auth;
 		return renderToStaticMarkup(
-			<IssueStatusSection issueId="issue-1" status="open" />,
+			<IssueStatusSection
+				issueId="issue-1"
+				status="open"
+				title="駅前の街灯が切れている"
+				description="夜道が暗くて危ない"
+				scope="community"
+				category="infrastructure"
+			/>,
 		);
 	}
 
