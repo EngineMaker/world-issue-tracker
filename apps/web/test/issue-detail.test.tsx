@@ -32,6 +32,11 @@ import IssueDetailPage from "../src/app/issues/[id]/page";
 import { formatCreatedAt, toIsoDateTime } from "../src/lib/datetime";
 import { fetchIssue } from "../src/lib/issues";
 import { LOCALE_COOKIE_NAME } from "../src/lib/locale";
+import {
+	defaultCommentsResponse,
+	defaultHelpOffersResponse,
+	defaultReactionsResponse,
+} from "./helpers/detail-stub";
 import { clearTestCookies, setTestCookies } from "./helpers/mock-cookies";
 
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
@@ -218,21 +223,13 @@ describe("詳細ページ", () => {
 			const url = typeof input === "string" ? input : input.toString();
 			calls.push(url);
 			if (url.endsWith("/comments")) {
-				return comments ?? Response.json({ data: [], total: 0 });
+				return comments ?? defaultCommentsResponse();
 			}
 			if (url.endsWith("/reactions")) {
-				return reactions ?? Response.json({ total: 0, viewer_reacted: false });
+				return reactions ?? defaultReactionsResponse();
 			}
 			if (url.endsWith("/help-offers")) {
-				return (
-					helpOffers ??
-					Response.json({
-						data: [],
-						total: 0,
-						viewer_offered: false,
-						viewer_user_id: null,
-					})
-				);
+				return helpOffers ?? defaultHelpOffersResponse();
 			}
 			return response;
 		}) as unknown as typeof globalThis.fetch;
