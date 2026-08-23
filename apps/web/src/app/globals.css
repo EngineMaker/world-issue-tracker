@@ -1683,6 +1683,27 @@ main p {
 }
 
 /*
+  Issue 本文の編集（#143）。起票者だけに、ステータス欄の上に出る。
+  「内容を編集」を押すと入力欄（.issue-form）が開く。入力欄そのものの
+  スタイルは .issue-form の節が持つので、ここは囲いと余白だけ
+*/
+.issue-edit {
+	margin-top: var(--space-5);
+}
+
+/*
+  「内容を編集」ボタン、または編集中の「保存・やめる」が並ぶ行。
+  削除（.issue-delete-actions）と同じ作法で、幅が足りなければ折り返す
+*/
+.issue-edit-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+	margin: 0;
+}
+
+/*
   Issue 自体の削除（#144）。起票者だけに、ステータス欄の下に出る。
   取り消しのための操作なので上の操作から少し離し、間違って押しにくくする
 */

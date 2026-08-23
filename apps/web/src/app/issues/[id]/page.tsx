@@ -298,6 +298,10 @@ export default async function IssueDetailPage({
 				key={`status-${issue.id}`}
 				issueId={issue.id}
 				status={issue.status}
+				title={issue.title}
+				description={issue.description}
+				scope={issue.scope}
+				category={issue.category}
 				locale={locale}
 			/>
 
