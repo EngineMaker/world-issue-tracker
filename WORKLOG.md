@@ -2,10 +2,10 @@
 
 > **迷ったらここだけ読めば戻れます。** 詳細は下に追記式で続きます。
 
-## 🚨 2026-09-23 — 本番デプロイが 8/22 から失敗し続けている
+## 🚨 2026-09-23 — 本番デプロイが 8/19 から失敗し続けていた（修正済み・未デプロイ）
 
-**main への push で走る Deploy ワークフローが、2026-08-22 以降ずっと失敗している。**
-（8/22 に2回、8/23、9/23 と4回連続で failure。CI 自体は success）
+**main への push で走る Deploy ワークフローが、2026-08-19 以降ずっと失敗していた。**
+（8/19 の #137、8/22 の #157・#156、8/23 の #160、9/23 のマージと5回連続で failure。CI 自体は success）
 
 **原因**: `wrangler` が Cloudflare API に弾かれている。
 
@@ -14,21 +14,22 @@ KV namespace '0000000000000000000000000000000000' is not valid.
 Please verify the namespace_id in your configuration.
 ```
 
-**KV namespace の ID がプレースホルダ（ゼロ埋め）のまま**で、実在の値が入っていない。
-コードの問題ではなく**設定の問題**。
+PR #137（#135、表示名の KV キャッシュ）で `apps/api/wrangler.jsonc` に
+`DISPLAY_NAME_CACHE` の KV バインディングを追加したが、**ID がプレースホルダ（ゼロ埋め）のまま**
+マージされ、実際の namespace も作られていなかった。コードの問題ではなく**設定の問題**。
 
 ### ⚠️ これが意味すること
 
-**本番（https://issues.emaker.dev ）は 8/22 時点のコードで動いたまま。**
-それ以降にマージしたもの（**PR #160 の Issue 編集機能**を含む）は
-**本番に反映されていない**可能性が高い。
+deploy-api が失敗すると **deploy-web はスキップされる**ため、
+**本番（https://issues.emaker.dev ）は API・Web とも 8/19 の #147 時点のまま。**
+**#137・#157・#156・#160（Issue 編集機能）は本番に反映されていない。**
 
-### 👉 直すには
+### 👉 対応
 
-1. Cloudflare ダッシュボードで実際の KV namespace ID を確認する
-2. `apps/api/wrangler.toml`（または該当する設定ファイル）の `namespace_id` を差し替える
-   - リポジトリに直接書くか、GitHub Secrets 経由にするかは要判断
-3. 再デプロイして、本番に PR #160 の内容が出ているか確認する
+1. ✅ Cloudflare アカウント `mktoho` に KV namespace を作成した（このプロジェクト用のものは無かった）
+   - title: `world-issue-tracker-display-name-cache` / id: `87da3423be7e4ac4a90d05c5412cde12`
+2. ✅ `apps/api/wrangler.jsonc` の `id` を差し替えた（KV の ID は秘密情報ではないのでリポジトリに直接書く）
+3. ⬜ push して Deploy が通ること、本番に #160 などが出ていることを確認する
 
 ## 🔖 いまの状況（2026-09-21 時点）
 
