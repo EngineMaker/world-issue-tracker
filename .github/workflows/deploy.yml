@@ -107,3 +107,24 @@ jobs:
           # 見えるものが変わる）
           NEXT_PUBLIC_MAP_TILE_URL: "https://tiles.emaker.dev/japan-z15-20260817.pmtiles"
           NEXT_PUBLIC_MAP_TILE_ATTRIBUTION: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors'
+
+  # どちらかのジョブが落ちたら Discord に知らせる。
+  #
+  # 2026-08-19〜09-23 の5回連続失敗に約1ヶ月気付かなかった反省（WORKLOG.md）。
+  # deploy-api が落ちると deploy-web は skipped になるが、failure() は needs の
+  # どれかが失敗していれば真になるので、1 デプロイにつき 1 通だけ届く。
+  notify-failure:
+    runs-on: ubuntu-latest
+    name: Notify failure
+    needs: [deploy-api, deploy-web]
+    if: failure()
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/notify-discord
+        with:
+          webhook-url: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
+          user-id: ${{ vars.DISCORD_USER_ID }}
+          message: |
+            🚨 ${{ github.repository }}: 本番 ${{ github.workflow }} が失敗しました（本番は前回のデプロイのまま）
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
