@@ -44,7 +44,6 @@ deploy-api が失敗すると **deploy-web はスキップされる**ため、
 - 設定: Secret `DISCORD_ALERT_WEBHOOK_URL`、Variable `DISCORD_USER_ID`（どちらも登録済み。
   Webhook は mk-discord-bot のげんばで作成）
 - 届くかの確認は `gh workflow run notify-test.yml`（2026-09-23 に届くことを確認済み）
-- 他のリポジトリでも、Secret を登録して action をコピーすれば使い回せる
 
 ## 🔖 いまの状況（2026-09-21 時点）
 
