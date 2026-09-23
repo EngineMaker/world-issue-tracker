@@ -2,7 +2,7 @@
 
 > **迷ったらここだけ読めば戻れます。** 詳細は下に追記式で続きます。
 
-## 🚨 2026-09-23 — 本番デプロイが 8/19 から失敗し続けていた（修正済み・未デプロイ）
+## ✅ 2026-09-23 — 本番デプロイが 8/19 から失敗し続けていた（復旧済み・通知を追加）
 
 **main への push で走る Deploy ワークフローが、2026-08-19 以降ずっと失敗していた。**
 （8/19 の #137、8/22 の #157・#156、8/23 の #160、9/23 のマージと5回連続で failure。CI 自体は success）
@@ -29,7 +29,22 @@ deploy-api が失敗すると **deploy-web はスキップされる**ため、
 1. ✅ Cloudflare アカウント `mktoho` に KV namespace を作成した（このプロジェクト用のものは無かった）
    - title: `world-issue-tracker-display-name-cache` / id: `87da3423be7e4ac4a90d05c5412cde12`
 2. ✅ `apps/api/wrangler.jsonc` の `id` を差し替えた（KV の ID は秘密情報ではないのでリポジトリに直接書く）
-3. ⬜ push して Deploy が通ること、本番に #160 などが出ていることを確認する
+3. ✅ push（`b3325d4`）→ Deploy run 35835003646 が API・Web とも success。
+   #137・#156・#157・#160 が本番に出た
+   - ⬜ #160 の編集ボタンは投稿者本人のログイン時だけ出るため、外からは未確認。本人の Issue で一度触って確かめる
+
+### 🔔 再発防止: Deploy 失敗を Discord に通知する（`74c5a49`）
+
+失敗が GitHub の画面にしか出ていなかったのが、1ヶ月気付かなかった原因。
+
+- deploy-api / deploy-web のどちらかが落ちると、`notify-failure` ジョブが
+  ユーザー個人の Discord `#alert` に**本人メンション付き**で 1 通送る
+- 送信部品は `.github/actions/notify-discord`（Discord のチャンネル Webhook を直接叩く）。
+  mk-discord-bot を経由しないので、bot が止まっていても届く
+- 設定: Secret `DISCORD_ALERT_WEBHOOK_URL`、Variable `DISCORD_USER_ID`（どちらも登録済み。
+  Webhook は mk-discord-bot のげんばで作成）
+- 届くかの確認は `gh workflow run notify-test.yml`（2026-09-23 に届くことを確認済み）
+- 他のリポジトリでも、Secret を登録して action をコピーすれば使い回せる
 
 ## 🔖 いまの状況（2026-09-21 時点）
 
