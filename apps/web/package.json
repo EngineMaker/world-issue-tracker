@@ -10,7 +10,7 @@
 		"check": "tsc --noEmit",
 		"lint": "biome check .",
 		"test": "bun test",
-		"deploy": "bun run scripts/check-clerk-keys.ts && bun run copy:map-worker && opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+		"deploy": "bun run scripts/check-clerk-keys.ts && bun run copy:map-worker && opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion && opennextjs-cloudflare deploy",
 		"copy:map-worker": "bun run scripts/copy-map-worker.ts"
 	},
 	"dependencies": {
