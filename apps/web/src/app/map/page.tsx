@@ -1,4 +1,5 @@
 import { getUiMessages } from "@world-issue-tracker/shared";
+import type { Metadata } from "next";
 import Link from "next/link";
 import {
 	buildIssueQueryString,
@@ -117,6 +118,19 @@ function buildMapHref(filters: IssueFilters, view: MapView | null): string {
 	return query ? `/map?${query}` : "/map";
 }
 
+/**
+ * 地図ページは検索結果に出さない。
+ *
+ * パン・ズームのリンクが `?zoom&lat&lng` を少しずつ変えた URL を無限に
+ * 生むため、クローラーがたどり続けて Worker の CPU を使い切っていた
+ * （2026-10 に Meta / Anthropic の AI クローラーで無料枠の CPU 制限を
+ * 1 日 10,000 回以上超過）。リンク側の `rel="nofollow"` と
+ * public/robots.txt の Disallow と合わせて三重に止める。
+ */
+export const metadata: Metadata = {
+	robots: { index: false, follow: false },
+};
+
 export default async function MapPage({
 	searchParams,
 }: {
@@ -194,6 +208,7 @@ export default async function MapPage({
 							{messages.mapPage.zoomLabel}
 						</span>
 						<Link
+							rel="nofollow"
 							href={buildMapHref(filters, {
 								...view,
 								zoom: clampMapZoom(view.zoom + 1),
@@ -203,6 +218,7 @@ export default async function MapPage({
 							{messages.mapPage.zoomIn}
 						</Link>
 						<Link
+							rel="nofollow"
 							href={buildMapHref(filters, {
 								...view,
 								zoom: clampMapZoom(view.zoom - 1),
@@ -215,16 +231,22 @@ export default async function MapPage({
 						<span className="map-controls-label">
 							{messages.mapPage.panLabel}
 						</span>
-						<Link href={buildMapHref(filters, moved(step / 2, 0))}>
+						<Link
+							rel="nofollow"
+							href={buildMapHref(filters, moved(step / 2, 0))}
+						>
 							{messages.mapPage.panNorth}
 						</Link>
-						<Link href={buildMapHref(filters, moved(-step / 2, 0))}>
+						<Link
+							rel="nofollow"
+							href={buildMapHref(filters, moved(-step / 2, 0))}
+						>
 							{messages.mapPage.panSouth}
 						</Link>
-						<Link href={buildMapHref(filters, moved(0, -step))}>
+						<Link rel="nofollow" href={buildMapHref(filters, moved(0, -step))}>
 							{messages.mapPage.panWest}
 						</Link>
-						<Link href={buildMapHref(filters, moved(0, step))}>
+						<Link rel="nofollow" href={buildMapHref(filters, moved(0, step))}>
 							{messages.mapPage.panEast}
 						</Link>
 
@@ -232,7 +254,7 @@ export default async function MapPage({
 						  動かしすぎて Issue が 1 件も映らなくなったときの逃げ道。
 						  視界を URL から落とすと、全件が収まる範囲へ戻る
 						*/}
-						<Link href={buildMapHref(filters, null)}>
+						<Link rel="nofollow" href={buildMapHref(filters, null)}>
 							{messages.mapPage.resetView}
 						</Link>
 					</nav>
