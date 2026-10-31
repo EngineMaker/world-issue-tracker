@@ -49,6 +49,9 @@ export function LocaleSwitcher({ locale }: { locale: Locale }) {
 						<a
 							href={`/locale?lang=${option}&next=${encodeURIComponent(next)}`}
 							hrefLang={option}
+							// クローラーに辿らせない。全ページに付くリンクで、`next` に
+							// 現在のクエリを載せるため URL が際限なく増える（public/robots.txt 参照）
+							rel="nofollow"
 						>
 							{messages.localeSwitcher.names[option]}
 						</a>

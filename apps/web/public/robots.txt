@@ -1,0 +1,11 @@
+# Worker を通さず静的アセットとして配信される（CPU を使わない）。
+#
+# /map はパン・ズームのリンクで ?zoom&lat&lng の組み合わせが無限に生まれ、
+# /locale は全ページから next=<現在のURL> 付きで張られている。
+# クローラーがこれらを辿り続けて Workers 無料枠の CPU 制限を超えたため止める
+# （2026-10、meta-externalagent / ClaudeBot）。
+User-agent: *
+Disallow: /map
+Disallow: /locale
+Disallow: /my-issues
+Disallow: /issues/new
