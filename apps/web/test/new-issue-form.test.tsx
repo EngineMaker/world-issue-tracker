@@ -47,7 +47,13 @@ let resizeImpl: (file: File) => Promise<ResizeResult> = async (file) => ({
 	ok: true,
 	file,
 });
+// 実モジュールの export を土台にして、差し替える関数だけ上書きする。
+// `mock.module` はテストファイルをまたいで効くため、定数（PHOTO_MAX_EDGE 等）を
+// 落とすと、後から走る photo.test.tsx が「Export named ... not found」で落ちる
+// （CI のファイル順でだけ再現していた）。
+const actualPhoto = { ...(await import("../src/lib/photo")) };
 mock.module("@/lib/photo", () => ({
+	...actualPhoto,
 	resizeImageFile: (file: File) => resizeImpl(file),
 	createThumbnailFile: async () => null,
 }));
