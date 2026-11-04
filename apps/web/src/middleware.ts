@@ -7,6 +7,15 @@ import { NextResponse } from "next/server";
 import { legacyRedirectTarget } from "./lib/legacy-origin";
 
 /*
+ * Next.js 16 では `middleware.ts` は非推奨で `proxy.ts` が推奨されているが、
+ * あえて移していない（#163）。`proxy.ts` は Node.js ランタイム専用で、
+ * OpenNext Cloudflare は Node.js の middleware を「実験的・公式には保守しない」
+ * 扱いにしている（ビルド時に警告が出る）。Edge ランタイムの `middleware.ts`
+ * のままなら公式にサポートされた経路で動くので、こちらを使い続ける。
+ * codemod（`middleware-to-proxy`）で機械的に移さないこと。
+ */
+
+/*
  * `authorizedParties` を明示する（#98）。理由は API 側
  * （`apps/api/src/middleware/clerk.ts`）と同じで、指定しないと同じ root
  * ドメイン配下の別サブドメインが侵害されたときに、そこで作られたセッションが
